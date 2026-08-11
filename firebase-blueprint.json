@@ -1,0 +1,71 @@
+{
+  "entities": {
+    "users": {
+      "title": "Users",
+      "description": "User accounts and permissions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string" },
+        "username": { "type": "string" },
+        "designation": { "type": "string" },
+        "contactNumber": { "type": "string" },
+        "roleId": { "type": "string" },
+        "roleName": { "type": "string" },
+        "status": { "type": "string" },
+        "requirePinChange": { "type": "boolean" },
+        "failedLoginCount": { "type": "number" },
+        "pinHash": { "type": "string" },
+        "pinSalt": { "type": "string" }
+      },
+      "required": ["id", "username"]
+    },
+    "settings": {
+      "title": "Settings",
+      "description": "Site configurations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "group": { "type": "string" },
+        "key": { "type": "string" },
+        "value": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "group", "key"]
+    },
+    "slideshow": {
+      "title": "Slideshow Items",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "excoMembers": {
+      "title": "Exco Members",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "quizQuestions": {
+      "title": "Quiz Questions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "quizSubmissions": {
+      "title": "Quiz Submissions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" }
+      },
+      "required": ["id"]
+    }
+  }
+}
