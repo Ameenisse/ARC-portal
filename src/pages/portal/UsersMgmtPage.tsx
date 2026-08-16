@@ -35,6 +35,12 @@ export const UsersMgmtPage: React.FC = () => {
   // Delete Confirmation State
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
 
+  // Admin Reset PIN State
+  const [resetPinUser, setResetPinUser] = useState<User | null>(null);
+  const [newResetPin, setNewResetPin] = useState('');
+  const [confirmResetPin, setConfirmResetPin] = useState('');
+  const [resetPinLoading, setResetPinLoading] = useState(false);
+
   // User Form State
   const [username, setUsername] = useState('');
   const [fullName, setFullName] = useState('');
@@ -98,23 +104,8 @@ export const UsersMgmtPage: React.FC = () => {
     setIsActive(true);
     setIsLocked(false);
 
-    const defPerms: Record<string, ModulePermission> = {};
-    ALL_SYSTEM_MODULES.forEach(m => {
-      defPerms[m.key] = {
-        id: `perm_${m.key}`,
-        userId: 'new',
-        moduleKey: m.key,
-        canView: true,
-        canCreate: true,
-        canEdit: true,
-        canDelete: true,
-        canPublish: true,
-        canApprove: true,
-        canExport: true,
-        canManageSettings: true
-      };
-    });
-    setPermissions(defPerms);
+    // Standard members don't require admin module permissions
+    setPermissions({});
     setUserModalOpen(true);
   };
 
@@ -153,7 +144,19 @@ export const UsersMgmtPage: React.FC = () => {
 
   const handleTogglePerm = (modKey: string, field: keyof ModulePermission) => {
     setPermissions(prev => {
-      const curr = prev[modKey] || { moduleKey: modKey as any, canView: false, canCreate: false, canEdit: false, canDelete: false, canApprove: false };
+      const curr = prev[modKey] || {
+        id: `perm_${modKey}`,
+        userId: editingUser?.id || '',
+        moduleKey: modKey as any,
+        canView: false,
+        canCreate: false,
+        canEdit: false,
+        canDelete: false,
+        canPublish: false,
+        canApprove: false,
+        canExport: false,
+        canManageSettings: false
+      };
       return {
         ...prev,
         [modKey]: {
@@ -176,10 +179,13 @@ export const UsersMgmtPage: React.FC = () => {
       return;
     }
 
-    const permissionList = Object.values(permissions);
     const selectedRole = roles.find(r => r.id === roleId);
     const roleName = selectedRole?.name || '';
+    const isMemberRole = roleId === 'role_member' || roleName === 'Club Member';
     const isExcoRole = roleName === 'EXCO Member' || roleId === 'role_exco' || ['role_president', 'role_vp', 'role_treasurer', 'role_secretary'].includes(roleId);
+
+    // For standard members, no administrative modules are assigned
+    const permissionList = isMemberRole ? [] : Object.values(permissions);
 
     const payload = {
       username,
@@ -190,7 +196,7 @@ export const UsersMgmtPage: React.FC = () => {
       pin: pin || undefined,
       confirmPin: pin || undefined,
       roleId,
-      roleName: selectedRole?.name || 'Club Member',
+      roleName: selectedRole?.name || (isMemberRole ? 'Club Member' : 'System User'),
       isActive,
       isLocked,
       permissions: permissionList
@@ -239,16 +245,49 @@ export const UsersMgmtPage: React.FC = () => {
     }
   };
 
-  const handleResetPin = async (u: User) => {
-    const newPin = prompt(`Enter new 4-digit PIN for user @${u.username}:`, '2613');
-    if (!newPin) return;
+  const handleOpenResetPinModal = (u: User) => {
+    setResetPinUser(u);
+    setNewResetPin('');
+    setConfirmResetPin('');
+  };
+
+  const handlePerformResetPin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetPinUser) return;
+
+    const cleanPin = newResetPin.trim();
+    if (!cleanPin || !confirmResetPin.trim()) {
+      showToast('error', 'Please enter and confirm the new numeric PIN.');
+      return;
+    }
+
+    if (!/^\d+$/.test(cleanPin)) {
+      showToast('error', 'PIN must contain numeric digits only (e.g. 2613).');
+      return;
+    }
+
+    if (cleanPin.length < 4) {
+      showToast('error', 'PIN must be at least 4 numeric digits.');
+      return;
+    }
+
+    if (cleanPin !== confirmResetPin.trim()) {
+      showToast('error', 'New PIN and Confirm PIN do not match.');
+      return;
+    }
 
     try {
-      await api.resetUserPin(u.id, newPin);
-      showToast('success', `PIN reset for user @${u.username}.`);
+      setResetPinLoading(true);
+      await api.resetUserPin(resetPinUser.id, cleanPin);
+      showToast('success', `PIN successfully reset for user @${resetPinUser.username}.`);
+      setResetPinUser(null);
+      setNewResetPin('');
+      setConfirmResetPin('');
       fetchUsers();
     } catch (err: any) {
       showToast('error', err.message || 'Failed to reset PIN.');
+    } finally {
+      setResetPinLoading(false);
     }
   };
 
@@ -472,38 +511,46 @@ export const UsersMgmtPage: React.FC = () => {
                               <Activity className="w-3.5 h-3.5" />
                               <span>Performance</span>
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => handleResetPin(u)}
-                              className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
-                              title="Reset PIN"
-                            >
-                              <Key className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleToggleLock(u)}
-                              className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
-                              title={u.status === 'locked' ? 'Unlock Account' : 'Lockout Account'}
-                            >
-                              {u.status === 'locked' ? <Unlock className="w-3.5 h-3.5 text-orange-400" /> : <Lock className="w-3.5 h-3.5 text-amber-400" />}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditUser(u)}
-                              className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
-                              title="Edit User & Permissions"
-                            >
-                              <Edit className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteUser(u)}
-                              className="p-1.5 rounded-lg bg-slate-800 text-rose-400 hover:text-rose-300 hover:bg-rose-950/50"
-                              title="Delete User Account"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {hasPermission('users', 'canEdit') && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenResetPinModal(u)}
+                                className="p-1.5 rounded-lg bg-slate-800 text-orange-400 hover:text-white hover:bg-slate-700"
+                                title="Admin Reset PIN"
+                              >
+                                <Key className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {hasPermission('users', 'canEdit') && (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleLock(u)}
+                                className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+                                title={u.status === 'locked' ? 'Unlock Account' : 'Lockout Account'}
+                              >
+                                {u.status === 'locked' ? <Unlock className="w-3.5 h-3.5 text-orange-400" /> : <Lock className="w-3.5 h-3.5 text-amber-400" />}
+                              </button>
+                            )}
+                            {hasPermission('users', 'canEdit') && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditUser(u)}
+                                className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+                                title="Edit User & Permissions"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {hasPermission('users', 'canDelete') && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteUser(u)}
+                                className="p-1.5 rounded-lg bg-slate-800 text-rose-400 hover:text-rose-300 hover:bg-rose-950/50"
+                                title="Delete User Account"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       )))}
@@ -715,7 +762,7 @@ export const UsersMgmtPage: React.FC = () => {
             </div>
           </div>
 
-          {!editingUser && (
+          {!editingUser ? (
             <PinInput
               id="new_user_pin"
               value={pin}
@@ -723,45 +770,69 @@ export const UsersMgmtPage: React.FC = () => {
               label="Initial Numeric PIN *"
               required
             />
+          ) : (
+            <PinInput
+              id="edit_user_pin"
+              value={pin}
+              onChange={setPin}
+              label="Update User PIN (Optional - leave blank to keep unchanged)"
+            />
           )}
 
-          {/* Module Permissions Grid */}
-          <div className="space-y-3 pt-3 border-t border-slate-800">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">User Module Access & Permissions Grid</span>
-              <button
-                type="button"
-                onClick={() => {
-                  const fullPerms: Record<string, ModulePermission> = {};
-                  ALL_SYSTEM_MODULES.forEach(m => {
-                    fullPerms[m.key] = {
-                      id: `perm_${m.key}`,
-                      userId: editingUser ? editingUser.id : 'new',
-                      moduleKey: m.key,
-                      canView: true,
-                      canCreate: true,
-                      canEdit: true,
-                      canDelete: true,
-                      canPublish: true,
-                      canApprove: true,
-                      canExport: true,
-                      canManageSettings: true
-                    };
-                  });
-                  setPermissions(fullPerms);
-                  showToast('success', 'Marked FULL ACCESS permissions across all modules.');
-                }}
-                className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-bold text-[11px] rounded-lg transition-all flex items-center gap-1.5"
-              >
-                <Sliders className="w-3.5 h-3.5" />
-                <span>Mark Full Access (ހުރިހާ ހުއްދައެއް)</span>
-              </button>
+          {/* Module Permissions Grid or Standard Member Info */}
+          {(roleId === 'role_member' || roles.find(r => r.id === roleId)?.name === 'Club Member') ? (
+            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4 flex items-start gap-3.5">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                <Shield className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-xs font-bold text-emerald-300">ސްޓޭންޑަރޑް މެންބަރ އެކައުންޓް (Standard Member Role)</h4>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  ސްޓޭންޑަރޑް މެންބަރުންގެ އެކައުންޓްތަކަށް ވަކި އެޑްމިން މޮޑިއުލްތަކެއް އެސައިން ކުރާކަށް ނުޖެހޭނެއެވެ. މެންބަރުންނަށް އަމިއްލަ މެންބަރޝިޕް ޑޭޝްބޯޑު، އަމިއްލަ ބަޖެޓާއި ފީގެ ތަފްޞީލު، ރަމަޟާން ކުއިޒް، ކްލަބް ޤަވާޢިދުތައް އަދި ޕްރޮފައިލް ސެޓިންގްސް އޮޓޮމެޓިކުން ލިބޭނެއެވެ.
+                </p>
+                <p className="text-[11px] text-emerald-400 font-mono pt-1">
+                  ✓ Standard Member: No administrative module permissions needed. Direct access to self-service dashboard & personal budget statistics.
+                </p>
+              </div>
             </div>
-            <ModulePermissionsGrid
-              permissions={permissions}
-              onChange={setPermissions}
-            />
-          </div>
+          ) : (
+            <div className="space-y-3 pt-3 border-t border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">User Module Access & Permissions Grid</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const fullPerms: Record<string, ModulePermission> = {};
+                    ALL_SYSTEM_MODULES.forEach(m => {
+                      fullPerms[m.key] = {
+                        id: `perm_${m.key}`,
+                        userId: editingUser ? editingUser.id : 'new',
+                        moduleKey: m.key,
+                        canView: true,
+                        canCreate: true,
+                        canEdit: true,
+                        canDelete: true,
+                        canPublish: true,
+                        canApprove: true,
+                        canExport: true,
+                        canManageSettings: true
+                      };
+                    });
+                    setPermissions(fullPerms);
+                    showToast('success', 'Marked FULL ACCESS permissions across all modules.');
+                  }}
+                  className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-bold text-[11px] rounded-lg transition-all flex items-center gap-1.5"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  <span>Mark Full Access (ހުރިހާ ހުއްދައެއް)</span>
+                </button>
+              </div>
+              <ModulePermissionsGrid
+                permissions={permissions}
+                onChange={setPermissions}
+              />
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-3">
             <button
@@ -776,6 +847,67 @@ export const UsersMgmtPage: React.FC = () => {
               className="px-5 py-2 rounded-xl bg-orange-500 text-white font-bold text-xs hover:bg-orange-400"
             >
               Save User Account
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Admin Reset User PIN Modal */}
+      <Modal
+        isOpen={!!resetPinUser}
+        onClose={() => {
+          setResetPinUser(null);
+          setNewResetPin('');
+          setConfirmResetPin('');
+        }}
+        title={`Reset Security PIN: @${resetPinUser?.username}`}
+        description="Set a new numeric PIN for this user account. Only administrators have permission to create or change user PINs."
+      >
+        <form onSubmit={handlePerformResetPin} className="space-y-4">
+          <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between text-xs">
+            <div>
+              <p className="font-bold text-white">{resetPinUser?.fullName}</p>
+              <p className="text-slate-400">@{resetPinUser?.username} &bull; {resetPinUser?.roleName}</p>
+            </div>
+            <span className="px-2 py-0.5 rounded bg-orange-500/20 text-orange-400 font-mono text-[11px] font-bold">
+              Admin PIN Override
+            </span>
+          </div>
+
+          <PinInput
+            id="admin_reset_new_pin"
+            value={newResetPin}
+            onChange={setNewResetPin}
+            label="New Numeric PIN (at least 4 digits) *"
+            required
+          />
+
+          <PinInput
+            id="admin_reset_confirm_pin"
+            value={confirmResetPin}
+            onChange={setConfirmResetPin}
+            label="Confirm New Numeric PIN *"
+            required
+          />
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setResetPinUser(null);
+                setNewResetPin('');
+                setConfirmResetPin('');
+              }}
+              className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-semibold text-xs hover:bg-slate-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={resetPinLoading}
+              className="px-5 py-2 rounded-xl bg-orange-500 text-white font-bold text-xs hover:bg-orange-400 disabled:opacity-50"
+            >
+              {resetPinLoading ? 'Resetting PIN...' : 'Save New PIN'}
             </button>
           </div>
         </form>

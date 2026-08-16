@@ -17,7 +17,8 @@ interface PublicHeaderProps {
 
 export const PublicHeader: React.FC<PublicHeaderProps> = ({ branding, activePath = '/', hasEvents = false }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { isAuthenticated, user } = useAuth();
+  const { user } = useAuth();
+  const isAuthenticated = Boolean(user);
   const showLogoImage = Boolean(branding?.useLogo && branding?.logo && branding.logo.trim() !== '');
 
   const navLinks = [

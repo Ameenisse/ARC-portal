@@ -1345,7 +1345,7 @@ export const ContentMgmtPage: React.FC = () => {
         isOpen={eventModalOpen}
         onClose={() => setEventModalOpen(false)}
         title={editingEvent ? 'Edit Event / ޙަރަކާތް ބަދަލުކުރެއްވުން' : 'Add New Event / އާ ޙަރަކާތެއް އިތުރުކުރެއްވުން'}
-        maxWidth="max-w-3xl"
+        maxWidth="3xl"
       >
         <form onSubmit={handleSaveEvent} className="space-y-5 text-right" dir="rtl">
           {/* Title */}

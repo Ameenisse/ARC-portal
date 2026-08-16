@@ -134,7 +134,7 @@ export const EventsSection: React.FC<EventsSectionProps> = ({ events }) => {
             setLightboxIndex(null);
           }}
           title={selectedEvent.title}
-          maxWidth="max-w-4xl"
+          maxWidth="4xl"
         >
           <div className="space-y-6 text-right" dir="rtl">
             {/* Event Header Stats */}

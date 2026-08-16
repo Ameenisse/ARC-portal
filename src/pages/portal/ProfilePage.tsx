@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PortalLayout } from '../../components/portal/PortalLayout';
 import { useAuth } from '../../context/AuthContext';
-import { PinInput } from '../../components/common/PinInput';
 import { useToast } from '../../components/common/Toast';
 import { api } from '../../services/api';
 import { ClubRulesModal } from '../../components/portal/ClubRulesModal';
@@ -11,20 +10,9 @@ import { UserPerformanceModal } from '../../components/portal/UserPerformanceMod
 import {
   User as UserIcon,
   Shield,
-  Lock,
-  CheckCircle,
   Save,
   Phone,
-  Mail,
-  Building,
-  Key,
-  Bell,
   Sliders,
-  Calendar,
-  Clock,
-  CheckSquare,
-  Sparkles,
-  Image as ImageIcon,
   BookOpen,
   Activity
 } from 'lucide-react';
@@ -35,11 +23,27 @@ export const ProfilePage: React.FC = () => {
   const [isRulesModalOpen, setRulesModalOpen] = useState(false);
   const [isPerformanceModalOpen, setPerformanceModalOpen] = useState(false);
 
-  // URL query parameter tab handling (e.g. /portal/profile?tab=pin)
-  const queryParams = new URLSearchParams(window.location.search);
-  const initialTab = queryParams.get('tab') === 'performance' ? 'performance' : (queryParams.get('tab') === 'pin' ? 'pin' : 'info');
+  // Check if current user is Admin
+  const isAdmin = Boolean(
+    user && (
+      user.roleName === 'Admin' ||
+      user.roleId === 'role_admin' ||
+      user.roleName?.toLowerCase().includes('admin')
+    )
+  );
 
-  const [activeTab, setActiveTab] = useState<'info' | 'pin' | 'preferences' | 'permissions' | 'performance'>(initialTab as any);
+  // If Admin user enters profile, redirect to Admin Controller Settings
+  useEffect(() => {
+    if (isAdmin) {
+      window.location.replace('/portal/settings');
+    }
+  }, [isAdmin]);
+
+  // URL query parameter tab handling (e.g. /portal/profile?tab=performance)
+  const queryParams = new URLSearchParams(window.location.search);
+  const initialTab = queryParams.get('tab') === 'performance' ? 'performance' : (queryParams.get('tab') === 'preferences' ? 'preferences' : 'info');
+
+  const [activeTab, setActiveTab] = useState<'info' | 'preferences' | 'permissions' | 'performance'>(initialTab as any);
 
   // Profile Info Form
   const [fullName, setFullName] = useState(user?.fullName || '');
@@ -48,12 +52,6 @@ export const ProfilePage: React.FC = () => {
   const [profileImage, setProfileImage] = useState(user?.profileImage || '');
   const [notes, setNotes] = useState(user?.notes || '');
   const [infoLoading, setInfoLoading] = useState(false);
-
-  // Security PIN Form
-  const [currentPin, setCurrentPin] = useState('');
-  const [newPin, setNewPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
-  const [pinLoading, setPinLoading] = useState(false);
 
   // Preferences Form
   const [emailAlerts, setEmailAlerts] = useState(true);
@@ -70,7 +68,7 @@ export const ProfilePage: React.FC = () => {
     }
   }, [user]);
 
-  if (!user) return null;
+  if (!user || isAdmin) return null;
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,36 +92,6 @@ export const ProfilePage: React.FC = () => {
       showToast('error', err.message || 'Failed to update profile info.');
     } finally {
       setInfoLoading(false);
-    }
-  };
-
-  const handlePinUpdate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentPin || !newPin || !confirmPin) {
-      showToast('error', 'All PIN fields are required.');
-      return;
-    }
-    if (newPin !== confirmPin) {
-      showToast('error', 'New PIN and Confirm PIN do not match.');
-      return;
-    }
-    if (newPin.length < 4) {
-      showToast('error', 'PIN must be at least 4 digits long.');
-      return;
-    }
-
-    try {
-      setPinLoading(true);
-      await api.changePin({ currentPin, newPin, confirmPin });
-      showToast('success', 'Security PIN updated successfully.');
-      setCurrentPin('');
-      setNewPin('');
-      setConfirmPin('');
-      refreshUser();
-    } catch (err: any) {
-      showToast('error', err.message || 'Failed to update PIN.');
-    } finally {
-      setPinLoading(false);
     }
   };
 
@@ -211,18 +179,6 @@ export const ProfilePage: React.FC = () => {
             >
               <UserIcon className="w-4 h-4" />
               <span>ޕްރޯފައިލް މަޢުލޫމާތު (Profile Details)</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('pin')}
-              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition whitespace-nowrap ${
-                activeTab === 'pin'
-                  ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Lock className="w-4 h-4" />
-              <span>ސެކިއުރިޓީ އަދި ޕިން ކޯޑު (Change PIN)</span>
             </button>
 
             <button
@@ -360,77 +316,7 @@ export const ProfilePage: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 2: CHANGE SECURITY PIN FORM */}
-        {activeTab === 'pin' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-            <div className="border-b border-slate-800 pb-4">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <Lock className="w-5 h-5 text-orange-400" />
-                <span>ސެކިއުރިޓީ ޕިން ކޯޑު ބަދަލުކުރުން (Change Numeric PIN)</span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-1">
-                ޕޯޓަލްއަށް ލޮގިންވުމަށް ބޭނުންކުރާ ނިއުމެރިކް ޕިން ކޯޑު އައުކުރައްވާ.
-              </p>
-            </div>
-
-            {user.requirePinChange && (
-              <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs font-semibold flex items-center gap-3">
-                <Sparkles className="w-5 h-5 text-amber-400 shrink-0" />
-                <span>ސެކިއުރިޓީ ވަރުގަދަކުރުމަށްޓަކައި އިބްތިދާއީ (Default) ޕިން ކޯޑު ބަދަލުކުރައްވާ!</span>
-              </div>
-            )}
-
-            <form onSubmit={handlePinUpdate} className="space-y-4 max-w-md">
-              <PinInput
-                id="profile_tab_curr_pin"
-                value={currentPin}
-                onChange={setCurrentPin}
-                label="މިހާރުގެ ޕިން ކޯޑު (Current PIN) *"
-                required
-              />
-              <PinInput
-                id="profile_tab_new_pin"
-                value={newPin}
-                onChange={setNewPin}
-                label="އައު ޕިން ކޯޑު (New Numeric PIN) *"
-                required
-              />
-              <PinInput
-                id="profile_tab_confirm_pin"
-                value={confirmPin}
-                onChange={setConfirmPin}
-                label="އައު ޕިން ކޯޑު ކަށަވަރުކުރައްވާ (Confirm New PIN) *"
-                required
-              />
-
-              {/* PIN Guidance Checklist */}
-              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1.5 text-xs text-slate-400">
-                <p className="font-bold text-slate-300">ޕިން ކޯޑުގެ ޤަވާޢިދުތައް:</p>
-                <div className="flex items-center gap-2">
-                  <CheckCircle className={`w-3.5 h-3.5 ${newPin.length >= 4 ? 'text-emerald-400' : 'text-slate-600'}`} />
-                  <span>މަދުވެގެން 4 އަކުރުގެ ނަންބަރު</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle className={`w-3.5 h-3.5 ${newPin && newPin === confirmPin ? 'text-emerald-400' : 'text-slate-600'}`} />
-                  <span>ދެ ޕިން ކޯޑު އެއްގޮތްވުން</span>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  disabled={pinLoading}
-                  className="px-6 py-3 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-xs transition flex items-center gap-2 shadow-lg shadow-orange-500/20"
-                >
-                  <Key className="w-4 h-4" />
-                  <span>{pinLoading ? 'ބަދަލުކުރެވެނީ...' : 'ޕިން ކޯޑު ބަދަލުކުރައްވާ'}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
-
-        {/* TAB 3: PREFERENCES & NOTIFICATIONS */}
+        {/* TAB 2: PREFERENCES & NOTIFICATIONS */}
         {activeTab === 'preferences' && (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
             <div className="border-b border-slate-800 pb-4">

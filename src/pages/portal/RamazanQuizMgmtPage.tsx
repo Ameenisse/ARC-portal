@@ -1277,15 +1277,15 @@ export const RamazanQuizMgmtPage: React.FC = () => {
 
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase ${
-                          q.state === 'open' ? 'bg-orange-950 text-orange-400 border border-orange-800' :
-                          q.state === 'answer_revealed' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
-                          q.state === 'winner_announced' ? 'bg-sky-950 text-sky-400 border border-sky-800' :
+                          (q.status || (q as any).state) === 'open' ? 'bg-orange-950 text-orange-400 border border-orange-800' :
+                          (q.status || (q as any).state) === 'answer_revealed' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
+                          (q.status || (q as any).state) === 'winner_announced' ? 'bg-sky-950 text-sky-400 border border-sky-800' :
                           'bg-slate-800 text-slate-400'
                         }`}>
-                          {(q?.state || '').replace(/_/g, ' ')}
+                          {(q.status || (q as any).state || '').replace(/_/g, ' ')}
                         </span>
 
-                        {q.state === 'draft' && (
+                        {(q.status || (q as any).state) === 'draft' && (
                           <button
                             type="button"
                             onClick={() => handleStatusAction(q.id, 'open')}
@@ -1295,7 +1295,7 @@ export const RamazanQuizMgmtPage: React.FC = () => {
                           </button>
                         )}
 
-                        {q.state === 'open' && (
+                        {(q.status || (q as any).state) === 'open' && (
                           <button
                             type="button"
                             onClick={() => handleStatusAction(q.id, 'closed')}
@@ -1305,7 +1305,7 @@ export const RamazanQuizMgmtPage: React.FC = () => {
                           </button>
                         )}
 
-                        {q.state === 'closed' && (
+                        {(q.status || (q as any).state) === 'closed' && (
                           <button
                             type="button"
                             onClick={() => handleStatusAction(q.id, 'answer_revealed')}
@@ -1315,7 +1315,7 @@ export const RamazanQuizMgmtPage: React.FC = () => {
                           </button>
                         )}
 
-                        {['answer_revealed', 'draw_running'].includes(q.state) && (
+                        {['answer_revealed', 'draw_running'].includes(q.status || (q as any).state) && (
                           <button
                             type="button"
                             onClick={() => handleTriggerDraw(q.id)}

@@ -103,6 +103,15 @@ export function formatDateTime(dateVal: string | number | Date | null | undefine
 export const THAANA_LABELS = ['ހ', 'ށ', 'ނ', 'ރ', 'ބ', 'ޅ', 'ކ', 'އ', 'ވ', 'މ', 'ފ', 'ދ'];
 
 /**
+ * Formats a monetary amount in MVR currency format
+ */
+export function formatCurrency(amount: number | string | null | undefined, currency = 'MVR'): string {
+  const num = typeof amount === 'string' ? parseFloat(amount) : (amount || 0);
+  if (isNaN(num)) return `0.00 ${currency}`;
+  return `${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
+}
+
+/**
  * Returns Dhivehi Thaana Option Label (ހ, ށ, ނ, ރ...) instead of A, B, C, D
  */
 export function getThaanaOptionLabel(label?: string, idx: number = 0): string {

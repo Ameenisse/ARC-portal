@@ -17,17 +17,22 @@ export type ModuleKey =
   | 'dashboard'
   | 'members'
   | 'events_meetings'
+  | 'events'
+  | 'budget'
   | 'slideshow'
   | 'content'
   | 'vision_mission'
   | 'contact'
+  | 'contacts'
   | 'social_media'
   | 'exco_team'
   | 'ramazan_quiz'
+  | 'quiz'
   | 'quiz_participants'
   | 'quiz_winners'
   | 'users'
   | 'roles_permissions'
+  | 'roles'
   | 'audit_logs'
   | 'club_rules'
   | 'settings'
@@ -116,6 +121,31 @@ export interface User {
   permissions: ModulePermission[];
   modulePermissions?: ModulePermission[];
   memberId?: string;
+  pin?: string;
+  pinSalt?: string;
+  pinHash?: string;
+}
+
+export interface MemberDashboardWidgetSettings {
+  showClubOverviewStats?: boolean;
+  showPersonalScore?: boolean;
+  showQuizHistory?: boolean;
+  showWinsRecord?: boolean;
+  showAttendanceRecord?: boolean;
+  showBadgesMilestones?: boolean;
+  showUpcomingEvents?: boolean;
+  showClubRulesBanner?: boolean;
+  showWelcomeBanner?: boolean;
+  showProfileCard?: boolean;
+  showStatsSummary?: boolean;
+  showBadges?: boolean;
+  showWinsHistory?: boolean;
+  showAttendanceHistory?: boolean;
+  showBudgetStats?: boolean;
+  showPersonalBudgetReport?: boolean;
+  showClubRulesQuickButton?: boolean;
+  showQuizQuickButton?: boolean;
+  allowMemberConnectProfile?: boolean;
 }
 
 export interface UserPerformanceBadge {
@@ -178,6 +208,38 @@ export interface UserPerformanceData {
   activity: {
     messagesCount: number;
     auditLogsCount: number;
+  };
+  budget?: {
+    summary: {
+      totalPaid: number;
+      totalFines: number;
+      totalPending: number;
+      pendingCount: number;
+      overdueCount: number;
+      paidCount: number;
+      waivedCount: number;
+      totalMonths: number;
+      isUpToDate: boolean;
+      monthlyFee: number;
+      dueDayOfMonth: number;
+      annualAdvanceDiscountMonths: number;
+      status: 'good_standing' | 'pending' | 'overdue';
+      depositAccount?: {
+        id: string;
+        accountName: string;
+        accountNumber: string;
+        bankName: string;
+        currency: string;
+      };
+    };
+    contributions: MemberContributionRecord[];
+    clubStats: {
+      totalClubIncome: number;
+      totalClubExpenses: number;
+      netReserve: number;
+      totalContributionsCollected: number;
+      currentYear: number;
+    };
   };
   overallScore: number;
   badges: UserPerformanceBadge[];
@@ -298,6 +360,7 @@ export interface QuizOption {
   questionId: string;
   optionLabel: string; // e.g. 'A', 'B', 'C', 'D'
   optionText: string;
+  text?: string; // alias for optionText
   optionImage?: string;
   displayOrder: number;
 }
@@ -335,10 +398,40 @@ export interface QuizQuestion {
   eligibleCount?: number;
 }
 
+export interface QuizParticipantQueue {
+  id: string; // normalizedIdNumber (e.g. 'A123456')
+  normalizedIdNumber: string;
+  queNumber: string; // e.g. 'Q-0001'
+  queIndex: number;
+  contactNumber?: string;
+  participantName?: string;
+  firstRegisteredAt: string;
+  lastSubmittedAt: string;
+}
+
+export interface MasterParticipant {
+  idNumber: string;
+  normalizedIdNumber: string;
+  queNumber: string;
+  queIndex?: number;
+  participantNumber: string;
+  contactNumber?: string;
+  maskedIdNumber: string;
+  maskedContactNumber: string;
+  totalSubmissions: number;
+  correctCount: number;
+  disqualifiedCount: number;
+  isBlocked: boolean;
+  isNotEligible: boolean;
+  firstRegisteredAt?: string;
+  lastSubmittedAt?: string;
+}
+
 export interface QuizSubmission {
   id: string;
   questionId: string;
   participantNumber: string; // e.g. 'RQ-0001'
+  participantName?: string;
   normalizedIdNumber: string; // e.g. 'A123456'
   idNumber?: string;
   contactNumber?: string; // e.g. '7712345'
@@ -365,12 +458,15 @@ export interface QuizWinner {
   questionId: string;
   submissionId: string;
   participantNumber: string;
+  participantName?: string;
   maskedIdNumber: string;
   maskedContactNumber: string;
   // Unmasked fields accessible only in admin portal
   fullName?: string;
   contactNumber?: string;
   idNumber?: string;
+  prizeId?: string;
+  sponsorId?: string;
   prizeTitle: string;
   prizeDescription?: string;
   sponsorName?: string;
@@ -505,6 +601,9 @@ export interface ClubRulesData {
   descriptionEnglish?: string;
   version: string;
   effectiveDate: string;
+  pdfUrl?: string;
+  pdfFileName?: string;
+  pdfFileSize?: string;
   updatedAt: string;
   updatedByName?: string;
   chapters: ClubRuleChapter[];
@@ -529,6 +628,7 @@ export interface ClubMember {
 
 export interface AttendanceRecord {
   memberId: string;
+  userId?: string;
   memberName: string;
   memberNumber: string;
   status: 'present' | 'absent' | 'excused';
@@ -590,3 +690,243 @@ export interface MeetingItem {
   createdAt: string;
   updatedAt: string;
 }
+
+// --- BUDGET MODULE TYPES ---
+
+export type BankAccountType = 'bank' | 'cash' | 'mobile_wallet' | 'other';
+
+export interface BankAccount {
+  id: string;
+  accountName: string;
+  accountNumber: string;
+  bankName: string;
+  type: BankAccountType;
+  currency: string;
+  openingBalance: number;
+  currentBalance: number;
+  status: 'active' | 'inactive';
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type IncomeCategory = 
+  | 'member_contribution'
+  | 'sponsorship'
+  | 'donation'
+  | 'event_fee'
+  | 'merchandise'
+  | 'grant'
+  | 'other';
+
+export interface IncomeRecord {
+  id: string;
+  title: string;
+  category: IncomeCategory;
+  amount: number;
+  date: string;
+  accountId: string;
+  accountName?: string;
+  paymentMethod: 'bank_transfer' | 'cash' | 'cheque' | 'gateway' | 'other';
+  referenceNumber?: string;
+  receivedFrom: string;
+  payerMemberId?: string;
+  status: 'received' | 'pending' | 'cancelled';
+  notes?: string;
+  attachments?: string[];
+  contributionRecordId?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ExpenseCategory = 
+  | 'event_logistics'
+  | 'venue_rent'
+  | 'catering'
+  | 'marketing_pr'
+  | 'prizes_awards'
+  | 'office_admin'
+  | 'utilities'
+  | 'equipment'
+  | 'travel'
+  | 'maintenance'
+  | 'other';
+
+export interface ExpenseRecord {
+  id: string;
+  title: string;
+  category: ExpenseCategory;
+  amount: number;
+  date: string;
+  accountId: string;
+  accountName?: string;
+  paymentMethod: 'bank_transfer' | 'cash' | 'cheque' | 'card' | 'other';
+  referenceNumber?: string;
+  payee: string;
+  approvedBy?: string;
+  status: 'paid' | 'pending_approval' | 'rejected';
+  receiptNumber?: string;
+  notes?: string;
+  attachments?: string[];
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountTransferRecord {
+  id: string;
+  fromAccountId: string;
+  fromAccountName: string;
+  toAccountId: string;
+  toAccountName: string;
+  amount: number;
+  date: string;
+  referenceNumber?: string;
+  notes?: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface MemberContributionSetting {
+  monthlyFee: number;
+  dueDayOfMonth: number;
+  finePerDay: number;
+  annualAdvanceDiscountMonths: number;
+  currency: string;
+  defaultDepositAccountId: string;
+  enableAutoFines: boolean;
+  gracePeriodDays: number;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export type ContributionStatus = 'paid' | 'pending' | 'overdue' | 'waived';
+
+export interface MemberContributionRecord {
+  id: string;
+  memberId: string;
+  memberName: string;
+  memberNumber: string;
+  year: number;
+  month: number; // 1 to 12
+  baseAmount: number;
+  discountAmount: number;
+  fineDays: number;
+  finePerDay: number;
+  fineAmount: number;
+  totalPayable: number;
+  paidAmount: number;
+  dueDate: string;
+  paidDate?: string;
+  status: ContributionStatus;
+  paymentMethod?: 'bank_transfer' | 'cash' | 'cheque' | 'gateway' | 'other';
+  referenceNumber?: string;
+  accountId?: string;
+  accountName?: string;
+  isAdvancePayment?: boolean;
+  advancePackageMonths?: number;
+  incomeRecordId?: string;
+  receiptNumber?: string;
+  notes?: string;
+  recordedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CategoryBudgetAllocation {
+  id: string;
+  year: number;
+  category: ExpenseCategory;
+  categoryLabel: string;
+  allocatedAmount: number;
+  spentAmount?: number;
+  notes?: string;
+  updatedAt?: string;
+}
+
+export interface BudgetStats {
+  totalIncome: number;
+  totalExpenses: number;
+  netBalance: number;
+  totalAccountsBalance: number;
+  totalContributionsCollected: number;
+  pendingContributionsCount: number;
+  pendingContributionsAmount: number;
+  overdueContributionsCount: number;
+  overdueContributionsAmount: number;
+  totalFinesCollected: number;
+  monthlyFlow: Array<{
+    month: string;
+    income: number;
+    expense: number;
+    net: number;
+  }>;
+  categoryIncome: Array<{
+    category: string;
+    categoryLabel: string;
+    amount: number;
+    percentage: number;
+  }>;
+  categoryExpense: Array<{
+    category: string;
+    categoryLabel: string;
+    amount: number;
+    percentage: number;
+  }>;
+  recentTransactions: Array<{
+    id: string;
+    type: 'income' | 'expense';
+    title: string;
+    amount: number;
+    date: string;
+    category: string;
+    accountName: string;
+    status: string;
+  }>;
+}
+
+// --- EXECUTIVE OFFICER SPECIFIC TYPES ---
+
+export interface PresidentialDirective {
+  id: string;
+  title: string;
+  titleDv?: string;
+  directiveNumber?: string;
+  refNumber?: string;
+  body?: string;
+  description?: string;
+  targetRole?: string;
+  targetOfficer?: string;
+  priority: 'low' | 'normal' | 'routine' | 'high' | 'urgent';
+  status: 'draft' | 'issued' | 'active' | 'in_progress' | 'completed' | 'archived';
+  effectiveDate?: string;
+  issueDate?: string;
+  targetDate?: string;
+  issuedBy?: string;
+  completionNotes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface OfficialCircular {
+  id: string;
+  circularNumber?: string;
+  refNumber?: string;
+  title: string;
+  titleDv?: string;
+  content?: string;
+  summary?: string;
+  category?: 'general' | 'agm' | 'election' | 'event' | 'policy';
+  targetAudience?: 'all_members' | 'exco' | 'public' | 'committee';
+  publishDate?: string;
+  publishedDate?: string;
+  status: 'draft' | 'published' | 'archived';
+  signatoryName?: string;
+  signedBy?: string;
+  signatoryRole?: string;
+  attachmentUrl?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+

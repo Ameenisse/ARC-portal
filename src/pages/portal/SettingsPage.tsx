@@ -34,14 +34,48 @@ import {
   Cloud,
   FileCode,
   Clock,
-  Globe
+  Globe,
+  LayoutDashboard,
+  HelpCircle,
+  Trophy,
+  UserCheck,
+  ToggleLeft,
+  ToggleRight,
+  Sliders,
+  Check
 } from 'lucide-react';
+
+interface MemberDashboardWidgetSettings {
+  showWelcomeBanner: boolean;
+  showProfileCard: boolean;
+  showStatsSummary: boolean;
+  showBadges: boolean;
+  showQuizHistory: boolean;
+  showWinsHistory: boolean;
+  showAttendanceHistory: boolean;
+  showClubRulesQuickButton: boolean;
+  showQuizQuickButton: boolean;
+  allowMemberConnectProfile: boolean;
+}
+
+const DEFAULT_WIDGET_SETTINGS: MemberDashboardWidgetSettings = {
+  showWelcomeBanner: true,
+  showProfileCard: true,
+  showStatsSummary: true,
+  showBadges: true,
+  showQuizHistory: true,
+  showWinsHistory: true,
+  showAttendanceHistory: true,
+  showClubRulesQuickButton: true,
+  showQuizQuickButton: true,
+  allowMemberConnectProfile: true,
+};
 
 export const SettingsPage: React.FC = () => {
   const { user } = useAuth();
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'rules' | 'security' | 'database' | 'hosting_time'>('hosting_time');
+  const [activeTab, setActiveTab] = useState<'rules' | 'security' | 'database' | 'hosting_time' | 'widgets'>('hosting_time');
 
   // Check if current user is Admin
   const isAdmin = Boolean(
@@ -51,6 +85,10 @@ export const SettingsPage: React.FC = () => {
       user.roleName.toLowerCase().includes('admin')
     )
   );
+
+  // Member Dashboard Widgets Configuration State
+  const [widgetSettings, setWidgetSettings] = useState<MemberDashboardWidgetSettings>(DEFAULT_WIDGET_SETTINGS);
+  const [widgetsSaving, setWidgetsSaving] = useState(false);
 
   // Hosting Time & Timezone State
   const [selectedTimezone, setSelectedTimezone] = useState('Indian/Maldives (GMT+05:00)');
@@ -474,8 +512,8 @@ export const SettingsPage: React.FC = () => {
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
           >
-            <Database className="w-4 h-4" />
-            <span>ޑޭޓާބޭސް ޓޭބަލްތައް އަދި ސިންކު (DB Tables & Sync)</span>
+            <Database className="w-4 h-4 text-amber-400" />
+            <span>ފަޔަރބޭސް ޑޭޓާބޭސް (Firebase Firestore DB)</span>
           </button>
 
           <button
@@ -703,20 +741,29 @@ export const SettingsPage: React.FC = () => {
           </form>
         ) : (
 
-          /* TAB 3: DATABASE TABLES, DATA RECORDS & CLOUD SYNC */
+          /* TAB 3: FIREBASE CLOUD FIRESTORE DATABASE COLLECTIONS, RECORDS & SYNC */
           <div className="space-y-6">
             
-            {/* Sync Overview Status Card */}
+            {/* Firebase Firestore Connection Overview Status Card */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
               <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
                 <div>
-                  <h3 className="text-xl font-bold text-white font-heading flex items-center gap-2">
-                    <Database className="w-6 h-6 text-orange-400" />
-                    <span>ޑޭޓާބޭސް ޓޭބަލްތައް އަދި ސިންކު ސްޓޭޓަސް (DB Tables & Sync)</span>
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    ޕޯޓަލްގެ ހުރިހާ ޑޭޓާބޭސް ޓޭބަލްތަކާއި، ރެކޯޑުތަކުގެ އަދަދު އަދި ކްލައުޑް ފަޔަރސްޓޯރ / ލޯކަލް ޑިސްކް ސިންކު ޙާލަތު.
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                      <Database className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-white font-heading flex items-center gap-2">
+                        <span>ފަޔަރބޭސް ކްލައުޑް ފަޔަރސްޓޯރ (Firebase Cloud Firestore)</span>
+                        <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[11px] font-mono font-bold">
+                          Firestore Active
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        ޕޯޓަލްގެ ހުރިހާ ފަޔަރސްޓޯރ ކަލެކްޝަންތަކާއި، ރެކޯޑުތަކުގެ އަދަދު އަދި ލައިވް ޑޭޓާބޭސް ޙާލަތު.
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Quick Database Actions */}
@@ -725,10 +772,10 @@ export const SettingsPage: React.FC = () => {
                     type="button"
                     onClick={handleManualSync}
                     disabled={dbSyncing}
-                    className="px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-orange-500/20 transition disabled:opacity-50"
+                    className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-amber-600/20 transition disabled:opacity-50"
                   >
                     <RefreshCw className={`w-4 h-4 ${dbSyncing ? 'animate-spin' : ''}`} />
-                    <span>{dbSyncing ? 'ސިންކުވަނީ...' : 'ޑޭޓާބޭސް ސިންކު ކުރައްވާ (Sync Now)'}</span>
+                    <span>{dbSyncing ? 'ސިންކުވަނީ...' : 'ފަޔަރސްޓޯރ ސިންކު (Sync Firestore)'}</span>
                   </button>
 
                   <button
@@ -736,7 +783,7 @@ export const SettingsPage: React.FC = () => {
                     onClick={handleExportBackup}
                     className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-2 transition"
                   >
-                    <Download className="w-4 h-4 text-emerald-400" />
+                    <Download className="w-4 h-4 text-amber-400" />
                     <span>ބެކްއަޕް JSON (Backup)</span>
                   </button>
 
@@ -760,63 +807,70 @@ export const SettingsPage: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 space-y-1">
                   <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
-                    <span>ޖުމްލަ ޓޭބަލްތައް (Tables)</span>
-                    <Table className="w-4 h-4 text-orange-400" />
+                    <span>ޖުމްލަ ކަލެކްޝަންތައް (Collections)</span>
+                    <Table className="w-4 h-4 text-amber-400" />
                   </div>
                   <div className="text-2xl font-black text-white font-mono">
                     {dbTables.length}
                   </div>
-                  <p className="text-[10px] text-slate-500">ހުރިހާ މޮޑިއުލްތަކެއްގެ ދަފްތަރު</p>
+                  <p className="text-[10px] text-slate-500">Firestore Collections Active</p>
                 </div>
 
                 <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 space-y-1">
                   <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
-                    <span>ޖުމްލަ ރެކޯޑުތައް (Total Records)</span>
-                    <Layers className="w-4 h-4 text-emerald-400" />
+                    <span>ޖުމްލަ ލިޔުންތައް (Total Documents)</span>
+                    <Layers className="w-4 h-4 text-amber-400" />
                   </div>
-                  <div className="text-2xl font-black text-emerald-400 font-mono">
+                  <div className="text-2xl font-black text-amber-400 font-mono">
                     {dbTotalRecords}
                   </div>
-                  <p className="text-[10px] text-slate-500">ސިސްޓަމްގައި ރައްކާކުރެވިފައިވާ</p>
+                  <p className="text-[10px] text-slate-500">Live Firestore Documents Stored</p>
                 </div>
 
                 <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 space-y-1">
                   <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
-                    <span>ލޯކަލް ޑިސްކް ކޭޝް (Disk Store)</span>
-                    <HardDrive className="w-4 h-4 text-blue-400" />
+                    <span>ޑޭޓާބޭސް އިންޖީނު (DB Engine)</span>
+                    <HardDrive className="w-4 h-4 text-orange-400" />
+                  </div>
+                  <div className="text-xs font-bold text-orange-400 font-mono flex items-center gap-1 mt-1">
+                    <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>Cloud Firestore NoSQL</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">Google Cloud Managed</p>
+                </div>
+
+                <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 space-y-1">
+                  <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
+                    <span>ކްލައުޑް ޙާލަތު (Cloud Status)</span>
+                    <Cloud className="w-4 h-4 text-emerald-400" />
                   </div>
                   <div className="text-xs font-bold text-emerald-400 font-mono flex items-center gap-1 mt-1">
                     <CheckCircle className="w-3.5 h-3.5 shrink-0" />
-                    <span>arc_db.json Active</span>
-                  </div>
-                  <p className="text-[10px] text-slate-500">Persistent Disk Storage</p>
-                </div>
-
-                <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 space-y-1">
-                  <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
-                    <span>ކްލައުޑް ސިންކު (Cloud Firestore)</span>
-                    <Cloud className="w-4 h-4 text-cyan-400" />
-                  </div>
-                  <div className="text-xs font-bold text-cyan-400 font-mono flex items-center gap-1 mt-1">
-                    <CheckCircle className="w-3.5 h-3.5 shrink-0" />
-                    <span>Firestore Synced</span>
+                    <span>Live Connected</span>
                   </div>
                   <p className="text-[10px] text-slate-500 truncate">
-                    {dbLastSynced ? new Date(dbLastSynced).toLocaleTimeString() : 'Synced'}
+                    {dbLastSynced ? new Date(dbLastSynced).toLocaleTimeString() : 'Connected'}
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* DB Tables Catalog Grid */}
+            {/* Firestore Collections Catalog Grid */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <h4 className="text-sm font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                  <Table className="w-4 h-4 text-orange-400" />
-                  <span>ޑޭޓާބޭސް ޓޭބަލްތަކުގެ ތަފްޞީލު (Database Collections Grid)</span>
-                </h4>
-                <span className="text-xs text-slate-400 font-mono">
-                  Showing {dbTables.length} collections
+                <div className="flex items-center gap-2">
+                  <Table className="w-5 h-5 text-amber-400" />
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-200 uppercase tracking-wider">
+                      ފަޔަރސްޓޯރ ކަލެކްޝަންތަކުގެ ތަފްޞީލު (Firestore Collections Grid)
+                    </h4>
+                    <p className="text-[11px] text-slate-400 font-mono">
+                      Cloud Firestore document schema & active record tallies
+                    </p>
+                  </div>
+                </div>
+                <span className="text-xs text-slate-400 font-mono px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800">
+                  {dbTables.length} Collections
                 </span>
               </div>
 
@@ -824,14 +878,14 @@ export const SettingsPage: React.FC = () => {
                 {dbTables.map(tbl => (
                   <div
                     key={tbl.key}
-                    className="bg-slate-950/80 border border-slate-800 hover:border-orange-500/40 rounded-xl p-4 space-y-3 transition shadow-lg flex flex-col justify-between"
+                    className="bg-slate-950/80 border border-slate-800 hover:border-emerald-500/40 rounded-xl p-4 space-y-3 transition shadow-lg flex flex-col justify-between"
                   >
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="px-2.5 py-1 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/20 text-xs font-bold font-mono">
+                        <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold font-mono">
                           {tbl.count} Records
                         </span>
-                        <span className="text-[10px] text-slate-500 font-mono uppercase">
+                        <span className="text-[10px] text-slate-400 font-mono uppercase bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
                           {tbl.key}
                         </span>
                       </div>
@@ -846,7 +900,7 @@ export const SettingsPage: React.FC = () => {
                       </div>
 
                       <div className="p-2 bg-slate-900/90 rounded-lg border border-slate-800 text-[10px] text-slate-400 font-mono truncate">
-                        Schema: {tbl.schema}
+                        Columns: {tbl.schema}
                       </div>
                     </div>
 
@@ -855,7 +909,7 @@ export const SettingsPage: React.FC = () => {
                       onClick={() => setSelectedTable(tbl)}
                       className="w-full py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition"
                     >
-                      <Eye className="w-3.5 h-3.5 text-orange-400" />
+                      <Eye className="w-3.5 h-3.5 text-emerald-400" />
                       <span>ރެކޯޑުތައް ބައްލަވާ (View Sample)</span>
                     </button>
                   </div>

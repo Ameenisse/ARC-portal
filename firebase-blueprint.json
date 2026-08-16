@@ -1,8 +1,8 @@
 {
   "entities": {
-    "users": {
-      "title": "Users",
-      "description": "User accounts and permissions",
+    "User": {
+      "title": "User",
+      "description": "User profile with role and PIN authentication details",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -12,60 +12,167 @@
         "contactNumber": { "type": "string" },
         "roleId": { "type": "string" },
         "roleName": { "type": "string" },
+        "memberId": { "type": "string" },
+        "profilePhotoUrl": { "type": "string" },
         "status": { "type": "string" },
         "requirePinChange": { "type": "boolean" },
-        "failedLoginCount": { "type": "number" },
         "pinHash": { "type": "string" },
-        "pinSalt": { "type": "string" }
+        "pinSalt": { "type": "string" },
+        "failedLoginCount": { "type": "number" },
+        "lockedUntil": { "type": "string" },
+        "lastLoginAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
       },
-      "required": ["id", "username"]
+      "required": ["id", "fullName", "username", "pinHash", "pinSalt"]
     },
-    "settings": {
-      "title": "Settings",
-      "description": "Site configurations",
+    "Role": {
+      "title": "Role",
+      "description": "System or custom role definition",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "group": { "type": "string" },
-        "key": { "type": "string" },
-        "value": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "isSystem": { "type": "boolean" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" }
       },
-      "required": ["id", "group", "key"]
+      "required": ["id", "name"]
     },
-    "slideshow": {
-      "title": "Slideshow Items",
+    "Member": {
+      "title": "Member",
+      "description": "Official club member record",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "title": { "type": "string" }
+        "memberNumber": { "type": "string" },
+        "fullName": { "type": "string" },
+        "idCardNumber": { "type": "string" },
+        "dateOfBirth": { "type": "string" },
+        "gender": { "type": "string" },
+        "address": { "type": "string" },
+        "contactNumber": { "type": "string" },
+        "email": { "type": "string" },
+        "joinedDate": { "type": "string" },
+        "membershipType": { "type": "string" },
+        "designation": { "type": "string" },
+        "profilePhotoUrl": { "type": "string" },
+        "notes": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
       },
-      "required": ["id"]
+      "required": ["id", "memberNumber", "fullName"]
     },
-    "excoMembers": {
-      "title": "Exco Members",
+    "SiteSetting": {
+      "title": "SiteSetting",
+      "description": "Configuration or branding setting",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "fullName": { "type": "string" }
+        "settingGroup": { "type": "string" },
+        "settingKey": { "type": "string" },
+        "value": { "type": "object" },
+        "valueType": { "type": "string" },
+        "isPublic": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
       },
-      "required": ["id"]
+      "required": ["id", "settingGroup", "settingKey", "value"]
     },
-    "quizQuestions": {
-      "title": "Quiz Questions",
+    "QuizQuestion": {
+      "title": "QuizQuestion",
+      "description": "Ramadan quiz question and metadata",
       "type": "object",
       "properties": {
-        "id": { "type": "string" }
+        "id": { "type": "string" },
+        "questionNumber": { "type": "number" },
+        "questionText": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "questionImageUrl": { "type": "string" },
+        "correctOptionId": { "type": "string" },
+        "options": { "type": "array" },
+        "publishAt": { "type": "string" },
+        "closeAt": { "type": "string" },
+        "revealAt": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
       },
-      "required": ["id"]
+      "required": ["id", "questionNumber", "questionText", "options"]
     },
-    "quizSubmissions": {
-      "title": "Quiz Submissions",
+    "QuizSubmission": {
+      "title": "QuizSubmission",
+      "description": "Quiz participant answer submission",
       "type": "object",
       "properties": {
-        "id": { "type": "string" }
+        "id": { "type": "string" },
+        "participantNumber": { "type": "string" },
+        "questionId": { "type": "string" },
+        "participantName": { "type": "string" },
+        "idCardNumber": { "type": "string" },
+        "normalizedIdNumber": { "type": "string" },
+        "contactNumber": { "type": "string" },
+        "selectedOptionId": { "type": "string" },
+        "submittedAt": { "type": "string" },
+        "isCorrect": { "type": "boolean" },
+        "isEligible": { "type": "boolean" },
+        "isDisqualified": { "type": "boolean" },
+        "isInvalid": { "type": "boolean" }
       },
-      "required": ["id"]
+      "required": ["id", "questionId", "participantName", "normalizedIdNumber", "selectedOptionId"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "System audit trail record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "fullName": { "type": "string" },
+        "action": { "type": "string" },
+        "module": { "type": "string" },
+        "recordId": { "type": "string" },
+        "ipAddress": { "type": "string" },
+        "userAgent": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "action", "module"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User accounts and auth metadata"
+    },
+    "/roles/{roleId}": {
+      "schema": "Role",
+      "description": "Club portal roles"
+    },
+    "/members/{memberId}": {
+      "schema": "Member",
+      "description": "Club member directory records"
+    },
+    "/siteSettings/{settingId}": {
+      "schema": "SiteSetting",
+      "description": "Club site configurations and branding"
+    },
+    "/quizQuestions/{questionId}": {
+      "schema": "QuizQuestion",
+      "description": "Ramadan quiz daily questions"
+    },
+    "/quizSubmissions/{submissionId}": {
+      "schema": "QuizSubmission",
+      "description": "User submissions for questions"
+    },
+    "/auditLogs/{logId}": {
+      "schema": "AuditLog",
+      "description": "System audit logs"
     }
   }
 }

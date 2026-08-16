@@ -240,5 +240,59 @@ export const api = {
 
   // --- Club Rules & Regulations API ---
   getClubRules: () => request<any>('/api/portal/club-rules'),
-  updateClubRules: (data: any) => request<any>('/api/portal/club-rules', { method: 'PUT', body: JSON.stringify(data) })
+  updateClubRules: (data: any) => request<any>('/api/portal/club-rules', { method: 'PUT', body: JSON.stringify(data) }),
+
+  // --- Budget Module API ---
+  getBudgetStats: (year?: number) => {
+    const query = year ? `?year=${year}` : '';
+    return request<any>(`/api/portal/budget/stats${query}`);
+  },
+  getBankAccounts: () => request<any[]>('/api/portal/budget/accounts'),
+  createBankAccount: (data: any) => request<any>('/api/portal/budget/accounts', { method: 'POST', body: JSON.stringify(data) }),
+  updateBankAccount: (id: string, data: any) => request<any>(`/api/portal/budget/accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteBankAccount: (id: string) => request<any>(`/api/portal/budget/accounts/${id}`, { method: 'DELETE' }),
+  transferAccountFunds: (data: any) => request<any>('/api/portal/budget/transfers', { method: 'POST', body: JSON.stringify(data) }),
+  getAccountTransfers: () => request<any[]>('/api/portal/budget/transfers'),
+
+  getIncomeRecords: (params?: { category?: string; accountId?: string; startDate?: string; endDate?: string }) => {
+    const query = new URLSearchParams(params as any).toString();
+    return request<any[]>(`/api/portal/budget/income${query ? `?${query}` : ''}`);
+  },
+  createIncomeRecord: (data: any) => request<any>('/api/portal/budget/income', { method: 'POST', body: JSON.stringify(data) }),
+  updateIncomeRecord: (id: string, data: any) => request<any>(`/api/portal/budget/income/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteIncomeRecord: (id: string) => request<any>(`/api/portal/budget/income/${id}`, { method: 'DELETE' }),
+
+  getExpenseRecords: (params?: { category?: string; accountId?: string; status?: string; startDate?: string; endDate?: string }) => {
+    const query = new URLSearchParams(params as any).toString();
+    return request<any[]>(`/api/portal/budget/expenses${query ? `?${query}` : ''}`);
+  },
+  createExpenseRecord: (data: any) => request<any>('/api/portal/budget/expenses', { method: 'POST', body: JSON.stringify(data) }),
+  updateExpenseRecord: (id: string, data: any) => request<any>(`/api/portal/budget/expenses/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteExpenseRecord: (id: string) => request<any>(`/api/portal/budget/expenses/${id}`, { method: 'DELETE' }),
+
+  getContributionSettings: () => request<any>('/api/portal/budget/contributions/settings'),
+  updateContributionSettings: (data: any) => request<any>('/api/portal/budget/contributions/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  getMemberContributions: (params?: { year?: number; month?: number; memberId?: string; status?: string }) => {
+    const query = new URLSearchParams(params as any).toString();
+    return request<any[]>(`/api/portal/budget/contributions${query ? `?${query}` : ''}`);
+  },
+  processContributionPayment: (data: any) => request<any>('/api/portal/budget/contributions/pay', { method: 'POST', body: JSON.stringify(data) }),
+
+  getBudgetAllocations: (year?: number) => {
+    const query = year ? `?year=${year}` : '';
+    return request<any[]>(`/api/portal/budget/allocations${query}`);
+  },
+  saveBudgetAllocation: (data: any) => request<any>('/api/portal/budget/allocations', { method: 'POST', body: JSON.stringify(data) }),
+  deleteBudgetAllocation: (id: string) => request<any>(`/api/portal/budget/allocations/${id}`, { method: 'DELETE' }),
+
+  // --- Executive Roles & Directives API ---
+  getPresidentialDirectives: () => request<any[]>('/api/portal/executive/directives'),
+  createPresidentialDirective: (data: any) => request<any>('/api/portal/executive/directives', { method: 'POST', body: JSON.stringify(data) }),
+  updatePresidentialDirective: (id: string, data: any) => request<any>(`/api/portal/executive/directives/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePresidentialDirective: (id: string) => request<any>(`/api/portal/executive/directives/${id}`, { method: 'DELETE' }),
+
+  getOfficialCirculars: () => request<any[]>('/api/portal/executive/circulars'),
+  createOfficialCircular: (data: any) => request<any>('/api/portal/executive/circulars', { method: 'POST', body: JSON.stringify(data) }),
+  updateOfficialCircular: (id: string, data: any) => request<any>(`/api/portal/executive/circulars/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteOfficialCircular: (id: string) => request<any>(`/api/portal/executive/circulars/${id}`, { method: 'DELETE' })
 };

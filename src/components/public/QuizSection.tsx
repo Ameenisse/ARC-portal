@@ -590,14 +590,17 @@ export const QuizSection: React.FC = () => {
               </div>
               <h4 className="text-xl font-bold text-white font-heading">ޖަވާބު ކާމިޔާބުކަމާއެކު ފޮނުވިއްޖެ!</h4>
               <p className="text-orange-200 text-sm max-w-md mx-auto">
-                {submitSuccess.message}
+                {submitSuccess.message || 'ޖަވާބު ރައްކާކުރެވިއްޖެ! ތިޔަ ފަރާތުގެ ކިއު ނަންބަރު ހުރިހާ ސުވާލަކަށްވެސް އެއްގޮތަކަށް ދެމިއޮންނާނެއެވެ.'}
               </p>
-              <div className="pt-2">
-                <span className="text-xs uppercase tracking-wider text-orange-400 font-semibold block">
-                  އާންމުކޮށް ފެންނާނެ ކިއު ނަންބަރު:
+              <div className="pt-2 bg-slate-950/60 border border-orange-500/30 rounded-2xl p-4 max-w-xs mx-auto">
+                <span className="text-xs uppercase tracking-wider text-orange-400 font-bold block">
+                  ދާއިމީ ކިއު ނަންބަރު (Permanent Que No):
                 </span>
-                <span className="font-mono text-3xl font-bold text-white tracking-widest block mt-1">
-                  {submitSuccess.participantNumber}
+                <span className="font-mono text-3xl font-extrabold text-amber-300 tracking-widest block mt-1 drop-shadow-md">
+                  {submitSuccess.participantNumber || submitSuccess.queNumber}
+                </span>
+                <span className="text-[11px] text-slate-400 block mt-1">
+                  ކޮންމެ ސުވާލަކަށް ޖަވާބު ދެއްވިނަމަވެސް ތިޔަ ފަރާތުގެ ކިއު ނަންބަރަކީ މިއީއެވެ.
                 </span>
               </div>
               <div className="pt-2 flex justify-center">

@@ -1202,7 +1202,7 @@ export const EventsMeetingsMgmtPage: React.FC = () => {
                     const excused = att.filter(a => a.status === 'excused');
                     const totalRecorded = att.length;
                     const attRate = totalRecorded > 0 ? Math.round((present.length / totalRecorded) * 100) : 0;
-                    const photoCount = evt.photoGalleryUrl ? evt.photoGalleryUrl.split('\n').filter(Boolean).length : 0;
+                    const photoCount = Array.isArray(evt.photoGallery) ? evt.photoGallery.length : ((evt as any).photoGalleryUrl ? (evt as any).photoGalleryUrl.split('\n').filter(Boolean).length : 0);
 
                     return (
                       <div key={evt.id} className="p-5 bg-slate-950/80 border border-slate-800 rounded-xl space-y-4">
