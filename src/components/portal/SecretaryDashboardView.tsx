@@ -4,58 +4,125 @@ import { api } from '../../services/api';
 import { useToast } from '../common/Toast';
 import {
   FileText,
+  Mail,
   Calendar,
   Users,
-  Mail,
-  CheckCircle2,
-  Clock,
-  ArrowRight,
   Plus,
+  ArrowRight,
+  RefreshCw,
+  Trash2,
+  CheckCircle2,
   BookOpen,
   Send,
-  AlertCircle,
-  Inbox,
-  Award
+  Building2,
+  Clock,
+  ExternalLink
 } from 'lucide-react';
-import { MeetingItem, InboxMessage } from '../../types';
+import { User, OfficialCircular, MeetingItem, InboxMessage, ClubMember } from '../../types';
+import { formatDate } from '../../utils/formatters';
 
 interface SecretaryDashboardViewProps {
-  user: any;
+  user: User;
   onRefreshUser?: () => void;
 }
 
 export const SecretaryDashboardView: React.FC<SecretaryDashboardViewProps> = ({ user }) => {
   const { lang } = usePortalLanguage();
+  const isDh = lang === 'dhivehi';
   const { showToast } = useToast();
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [circulars, setCirculars] = useState<OfficialCircular[]>([]);
   const [meetings, setMeetings] = useState<MeetingItem[]>([]);
   const [messages, setMessages] = useState<InboxMessage[]>([]);
-  const [memberCount, setMemberCount] = useState<number>(0);
+  const [members, setMembers] = useState<ClubMember[]>([]);
+
+  // Circular Modal State
+  const [showCircularModal, setShowCircularModal] = useState(false);
+  const [circularForm, setCircularForm] = useState({
+    title: '',
+    refNumber: '',
+    targetAudience: 'all_members' as 'all_members' | 'exco' | 'public' | 'committee',
+    signedBy: user.fullName || user.username || 'Secretary General',
+    summary: '',
+    content: ''
+  });
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const [circData, meetData, msgData, memData] = await Promise.all([
+        api.getOfficialCirculars().catch(() => []),
+        api.getMeetingItems().catch(() => []),
+        api.getMessages().catch(() => ({ inbox: [] })),
+        api.getMembers().catch(() => [])
+      ]);
+      setCirculars(circData || []);
+      setMeetings(meetData || []);
+      setMessages((msgData as any)?.inbox || (msgData as any)?.messages || []);
+      setMembers(memData || []);
+    } catch (err: any) {
+      showToast('error', 'Failed to load secretarial data: ' + err.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        const [meetingList, msgRes, dashStats] = await Promise.all([
-          api.getMeetingItems().catch(() => []),
-          api.getMessages().catch(() => ({ inbox: [] })),
-          api.getDashboardStats().catch(() => null)
-        ]);
-        setMeetings(meetingList || []);
-        setMessages((msgRes as any)?.inbox || (msgRes as any)?.messages || []);
-        setMemberCount(dashStats?.membersCount ?? 0);
-      } catch (err: any) {
-        showToast('error', 'Failed to load secretarial data: ' + err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchData();
   }, []);
 
-  const unreadMessages = messages.filter(m => m.status === 'pending' || m.status === 'in_progress');
-  const scheduledMeetings = meetings.filter(m => m.status === 'scheduled');
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchData();
+  };
+
+  const handleCreateCircular = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!circularForm.title.trim()) {
+      showToast('error', 'Please enter a circular title.');
+      return;
+    }
+
+    try {
+      const newCirc = await api.createOfficialCircular({
+        title: circularForm.title.trim(),
+        refNumber: circularForm.refNumber.trim() || undefined,
+        targetAudience: circularForm.targetAudience,
+        signedBy: circularForm.signedBy.trim(),
+        summary: circularForm.summary.trim(),
+        status: 'published'
+      });
+      setCirculars(prev => [newCirc, ...prev]);
+      setShowCircularModal(false);
+      setCircularForm({
+        title: '',
+        refNumber: '',
+        targetAudience: 'all_members',
+        signedBy: user.fullName || user.username || 'Secretary General',
+        summary: '',
+        content: ''
+      });
+      showToast('success', 'Official circular published successfully.');
+    } catch (err: any) {
+      showToast('error', 'Failed to publish circular: ' + err.message);
+    }
+  };
+
+  const handleDeleteCircular = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this official circular?')) return;
+    try {
+      await api.deleteOfficialCircular(id);
+      setCirculars(prev => prev.filter(c => c.id !== id));
+      showToast('success', 'Circular deleted.');
+    } catch (err: any) {
+      showToast('error', 'Failed to delete circular: ' + err.message);
+    }
+  };
+
+  const pendingMessages = messages.filter(m => m.status === 'pending');
 
   return (
     <div className="space-y-6">
@@ -67,35 +134,38 @@ export const SecretaryDashboardView: React.FC<SecretaryDashboardViewProps> = ({ 
               <FileText className="w-3.5 h-3.5" />
               <span>Office of the Secretary General</span>
             </span>
-            <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-              Administration, Minutes & Official Correspondence
+            <span className="text-xs px-2.5 py-0.5 rounded bg-slate-800 text-slate-300 font-medium">
+              Secretariat, Circulars & Official Records
             </span>
           </div>
           <h2 className="text-2xl sm:text-3xl font-extrabold text-white font-heading">
-            {lang === 'english' ? "Secretary General's Secretariat Deck" : 'ސެކްރެޓަރީ ޖެނެރަލްގެ އިދާރީ ކޮމާންޑް ޕެނަލް'}
+            {isDh ? 'ސެކްރެޓަރީ ޖެނެރަލްގެ އިދާރީ ޕެނަލް' : "Secretary General's Secretariat Deck"}
           </h2>
           <p className="text-slate-300 text-xs sm:text-sm leading-relaxed">
-            {lang === 'english'
-              ? 'Draft meeting agendas, record official minutes, publish executive resolutions, manage formal correspondence, and maintain member registry records.'
-              : 'ބައްދަލުވުންތަކުގެ އެޖެންޑާއާއި ޔައުމިއްޔާ ލިޔެ ބެލެހެއްޓުމާއި، ކްލަބްގެ ސިޓީ މުޢާމަލާތްތަކާއި މެންބަރުންގެ ރަޖިސްޓްރީ ބެލެހެއްޓުމުގެ މައި މަރުކަޒު.'}
+            {isDh
+              ? 'ކްލަބުގެ ރަސްމީ އެންގުންތަކާއި (Circulars)، ބައްދަލުވުންތަކުގެ ޔައުމިއްޔާތައް ލިޔެ ބެލެހެއްޓުމާއި، އަދި އިދާރީ މުޢާމަލާތްތައް ހިންގުން.'
+              : 'Administer official club notices, publish circulars, record meeting agendas and minutes, and process incoming official correspondence.'}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <a
-            href="/portal/events-meetings"
-            className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-indigo-500/20 transition"
+        <div className="flex items-center gap-3 relative z-10">
+          <button
+            type="button"
+            onClick={() => setShowCircularModal(true)}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-indigo-500/20 transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>{lang === 'english' ? 'New Meeting & Minutes' : 'އައު ބައްދަލުވުން / ޔައުމިއްޔާ'}</span>
-          </a>
-          <a
-            href="/portal/messages"
-            className="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-2 transition"
+            <span>Publish Circular</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 hover:text-white font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
           >
-            <Inbox className="w-4 h-4 text-indigo-400" />
-            <span>{lang === 'english' ? 'Inbox & Mail' : 'އިންބޮކްސް'}</span>
-          </a>
+            <RefreshCw className={`w-4 h-4 text-indigo-400 ${refreshing ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
         </div>
       </div>
 
@@ -103,191 +173,274 @@ export const SecretaryDashboardView: React.FC<SecretaryDashboardViewProps> = ({ 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>{lang === 'english' ? 'Meeting Minutes' : 'ޖުމްލަ ޔައުމިއްޔާތައް'}</span>
+            <span>Official Circulars</span>
             <FileText className="w-4 h-4 text-indigo-400" />
+          </div>
+          <div className="text-2xl font-extrabold text-white font-mono">
+            {circulars.length}
+          </div>
+          <span className="text-[11px] text-indigo-400 font-medium">Published Club Notices</span>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2">
+          <div className="flex items-center justify-between text-slate-400 text-xs">
+            <span>Recorded Meetings</span>
+            <Calendar className="w-4 h-4 text-amber-400" />
           </div>
           <div className="text-2xl font-extrabold text-white font-mono">
             {meetings.length}
           </div>
-          <span className="text-[11px] text-indigo-400 font-medium">
-            {scheduledMeetings.length} {lang === 'english' ? 'Upcoming Sessions' : 'ކުރިއަށް އޮތް ބައްދަލުވުން'}
-          </span>
+          <span className="text-[11px] text-slate-400">Minutes & Attendance Logged</span>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>{lang === 'english' ? 'Unread Inquiries' : 'ނުކިޔާ މެސެޖުތައް'}</span>
-            <Mail className="w-4 h-4 text-rose-400" />
+            <span>Inquiries & Letters</span>
+            <Mail className="w-4 h-4 text-sky-400" />
           </div>
-          <div className="text-2xl font-extrabold text-white font-mono">
-            {unreadMessages.length}
+          <div className="text-2xl font-extrabold text-sky-400 font-mono">
+            {pendingMessages.length}
           </div>
-          <span className="text-[11px] text-slate-400 font-medium">
-            {messages.length} {lang === 'english' ? 'Total Correspondence' : 'ޖުމްލަ ލިބުނު މެސެޖް'}
-          </span>
+          <span className="text-[11px] text-sky-300 font-medium">Pending Visitor / Member Inquiries</span>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>{lang === 'english' ? 'Official Members Registry' : 'މެންބަރުންގެ ދަފްތަރު'}</span>
-            <Users className="w-4 h-4 text-blue-400" />
+            <span>Club Members</span>
+            <Users className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-2xl font-extrabold text-white font-mono">
-            {memberCount}
+            {members.filter(m => m.status === 'active').length}
           </div>
-          <span className="text-[11px] text-blue-400 font-medium">
-            {lang === 'english' ? 'Active Records' : 'ރަޖިސްޓްރީ ޞައްޙަ މެންބަރުން'}
-          </span>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2">
-          <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>{lang === 'english' ? 'Administrative Status' : 'އިދާރީ ހާލަތު'}</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="text-2xl font-extrabold text-white font-mono">
-            100%
-          </div>
-          <span className="text-[11px] text-emerald-400 font-medium">
-            {lang === 'english' ? 'Records & Archives Synced' : 'ރެކޯޑުތައް ފުރިހަމަކުރެވިފައި'}
-          </span>
+          <span className="text-[11px] text-slate-400">In Active Good Standing</span>
         </div>
       </div>
 
-      {/* Secretarial Tools & Actions */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-white font-heading flex items-center gap-2">
+      {/* Official Circulars Management Console */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-5 shadow-lg">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+          <div className="space-y-1">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2 font-heading">
               <FileText className="w-5 h-5 text-indigo-400" />
-              <span>{lang === 'english' ? 'Administrative Operations' : 'އިދާރީ މަސައްކަތްތަކާއި ލިޔެކިޔުން'}</span>
+              <span>Official Circulars & Executive Notices (ރަސްމީ އެންގުންތައް)</span>
             </h3>
+            <p className="text-xs text-slate-400">
+              Formally issued circulars to all club members, executive committee, or public bulletins.
+            </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <a
-              href="/portal/events-meetings"
-              className="p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-indigo-500/40 transition group space-y-2"
-            >
-              <div className="flex items-center justify-between">
-                <span className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
-                  <Calendar className="w-5 h-5" />
-                </span>
-                <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition transform group-hover:translate-x-1" />
-              </div>
-              <h4 className="font-bold text-white text-sm">
-                {lang === 'english' ? 'Meeting Minutes & Resolutions' : 'ބައްދަލުވުންތަކާއި ޔައުމިއްޔާ'}
-              </h4>
-              <p className="text-xs text-slate-400">
-                {lang === 'english'
-                  ? 'Record attendee list, formal minutes, agenda items, and voting outcomes.'
-                  : 'ބައްދަލުވުމުގެ އެޖެންޑާ، ޙާޟިރީ، އަދި ނިންމުންތައް ލިޔެ ރައްކާކުރުން.'}
-              </p>
-            </a>
-
-            <a
-              href="/portal/messages"
-              className="p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-rose-500/40 transition group space-y-2"
-            >
-              <div className="flex items-center justify-between">
-                <span className="p-2 rounded-lg bg-rose-500/10 text-rose-400">
-                  <Mail className="w-5 h-5" />
-                </span>
-                <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-rose-400 transition transform group-hover:translate-x-1" />
-              </div>
-              <h4 className="font-bold text-white text-sm">
-                {lang === 'english' ? 'Official Inquiries & Mailbox' : 'އިންބޮކްސް މެސެޖުތައް ބެލެހެއްޓުން'}
-              </h4>
-              <p className="text-xs text-slate-400">
-                {lang === 'english'
-                  ? 'Review incoming messages from public portal and track response status.'
-                  : 'ޕޯޓަލް މެދުވެރިކޮށް ލިބޭ ސިޓީ މުޢާމަލާތްތަކަށް ޖަވާބުދާރީވުން.'}
-              </p>
-            </a>
-
-            <a
-              href="/portal/members"
-              className="p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-blue-500/40 transition group space-y-2"
-            >
-              <div className="flex items-center justify-between">
-                <span className="p-2 rounded-lg bg-blue-500/10 text-blue-400">
-                  <Users className="w-5 h-5" />
-                </span>
-                <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-blue-400 transition transform group-hover:translate-x-1" />
-              </div>
-              <h4 className="font-bold text-white text-sm">
-                {lang === 'english' ? 'Members Registry Records' : 'މެންބަރުންގެ މަޢުލޫމާތު އަދާހަމަކުރުން'}
-              </h4>
-              <p className="text-xs text-slate-400">
-                {lang === 'english'
-                  ? 'Add new members, issue membership IDs, and link user profiles.'
-                  : 'އައު މެންބަރުން އިތުރުކުރުމާއި، މެންބަރ ނަންބަރާއި ޕްރޮފައިލް ގުޅުވުން.'}
-              </p>
-            </a>
-
-            <a
-              href="/portal/settings"
-              className="p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-emerald-500/40 transition group space-y-2"
-            >
-              <div className="flex items-center justify-between">
-                <span className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
-                  <BookOpen className="w-5 h-5" />
-                </span>
-                <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-emerald-400 transition transform group-hover:translate-x-1" />
-              </div>
-              <h4 className="font-bold text-white text-sm">
-                {lang === 'english' ? 'Club Bylaws & Regulations' : 'ކްލަބް ޤަވާޢިދު ބެލެހެއްޓުން'}
-              </h4>
-              <p className="text-xs text-slate-400">
-                {lang === 'english'
-                  ? 'View and update articles of ARC official constitution and amendments.'
-                  : 'ޤަވާޢިދުގެ ބާބުތަކާއި މާއްދާތައް ބަލަހައްޓައި އަދާހަމަކުރުން.'}
-              </p>
-            </a>
-          </div>
-        </div>
-
-        {/* Recent Inquiries Panel */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 flex flex-col justify-between">
-          <div className="space-y-4">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Mail className="w-4 h-4 text-indigo-400" />
-              <span>{lang === 'english' ? 'Latest Inquiries' : 'އެންމެ ފަހުގެ މެސެޖުތައް'}</span>
-            </h3>
-
-            {messages.length === 0 ? (
-              <div className="py-8 text-center text-slate-500 text-xs space-y-1">
-                <AlertCircle className="w-6 h-6 text-slate-600 mx-auto" />
-                <p>{lang === 'english' ? 'No messages received yet' : 'އެއްވެސް މެސެޖެއް ނެތް'}</p>
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {messages.slice(0, 3).map(msg => (
-                  <div key={msg.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-1">
-                    <div className="flex items-center justify-between font-bold text-slate-200">
-                      <span>{msg.senderName}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${msg.status === 'pending' ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-400'}`}>
-                        {msg.status}
-                      </span>
-                    </div>
-                    <div className="text-slate-400 text-[11px] line-clamp-1">
-                      {msg.subject || (msg as any).message || (msg as any).body || ''}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <a
-            href="/portal/messages"
-            className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs text-center flex items-center justify-center gap-2 transition"
+          <button
+            type="button"
+            onClick={() => setShowCircularModal(true)}
+            className="px-3.5 py-2 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
           >
-            <span>{lang === 'english' ? 'Open Inbox' : 'އިންބޮކްސް ހުޅުވާލުމަށް'}</span>
-            <ArrowRight className="w-4 h-4" />
-          </a>
+            <Plus className="w-3.5 h-3.5" />
+            <span>New Circular</span>
+          </button>
         </div>
+
+        {circulars.length === 0 ? (
+          <div className="py-12 text-center text-slate-500 space-y-3">
+            <FileText className="w-10 h-10 mx-auto opacity-30 text-indigo-400" />
+            <p className="text-sm font-medium">No official circulars published yet.</p>
+            <button
+              type="button"
+              onClick={() => setShowCircularModal(true)}
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-400 text-xs font-bold transition cursor-pointer"
+            >
+              + Create First Official Circular
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {circulars.map(circ => (
+              <div
+                key={circ.id}
+                className="p-4 sm:p-5 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+              >
+                <div className="space-y-2 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-mono font-bold text-indigo-400 px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20">
+                      {circ.refNumber || 'ARC/CIR/2026/01'}
+                    </span>
+                    <span className="text-sm font-bold text-white font-heading">{circ.title}</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 uppercase">
+                      {circ.status}
+                    </span>
+                  </div>
+
+                  {circ.summary && (
+                    <p className="text-xs text-slate-300 leading-relaxed max-w-3xl">{circ.summary}</p>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
+                    <span>Audience: <strong className="text-slate-200 capitalize">{circ.targetAudience?.replace(/_/g, ' ') || 'All Members'}</strong></span>
+                    <span>•</span>
+                    <span>Date: {formatDate(circ.publishedDate || circ.createdAt)}</span>
+                    <span>•</span>
+                    <span>Signatory: <strong className="text-slate-200">{circ.signedBy || 'Secretary General'}</strong></span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteCircular(circ.id)}
+                    className="p-2 rounded-xl bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-300 transition cursor-pointer"
+                    title="Delete Circular"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Secretarial Tools Matrix */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <a
+          href="/portal/events-meetings"
+          className="bg-slate-900 border border-slate-800 hover:border-indigo-500/40 rounded-3xl p-6 space-y-3 transition group"
+        >
+          <div className="p-3 rounded-2xl bg-indigo-500/10 text-indigo-400 w-fit group-hover:scale-110 transition">
+            <Calendar className="w-6 h-6" />
+          </div>
+          <h3 className="font-bold text-white text-base">Meeting Agendas & Minutes</h3>
+          <p className="text-slate-400 text-xs leading-relaxed">
+            Record minutes of executive meetings, formulate agendas, and conduct member voting rolls.
+          </p>
+          <span className="text-xs font-bold text-indigo-400 block pt-1">Open Meetings & Minutes →</span>
+        </a>
+
+        <a
+          href="/portal/messages"
+          className="bg-slate-900 border border-slate-800 hover:border-sky-500/40 rounded-3xl p-6 space-y-3 transition group"
+        >
+          <div className="p-3 rounded-2xl bg-sky-500/10 text-sky-400 w-fit group-hover:scale-110 transition">
+            <Mail className="w-6 h-6" />
+          </div>
+          <h3 className="font-bold text-white text-base">Inquiries & Correspondence</h3>
+          <p className="text-slate-400 text-xs leading-relaxed">
+            Process incoming public letters, answer inquiries, and record action responses ({pendingMessages.length} pending).
+          </p>
+          <span className="text-xs font-bold text-sky-400 block pt-1">Open Messages Inbox →</span>
+        </a>
+
+        <a
+          href="/portal/members"
+          className="bg-slate-900 border border-slate-800 hover:border-emerald-500/40 rounded-3xl p-6 space-y-3 transition group"
+        >
+          <div className="p-3 rounded-2xl bg-emerald-500/10 text-emerald-400 w-fit group-hover:scale-110 transition">
+            <Users className="w-6 h-6" />
+          </div>
+          <h3 className="font-bold text-white text-base">Members Register & Census</h3>
+          <p className="text-slate-400 text-xs leading-relaxed">
+            Maintain official membership register, ID numbers, joined dates, and member census data.
+          </p>
+          <span className="text-xs font-bold text-emerald-400 block pt-1">Open Members Register →</span>
+        </a>
+      </div>
+
+      {/* New Circular Modal */}
+      {showCircularModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-lg w-full space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-lg font-bold text-white font-heading">Publish Official Circular</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCircularModal(false)}
+                className="text-slate-400 hover:text-white text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateCircular} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">Circular Title *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Notice of 2026 Annual General Meeting & Constitutional Amendments"
+                  value={circularForm.title}
+                  onChange={e => setCircularForm({ ...circularForm, title: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Reference Number</label>
+                  <input
+                    type="text"
+                    placeholder={`ARC/CIR/${new Date().getFullYear()}/${String(circulars.length + 1).padStart(2, '0')}`}
+                    value={circularForm.refNumber}
+                    onChange={e => setCircularForm({ ...circularForm, refNumber: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Target Audience</label>
+                  <select
+                    value={circularForm.targetAudience}
+                    onChange={e => setCircularForm({ ...circularForm, targetAudience: e.target.value as any })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="all_members">All Club Members</option>
+                    <option value="exco">Executive Committee (EXCO)</option>
+                    <option value="public">General Public</option>
+                    <option value="committee">Sub-Committees</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">Signatory Name / Designation</label>
+                <input
+                  type="text"
+                  value={circularForm.signedBy}
+                  onChange={e => setCircularForm({ ...circularForm, signedBy: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">Circular Text & Summary</label>
+                <textarea
+                  rows={4}
+                  placeholder="Official statement, directives, agenda details, or instructions..."
+                  value={circularForm.summary}
+                  onChange={e => setCircularForm({ ...circularForm, summary: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCircularModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold text-xs shadow-lg shadow-indigo-500/20 transition cursor-pointer"
+                >
+                  Publish Circular
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

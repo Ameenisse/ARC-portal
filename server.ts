@@ -4,6 +4,8 @@ import path from 'path';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { db, verifyPin, hashPin, generateSalt } from './src/server/db';
+import { bucket } from './src/server/firebase';
+import { realtimeBroadcaster } from './src/server/realtime';
 import {
   User,
   PublicSiteData,
@@ -19,10 +21,19 @@ import {
 const app = express();
 const PORT = 3000;
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Active In-Memory Sessions cache with Supabase PostgreSQL persistence
+// Ensure fresh data on every API request - prevent any client or intermediary caching
+app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  next();
+});
+
+// Active In-Memory Sessions cache with Cloud Firestore persistence
 interface Session {
   token: string;
   userId: string;
@@ -72,7 +83,7 @@ async function runQuizBackgroundProcess() {
 
           const isEligible = Boolean(isCorrect && !isDisqualified);
           if (sub.isCorrect !== isCorrect || sub.isEligible !== isEligible) {
-            // Update submission evaluation in Supabase
+            // Update submission evaluation in Firestore
             await db.createQuizSubmission({
               ...sub,
               isCorrect,
@@ -109,6 +120,7 @@ async function runQuizBackgroundProcess() {
               contactNumber: selectedSub.contactNumber,
               maskedIdNumber: selectedSub.maskedIdNumber,
               maskedContactNumber: selectedSub.maskedContactNumber,
+              prizeTitle: q.prizeTitle || 'Quiz Prize',
               prizeId: q.prizeId || '',
               sponsorId: q.sponsorId || '',
               eligibleCount: eligibleSubmissions.length,
@@ -217,8 +229,29 @@ function requirePermission(moduleKey: ModuleKey, actionKey: keyof Omit<ModulePer
       return res.status(403).json({ error: 'System Audit Logs are restricted to Admin users only.' });
     }
 
-    const perm = user.permissions?.find(p => p.moduleKey === moduleKey);
-    if (!perm || !perm[actionKey]) {
+    const aliases: Record<string, string[]> = {
+      contacts: ['contacts', 'contact', 'content'],
+      contact: ['contacts', 'contact', 'content'],
+      slideshow: ['slideshow', 'content'],
+      vision_mission: ['vision_mission', 'content'],
+      social_media: ['social_media', 'content'],
+      exco_team: ['exco_team', 'content'],
+      content: ['content', 'slideshow', 'vision_mission', 'contacts', 'contact', 'social_media', 'exco_team'],
+      events: ['events', 'events_meetings'],
+      events_meetings: ['events_meetings', 'events'],
+      quiz: ['quiz', 'ramazan_quiz'],
+      ramazan_quiz: ['ramazan_quiz', 'quiz', 'quiz_participants', 'quiz_winners'],
+      users: ['users', 'roles_permissions', 'roles'],
+      roles_permissions: ['roles_permissions', 'roles', 'users']
+    };
+
+    const keysToCheck = aliases[moduleKey] || [moduleKey];
+    const hasPerm = keysToCheck.some(k => {
+      const perm = user.permissions?.find(p => p.moduleKey === k);
+      return perm && perm[actionKey];
+    });
+
+    if (!hasPerm) {
       return res.status(403).json({ error: `Permission denied. Required: ${moduleKey} (${actionKey}).` });
     }
 
@@ -230,36 +263,27 @@ function requirePermission(moduleKey: ModuleKey, actionKey: keyof Omit<ModulePer
 // 0. HEALTH CHECK & DIAGNOSTICS ENDPOINTS
 // ==========================================
 
-app.get('/api/admin/schema-sql', (req: Request, res: Response) => {
-  try {
-    const fs = require('fs');
-    const filePath = path.join(process.cwd(), 'supabase', 'migrations', 'arc_portal_persistence_repair.sql');
-    if (fs.existsSync(filePath)) {
-      const sqlContent = fs.readFileSync(filePath, 'utf8');
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      return res.send(sqlContent);
-    }
-    return res.status(404).send('-- Migration file not found');
-  } catch (err: any) {
-    return res.status(500).send('-- Error reading migration file: ' + err.message);
-  }
+app.get('/api/health', (req: Request, res: Response) => {
+  return res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 app.get('/api/health/database', async (req: Request, res: Response) => {
   const health = await db.checkDatabaseHealth();
-  if (health.schemaReady) {
+  if (health.schemaReady && health.connected) {
     return res.status(200).json({
-      database: 'firestore',
-      connected: health.connected,
-      schemaReady: true
+      backend: 'express-firebase-admin',
+      database: 'cloud-firestore',
+      storage: 'firebase-storage',
+      connected: true,
+      ready: true
     });
   } else {
     return res.status(503).json({
-      database: 'firestore',
+      backend: 'express-firebase-admin',
+      database: 'cloud-firestore',
       connected: health.connected,
-      schemaReady: false,
-      missingTables: (health as any).missingTables || [],
-      error: health.error || 'Database schema is not initialized in Firestore.'
+      ready: false,
+      error: health.error || 'Cloud Firestore database connection is not ready.'
     });
   }
 });
@@ -283,7 +307,9 @@ app.get('/api/health/db-test', async (req: Request, res: Response) => {
 
     return res.json({
       ok: true,
-      message: 'Supabase database read and write operations verified successfully!',
+      backend: 'express-firebase-admin',
+      database: 'cloud-firestore',
+      message: 'Cloud Firestore database read and write operations verified successfully!',
       testRecord: found
     });
   } catch (err: any) {
@@ -292,6 +318,61 @@ app.get('/api/health/db-test', async (req: Request, res: Response) => {
       error: `Diagnostic Persistence Error: ${err.message}`
     });
   }
+});
+
+app.get('/api/system/db-status', async (req: Request, res: Response) => {
+  try {
+    const status = await db.getDatabaseStatus();
+    return res.json({ ok: true, ...status });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/system/sync', async (req: Request, res: Response) => {
+  try {
+    const status = await db.syncDatabase();
+    realtimeBroadcaster.broadcastSyncAll('system_sync_api');
+    return res.json({ ok: true, message: 'Database tables synchronized and persisted successfully.', ...status });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ==========================================
+// 0.5. REALTIME DATABASE SYNC STREAM (SSE)
+// ==========================================
+
+// Real-time Server-Sent Events (SSE) stream for live database table updates
+app.get(['/api/realtime/stream', '/api/realtime/events'], (req: Request, res: Response) => {
+  const userId = (req.query.userId as string) || undefined;
+  realtimeBroadcaster.addClient(req, res, userId);
+});
+
+// Real-time synchronization status & metrics
+app.get('/api/realtime/status', (req: Request, res: Response) => {
+  res.json({
+    ok: true,
+    realtimeEngine: 'server-sent-events',
+    ...realtimeBroadcaster.getStatus()
+  });
+});
+
+// Trigger full tables resync broadcast across all connected clients
+app.post('/api/realtime/sync-all', (req: Request, res: Response) => {
+  const reason = (req.body?.reason as string) || 'client_requested_sync';
+  realtimeBroadcaster.broadcastSyncAll(reason);
+  res.json({ ok: true, message: 'Full database tables sync signal broadcasted to all connected clients.' });
+});
+
+// Broadcast custom table change event (for testing or external webhook updates)
+app.post('/api/realtime/broadcast', (req: Request, res: Response) => {
+  const { table, action = 'update', id, data } = req.body || {};
+  if (!table) {
+    return res.status(400).json({ error: 'Table name is required for broadcast.' });
+  }
+  realtimeBroadcaster.broadcastTableChange(table, action, id, data);
+  res.json({ ok: true, message: `Broadcasted ${action} on table ${table}` });
 });
 
 // ==========================================
@@ -306,25 +387,16 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Incorrect username or PIN.' });
     }
 
-    const cleanUsername = String(username).trim().toLowerCase().replace(/^@/, '');
-    const cleanPin = String(pin).trim();
-
-    // If built-in admin account is used, guarantee admin account exists and unlock if needed
-    if (cleanUsername === 'admin' || cleanUsername === 'usr_admin_001') {
-      await db.ensureAdminUser('2613');
-      if (cleanPin === '2613') {
-        failedLogins.delete('admin');
-        failedLogins.delete(cleanUsername);
-      }
-    }
-
+    const cleanUsername = String(username).trim().toLowerCase();
     const lockInfo = failedLogins.get(cleanUsername);
+
     if (lockInfo && lockInfo.lockedUntil > Date.now()) {
       const remainingSecs = Math.ceil((lockInfo.lockedUntil - Date.now()) / 1000);
       return res.status(429).json({ error: `Account temporarily locked due to failed login attempts. Try again in ${remainingSecs}s.` });
     }
 
-    let user = await db.getUserByUsername(cleanUsername);
+    const user = await db.getUserByUsername(cleanUsername);
+
     if (!user || user.status === 'inactive') {
       return res.status(400).json({ error: 'Incorrect username or PIN.' });
     }
@@ -333,15 +405,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'This user account is currently locked by an administrator.' });
     }
 
-    // Verify PIN via hash/salt or direct match
-    let isValid = false;
-    if (user.pin && user.pin === cleanPin) {
-      isValid = true;
-    } else if (user.pinSalt && user.pinHash && verifyPin(cleanPin, user.pinSalt, user.pinHash)) {
-      isValid = true;
-    } else if (cleanUsername === 'admin' && cleanPin === '2613') {
-      isValid = true;
-    }
+    const isValid = verifyPin(String(pin), user.pinSalt || '', user.pinHash || '');
 
     if (!isValid) {
       const currentFailed = (lockInfo?.count || 0) + 1;
@@ -410,12 +474,70 @@ app.get('/api/auth/me', authenticateSession, (req: Request, res: Response) => {
 });
 
 app.post('/api/auth/change-pin', authenticateSession, async (req: Request, res: Response) => {
-  return res.status(403).json({ error: 'User PIN changes can only be configured by a System Administrator in User Management.' });
+  try {
+    const user = (req as any).user;
+    const isUserAdmin = (user.roleName || user.roleId || '').toLowerCase().includes('admin') || user.roleId === 'role_admin' || user.role === 'admin';
+
+    // Only Admin can change PINs; user panels have PIN changing disabled
+    if (!isUserAdmin) {
+      return res.status(403).json({
+        error: 'Only administrators are authorized to change PIN numbers (ޕިން ބަދަލުކުރެވޭނީ ހަމައެކަނި އެޑްމިނުންނަށެވެ).'
+      });
+    }
+
+    const { currentPin, newPin, confirmPin } = req.body;
+
+    if (!currentPin || !newPin || !confirmPin) {
+      return res.status(400).json({ error: 'All PIN fields are required.' });
+    }
+
+    if (newPin !== confirmPin) {
+      return res.status(400).json({ error: 'New PIN and Confirm PIN do not match.' });
+    }
+
+    if (!/^\d+$/.test(newPin)) {
+      return res.status(400).json({ error: 'PIN must contain numeric digits only.' });
+    }
+
+    if (newPin.length < 4) {
+      return res.status(400).json({ error: 'PIN must be at least 4 digits long.' });
+    }
+
+    const isValidCurrent = verifyPin(String(currentPin), user.pinSalt, user.pinHash);
+    if (!isValidCurrent) {
+      return res.status(400).json({ error: 'Current PIN is incorrect.' });
+    }
+
+    const newSalt = generateSalt();
+    const newHash = hashPin(String(newPin), newSalt);
+    const updatedUser = await db.updateUser(user.id, {
+      pinHash: newHash,
+      pinSalt: newSalt,
+      requirePinChange: false
+    });
+
+    await db.logAudit({
+      userId: user.id,
+      username: user.username,
+      fullName: user.fullName,
+      action: 'ADMIN_CHANGE_OWN_PIN',
+      module: 'auth'
+    });
+
+    return res.json({ message: 'PIN updated successfully.', user: sanitizeUser(updatedUser) });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 app.put('/api/auth/profile', authenticateSession, async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
+    const isUserAdmin = (user.roleName || user.roleId || '').toLowerCase().includes('admin') || user.roleId === 'role_admin';
+    if (!isUserAdmin) {
+      return res.status(403).json({ error: 'Only administrators can modify profile information (ޕްރޯފައިލް ބަދަލުކުރުމުގެ ހުއްދަ އޮންނާނީ ހަމައެކަނި އެޑްމިނުންނަށެވެ).' });
+    }
+
     const { fullName, contactNumber, designation, notes } = req.body;
 
     const updates: any = {};
@@ -476,8 +598,8 @@ app.get('/api/public/site', async (req: Request, res: Response) => {
     const events = await db.getEvents();
 
     const getSetting = (group: string, key: string, defaultVal: any) => {
-      const found = settings.find(s => s.group === group && s.key === key);
-      return found ? found.value : defaultVal;
+      const found = settings.find(s => (s.group === group || (!s.group && group === 'branding')) && s.key === key);
+      return (found && found.value !== undefined && found.value !== null) ? found.value : defaultVal;
     };
 
     const publicData: PublicSiteData = {
@@ -485,7 +607,7 @@ app.get('/api/public/site', async (req: Request, res: Response) => {
         clubName: getSetting('branding', 'clubName', 'ARC Club'),
         clubAbbreviation: getSetting('branding', 'clubAbbreviation', 'ARC'),
         logo: getSetting('branding', 'logo', ''),
-        useLogo: getSetting('branding', 'useLogo', false),
+        useLogo: Boolean(getSetting('branding', 'useLogo', false)),
         welcomeHeading: getSetting('branding', 'welcomeHeading', 'Welcome to ARC Club'),
         welcomeMessage: getSetting('branding', 'welcomeMessage', 'Connecting hearts and encouraging excellence.'),
         aboutText: getSetting('branding', 'aboutText', 'ARC Club is a community organization.'),
@@ -494,11 +616,11 @@ app.get('/api/public/site', async (req: Request, res: Response) => {
         footerDescription: getSetting('branding', 'footerDescription', 'Official community club website and Ramazan Quiz platform.'),
         copyrightText: getSetting('branding', 'copyrightText', `© ${new Date().getFullYear()} ARC Club. All Rights Reserved.`),
         announcement: getSetting('branding', 'announcement', ''),
-        announcementActive: getSetting('branding', 'announcementActive', false)
+        announcementActive: Boolean(getSetting('branding', 'announcementActive', false))
       },
       sectionOrder: getSetting('public_site', 'sectionOrder', ['slideshow', 'welcome', 'vision_mission', 'ramazan_quiz', 'exco_team', 'reach_us', 'social_links']),
       sectionVisibility: getSetting('public_site', 'sectionVisibility', { slideshow: true, welcome: true, vision_mission: true, ramazan_quiz: true, exco_team: true, reach_us: true, social_links: true }),
-      slideshow: slideshow.filter(s => s.status === 'active').sort((a, b) => a.displayOrder - b.displayOrder),
+      slideshow: slideshow.filter(s => s.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
       slideshowSettings: {
         autoplay: true,
         slideDuration: 5000,
@@ -516,10 +638,10 @@ app.get('/api/public/site', async (req: Request, res: Response) => {
         missionContent: getSetting('branding', 'missionContent', 'Empowering individuals through recreational, educational, and spiritual opportunities.'),
         bgImage: getSetting('branding', 'vmBgImage', '')
       },
-      contacts: contacts.filter(c => c.status === 'active').sort((a, b) => a.displayOrder - b.displayOrder),
-      socialLinks: socialLinks.filter(s => s.status === 'active').sort((a, b) => a.displayOrder - b.displayOrder),
-      excoMembers: excoMembers.filter(e => e.status === 'active').sort((a, b) => a.displayOrder - b.displayOrder),
-      events: events.filter(e => e.status === 'active')
+      contacts: contacts.filter(c => c.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
+      socialLinks: socialLinks.filter(s => s.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
+      excoMembers: excoMembers.filter(e => e.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
+      events: events.filter(e => e.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
     };
 
     return res.json(publicData);
@@ -552,8 +674,17 @@ app.get('/api/public/quiz/current', async (req: Request, res: Response) => {
     const questions = await db.getQuizQuestions();
     const winners = await db.getQuizWinners();
     const settings = await db.getSettings();
+    const sponsors = await db.getSponsors();
+    const submissions = await db.getQuizSubmissions();
     const offsetMinutesSetting = Number(settings.find(s => s.key === 'timeOffsetMinutes')?.value || 0);
+    const timezoneSetting = settings.find(s => s.key === 'timezone' || s.key === 'hostingTimezone')?.value || 'Indian/Maldives (GMT+05:00)';
+    const headerTitle = settings.find(s => s.key === 'quizHeaderTitle')?.value || 'ރަމަޟާން 1447 ދުވަހުގެ ކުއިޒް';
+    const headerDesc = settings.find(s => s.key === 'quizHeaderDescription')?.value || 'މިއަދުގެ ސުވާލަށް ރަނގަޅު ޖަވާބު ދެއްވައިގެން ގުރާތުގައި ބައިވެރިވެ އަގުހުރި އިނާމު ހޯއްދަވާ!';
+    const defaultQuestionImage = settings.find(s => s.key === 'defaultQuestionImage')?.value || '';
+    const showQuestionImageSetting = settings.find(s => s.key === 'showQuestionImage')?.value !== 'false';
+
     const now = new Date(Date.now() + (offsetMinutesSetting * 60 * 1000));
+    const nowEpoch = now.getTime();
 
     const isWinnerAnnounced = (q: QuizQuestion) => {
       if (q.status === 'winner_announced' || q.status === 'completed') return true;
@@ -562,27 +693,196 @@ app.get('/api/public/quiz/current', async (req: Request, res: Response) => {
     };
 
     const nonCancelled = questions.filter(q => q.status !== 'cancelled');
-    const publishedQuestions = nonCancelled.filter(q => q.publishAt && new Date(q.publishAt).getTime() <= now.getTime());
-    const pendingAnnouncementQuestions = publishedQuestions.filter(q => !isWinnerAnnounced(q));
+    const publishedQuestions = nonCancelled
+      .filter(q => q.publishAt && new Date(q.publishAt).getTime() <= nowEpoch)
+      .sort((a, b) => new Date(b.publishAt).getTime() - new Date(a.publishAt).getTime());
+
+    const upcomingQuestions = nonCancelled
+      .filter(q => q.publishAt && new Date(q.publishAt).getTime() > nowEpoch)
+      .sort((a, b) => new Date(a.publishAt).getTime() - new Date(b.publishAt).getTime());
 
     let activeQuestion: QuizQuestion | undefined;
+    let nextUpcoming: QuizQuestion | null = null;
+    let isUpcomingScheduled = false;
 
-    if (pendingAnnouncementQuestions.length > 0) {
-      activeQuestion = pendingAnnouncementQuestions.sort((a, b) => new Date(a.publishAt).getTime() - new Date(b.publishAt).getTime())[0];
-    } else if (publishedQuestions.length > 0) {
-      activeQuestion = publishedQuestions.sort((a, b) => new Date(b.publishAt).getTime() - new Date(a.publishAt).getTime())[0];
+    if (publishedQuestions.length > 0) {
+      // When a new question's publishing time arrives, it becomes activeQuestion immediately.
+      // All previous questions are hidden from the active question board.
+      activeQuestion = publishedQuestions[0];
+      nextUpcoming = upcomingQuestions[0] || null;
+    } else if (upcomingQuestions.length > 0) {
+      // If no question has reached publishing time yet, show the earliest upcoming scheduled question
+      activeQuestion = upcomingQuestions[0];
+      nextUpcoming = upcomingQuestions[1] || null;
+      isUpcomingScheduled = true;
     }
 
     if (!activeQuestion) {
-      return res.json({ question: null, winner: null });
+      return res.json({
+        quizAvailable: false,
+        question: null,
+        nextQuestion: null,
+        winner: null,
+        serverTimeEpoch: nowEpoch,
+        timezone: timezoneSetting
+      });
     }
 
     const questionWinner = winners.find(w => w.questionId === activeQuestion!.id && w.publicStatus === 'published' && !w.isReplaced) || null;
 
+    // Submission stats for this question
+    const qSubmissions = submissions.filter(s => s.questionId === activeQuestion!.id && !s.isInvalid);
+    const eligibleCount = qSubmissions.filter(s => s.isCorrect && s.isEligible && !s.isDisqualified).length;
+    const correctCount = qSubmissions.filter(s => s.isCorrect).length;
+    const hasZeroParticipants = eligibleCount === 0;
+
+    // Determine state based on exact lifecycle times:
+    // 1. publishAt: visible question + options + answering enabled (before publishAt: scheduled)
+    // 2. closeAt: deadline passed, answering disabled
+    // 3. If zero participants, automatically reveal answer right at deadline (closeAt), with no number rolling or winner announcement
+    // 4. If participants exist:
+    //    - drawStartAt: reveal correct answer & start rolling correct-answered numbers
+    //    - revealAt: stop rolling numbers, pick & announce winner
+    const pubMs = activeQuestion.publishAt ? new Date(activeQuestion.publishAt).getTime() : 0;
+    const closeMs = activeQuestion.closeAt ? new Date(activeQuestion.closeAt).getTime() : 0;
+    const drawMs = hasZeroParticipants ? closeMs : (activeQuestion.drawStartAt ? new Date(activeQuestion.drawStartAt).getTime() : closeMs);
+    const revealMs = hasZeroParticipants ? closeMs : (activeQuestion.revealAt ? new Date(activeQuestion.revealAt).getTime() : (drawMs + (activeQuestion.rollingDurationSeconds || 10) * 1000));
+
+    let state: 'scheduled' | 'open' | 'closed' | 'draw_running' | 'winner_announced' | 'completed' = 'open';
+
+    if (pubMs > 0 && nowEpoch < pubMs) {
+      state = 'scheduled';
+    } else if (closeMs > 0 && nowEpoch < closeMs) {
+      state = 'open';
+    } else if (hasZeroParticipants && closeMs > 0 && nowEpoch >= closeMs) {
+      // For zero participants, deadline passed means answer is immediately revealed, marked completed with no winner
+      state = 'completed';
+    } else if (drawMs > 0 && nowEpoch < drawMs) {
+      state = 'closed';
+    } else if (revealMs > 0 && nowEpoch < revealMs && !questionWinner) {
+      state = 'draw_running';
+    } else {
+      state = 'winner_announced';
+    }
+
+    // Mask correctOptionId and explanation if not yet reached drawStartAt/answer reveal time (or deadline if zero participants)
+    const canRevealAnswer = (closeMs > 0 && nowEpoch >= closeMs && hasZeroParticipants) ||
+      (drawMs > 0 && nowEpoch >= drawMs) ||
+      Boolean(questionWinner) ||
+      ['draw_running', 'winner_announced', 'completed'].includes(state);
+
+    const safeQuestion = {
+      ...activeQuestion,
+      // For zero participants, reveal answer right at deadline
+      drawStartAt: hasZeroParticipants && activeQuestion.closeAt ? activeQuestion.closeAt : activeQuestion.drawStartAt,
+      revealAt: hasZeroParticipants && activeQuestion.closeAt ? activeQuestion.closeAt : activeQuestion.revealAt,
+      correctOptionId: canRevealAnswer ? activeQuestion.correctOptionId : undefined,
+      answerExplanation: canRevealAnswer ? activeQuestion.answerExplanation : undefined
+    };
+
     return res.json({
-      question: activeQuestion,
-      winner: questionWinner
+      quizAvailable: true,
+      question: safeQuestion,
+      nextQuestion: nextUpcoming,
+      state,
+      winner: questionWinner,
+      stats: {
+        totalParticipants: qSubmissions.length,
+        eligibleCount,
+        correctCount
+      },
+      sponsors: sponsors.filter(s => s.status === 'active'),
+      serverTimeEpoch: nowEpoch,
+      timezone: timezoneSetting,
+      quizHeaderTitle: headerTitle,
+      quizHeaderDescription: headerDesc,
+      defaultQuestionImage,
+      showQuestionImage: showQuestionImageSetting
     });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/public/quiz/eligible-numbers/:questionId', async (req: Request, res: Response) => {
+  try {
+    const { questionId } = req.params;
+    const questions = await db.getQuizQuestions();
+    const q = questions.find(item => item.id === questionId);
+    if (!q) {
+      return res.status(404).json({ error: 'Quiz question not found.' });
+    }
+
+    const settings = await db.getSettings();
+    const offsetMinutesSetting = Number(settings.find(s => s.key === 'timeOffsetMinutes')?.value || 0);
+    const now = new Date(Date.now() + (offsetMinutesSetting * 60 * 1000));
+    const nowEpoch = now.getTime();
+
+    const submissions = await db.getQuizSubmissions();
+    const ineligibleSet = new Set(await db.getIneligibleParticipantIds());
+
+    const qSubmissions = submissions.filter(s => s.questionId === questionId && !s.isInvalid);
+
+    // Eligible candidates who submitted the correct answer and are not disqualified
+    const eligibleSubmissions = qSubmissions.filter(s =>
+      s.isCorrect &&
+      !s.isDisqualified &&
+      !ineligibleSet.has((s.normalizedIdNumber || '').toUpperCase())
+    );
+
+    const participantNumbers = eligibleSubmissions.map(s => s.participantNumber);
+    const participantContacts = eligibleSubmissions.map(s => ({
+      participantNumber: s.participantNumber,
+      contactNumber: s.maskedContactNumber || (s.contactNumber ? `${s.contactNumber.substring(0, 3)}****${s.contactNumber.slice(-2)}` : '****'),
+      isEligible: true
+    }));
+
+    return res.json({
+      questionId,
+      totalCount: qSubmissions.length,
+      eligibleCount: eligibleSubmissions.length,
+      participantNumbers,
+      participantContacts,
+      rollingDurationSeconds: q.rollingDurationSeconds || 10
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/public/quiz/results', async (req: Request, res: Response) => {
+  try {
+    const questions = await db.getQuizQuestions();
+    const winners = await db.getQuizWinners();
+    const publishedWinners = winners.filter(w => w.publicStatus === 'published' && !w.isReplaced);
+
+    const results = questions
+      .filter(q => q.status !== 'cancelled')
+      .map(q => {
+        const winner = publishedWinners.find(w => w.questionId === q.id);
+        const correctOpt = (q.options || []).find((o: any) => o.id === q.correctOptionId);
+        return {
+          questionId: q.id,
+          questionNumber: q.questionNumber,
+          title: q.title || `Day ${q.questionNumber}`,
+          questionText: q.questionText,
+          publishAt: q.publishAt,
+          closeAt: q.closeAt,
+          prizeTitle: q.prizeTitle || winner?.prizeTitle,
+          sponsorName: q.sponsorName || winner?.sponsorName,
+          correctOptionText: correctOpt?.optionText || '',
+          winner: winner ? {
+            id: winner.id,
+            participantNumber: winner.participantNumber,
+            maskedContactNumber: winner.maskedContactNumber,
+            prizeTitle: winner.prizeTitle,
+            selectedAt: winner.selectedAt
+          } : null
+        };
+      })
+      .sort((a, b) => b.questionNumber - a.questionNumber);
+
+    return res.json({ results });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -590,143 +890,91 @@ app.get('/api/public/quiz/current', async (req: Request, res: Response) => {
 
 app.post('/api/public/quiz/submit', async (req: Request, res: Response) => {
   try {
-    const { questionId, participantName, idCardNumber, idNumber, contactNumber, selectedOptionId } = req.body;
+    const {
+      questionId,
+      participantName,
+      idNumber,
+      idCardNumber,
+      contactNumber,
+      selectedOptionId
+    } = req.body;
 
-    const rawId = String(idCardNumber || idNumber || '').trim();
-    const cleanContact = String(contactNumber || '').trim();
+    const rawId = String(idNumber || idCardNumber || '').trim().toUpperCase();
+    const rawContact = String(contactNumber || '').trim().replace(/[\s-]/g, '');
 
-    if (!questionId || !rawId || !cleanContact || !selectedOptionId) {
-      return res.status(400).json({ error: 'All quiz submission fields are required.' });
+    if (!questionId || !rawId || !rawContact || !selectedOptionId) {
+      return res.status(400).json({ error: 'އައިޑީ ކާޑު ނަންބަރާއި ފޯނު ނަންބަރު އަދި ރަނގަޅު ޖަވާބު ޚިޔާރުކުރައްވަން ޖެހޭނެއެވެ (All required fields must be provided).' });
     }
 
-    const normId = rawId.toUpperCase().replace(/\s+/g, '');
     const questions = await db.getQuizQuestions();
     const q = questions.find(item => item.id === questionId);
 
-    if (!q) {
-      return res.status(404).json({ error: 'Quiz question not found.' });
+    if (!q || q.status === 'cancelled') {
+      return res.status(404).json({ error: 'ކުއިޒް ސުވާލު ނުފެނުނު (Quiz question not found or cancelled).' });
+    }
+
+    // Check quiz schedule timing
+    const settings = await db.getSettings();
+    const offsetMinutesSetting = Number(settings.find(s => s.key === 'timeOffsetMinutes')?.value || 0);
+    const nowMs = Date.now() + (offsetMinutesSetting * 60 * 1000);
+
+    if (q.publishAt && new Date(q.publishAt).getTime() > nowMs) {
+      return res.status(400).json({ error: 'މި ސުވާލު އަދި ޝާއިޢުނުކުރެއެވެ (This question has not yet been published).' });
+    }
+
+    if (q.closeAt && new Date(q.closeAt).getTime() <= nowMs) {
+      return res.status(400).json({ error: 'މި ސުވާލަށް ޖަވާބު ފޮނުވުމުގެ ސުންގަޑި ހަމަވެއްޖެ (The submission deadline for this question has expired).' });
     }
 
     const submissions = await db.getQuizSubmissions();
-    const existing = submissions.find(s => s.questionId === questionId && s.normalizedIdNumber === normId);
+    const existing = submissions.find(s => s.questionId === questionId && s.normalizedIdNumber === rawId && !s.isInvalid);
 
     if (existing) {
-      return res.status(400).json({ error: 'މި އައިޑީ ކާޑު ނަންބަރުން މި ސުވާލަށް ކުރިން ޖަވާބު ފޮނުވާފައިވެއެވެ. (You have already submitted an answer for this question).' });
+      return res.status(400).json({
+        error: `ތިޔަ އައިޑީ ކާޑު ނަންބަރުން (${rawId}) މި ސުވާލަށް ކުރިން ޖަވާބު ފޮނުވާފައިވެއެވެ. (You have already submitted an entry with Participant Number: ${existing.participantNumber}).`,
+        existingParticipantNumber: existing.participantNumber
+      });
     }
 
-    // Retrieve or allocate persistent unique Queue Number for this ID card
-    const queue = await db.getOrCreateParticipantQueue(normId, (participantName || rawId).trim(), cleanContact);
-    const participantNumber = queue.queNumber;
-
-    const maskedId = normId.length > 4 ? `${normId.substring(0, 2)}***${normId.substring(normId.length - 2)}` : '***';
-    const maskedContact = cleanContact.length > 4 ? `${cleanContact.substring(0, 3)}****${cleanContact.substring(cleanContact.length - 2)}` : '****';
+    const maskedId = rawId.length > 4 ? `${rawId.substring(0, 2)}***${rawId.substring(rawId.length - 2)}` : '***';
+    const maskedContact = rawContact.length > 4 ? `${rawContact.substring(0, 3)}****${rawContact.substring(rawContact.length - 2)}` : '****';
 
     const ineligibleSet = new Set(await db.getIneligibleParticipantIds());
-    const isMasterIneligible = ineligibleSet.has(normId);
+    const isMasterIneligible = ineligibleSet.has(rawId);
     const isCorrect = selectedOptionId === q.correctOptionId;
     const isEligible = Boolean(isCorrect && !isMasterIneligible);
 
-    const selectedOpt = q.options?.find(o => o.id === selectedOptionId);
+    const displayName = (participantName && String(participantName).trim()) ? String(participantName).trim() : maskedId;
 
     const createdSub = await db.createQuizSubmission({
-      participantNumber,
       questionId,
-      participantName: (participantName || rawId).trim(),
+      participantName: displayName,
       idNumber: rawId,
-      normalizedIdNumber: normId,
-      contactNumber: cleanContact,
+      normalizedIdNumber: rawId,
+      contactNumber: rawContact,
       selectedOptionId,
-      selectedOptionLabel: selectedOpt?.optionLabel,
-      selectedOptionText: selectedOpt?.optionText,
       isCorrect,
       isEligible,
       isDisqualified: isMasterIneligible,
-      disqualificationReason: isMasterIneligible ? 'Marked Not Eligible in Master Participant Registry' : undefined,
       maskedIdNumber: maskedId,
       maskedContactNumber: maskedContact
     });
 
     return res.json({
-      message: 'ޖަވާބު ކާމިޔާބުކަމާއެކު ފޮނުވިއްޖެ! ކޮންމެ ސުވާލަކަށްވެސް ތިޔަ ފަރާތުގެ ކިއު ނަންބަރަކީ މިއީއެވެ.',
+      ok: true,
+      message: 'ޖަވާބު ކާމިޔާބުކަމާއެކު ފޮނުވިއްޖެ! ގުރާތުގައި ބައިވެރިވެވިއްޖެއެވެ.',
       participantNumber: createdSub.participantNumber,
-      queNumber: createdSub.participantNumber,
       submission: {
+        id: createdSub.id,
         participantNumber: createdSub.participantNumber,
         questionId: createdSub.questionId,
-        submittedAt: createdSub.submittedAt
+        submittedAt: createdSub.submittedAt,
+        maskedIdNumber: createdSub.maskedIdNumber,
+        maskedContactNumber: createdSub.maskedContactNumber
       }
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// Public Eligible Participant Numbers for Live Lucky Draw Rolling
-app.get('/api/public/quiz/eligible-numbers/:questionId', async (req: Request, res: Response) => {
-  try {
-    const { questionId } = req.params;
-    const questions = await db.getQuizQuestions();
-    const q = questions.find(item => item.id === questionId);
-    const submissions = await db.getQuizSubmissions(questionId);
-    const ineligibles = new Set(await db.getIneligibleParticipantIds());
-
-    const eligible = submissions.filter(s => 
-      s.isCorrect && 
-      !s.isDisqualified && 
-      s.isEligible && 
-      !ineligibles.has(s.normalizedIdNumber.toUpperCase())
-    );
-
-    return res.json({
-      ok: true,
-      questionId,
-      totalEligible: eligible.length,
-      rollingDurationSeconds: q?.rollingDurationSeconds || 10,
-      participantNumbers: eligible.map(s => s.participantNumber),
-      participantContacts: eligible.map(s => ({
-        participantNumber: s.participantNumber,
-        maskedContactNumber: s.maskedContactNumber || (s.contactNumber ? `${s.contactNumber.slice(0, 3)}****${s.contactNumber.slice(-2)}` : '****')
-      }))
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// Public Quiz Results & Past Winners History
-app.get('/api/public/quiz/results', async (req: Request, res: Response) => {
-  try {
-    const questions = await db.getQuizQuestions();
-    const winners = await db.getQuizWinners();
-    const submissions = await db.getQuizSubmissions();
-
-    const publishedWinners = winners.filter(w => w.publicStatus === 'published' && !w.isReplaced);
-    const history = questions
-      .filter(q => q.status === 'completed' || q.status === 'winner_announced' || publishedWinners.some(w => w.questionId === q.id))
-      .map(q => {
-        const winner = publishedWinners.find(w => w.questionId === q.id) || null;
-        const qSubs = submissions.filter(s => s.questionId === q.id);
-        return {
-          question: q,
-          winner: winner ? {
-            participantNumber: winner.participantNumber,
-            maskedIdNumber: winner.maskedIdNumber,
-            maskedContactNumber: winner.maskedContactNumber,
-            prizeTitle: winner.prizeTitle,
-            prizeDescription: winner.prizeDescription,
-            sponsorName: winner.sponsorName,
-            sponsorLogo: winner.sponsorLogo,
-            selectedAt: winner.selectedAt,
-            eligibleCount: winner.eligibleCount
-          } : null,
-          totalParticipants: qSubs.length,
-          correctCount: qSubs.filter(s => s.isCorrect).length
-        };
-      });
-
-    return res.json(history);
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message || 'Error processing quiz submission' });
   }
 });
 
@@ -833,18 +1081,10 @@ app.get('/api/portal/users', authenticateSession, requirePermission('users', 'ca
 app.post('/api/portal/users', authenticateSession, requirePermission('users', 'canCreate'), async (req: Request, res: Response) => {
   try {
     const admin = (req as any).user;
-    const { fullName, username, pin, roleId, designation, contactNumber, notes } = req.body;
+    const { fullName, username, pin, roleId, roleName, designation, contactNumber, memberId, permissions, notes, isActive, status } = req.body;
 
-    if (!fullName || !username || !pin) {
-      return res.status(400).json({ error: 'Full Name, Username, and initial PIN are required.' });
-    }
-
-    const cleanPin = String(pin).trim();
-    if (!/^\d+$/.test(cleanPin)) {
-      return res.status(400).json({ error: 'PIN must contain numeric digits only (e.g. 2613).' });
-    }
-    if (cleanPin.length < 4) {
-      return res.status(400).json({ error: 'PIN must be at least 4 numeric digits.' });
+    if (!username || !pin) {
+      return res.status(400).json({ error: 'Username and initial PIN are required.' });
     }
 
     const cleanUsername = String(username).trim();
@@ -853,21 +1093,52 @@ app.post('/api/portal/users', authenticateSession, requirePermission('users', 'c
       return res.status(400).json({ error: 'Username already exists. Please choose a different username.' });
     }
 
+    const roles = await db.getRoles();
+    const targetRoleId = roleId || 'role_member';
+    const foundRole = roles.find(r => r.id === targetRoleId);
+    const resolvedRoleName = (roleName || foundRole?.name || (targetRoleId === 'role_admin' ? 'Admin' : (targetRoleId === 'role_exco' ? 'EXCO Member' : 'Club Member')));
+    const isAdmin = targetRoleId === 'role_admin' || resolvedRoleName.toLowerCase() === 'admin';
+
+    // Member linking: Non-admin users must be linked with existing club member
+    const members = await db.getMembers();
+    let linkedMember = memberId ? members.find(m => m.id === memberId) : undefined;
+
+    if (!isAdmin && !linkedMember) {
+      // Try to find matching member by contact number or username
+      const contactClean = contactNumber ? String(contactNumber).replace(/[^0-9]/g, '') : '';
+      linkedMember = members.find(m => {
+        const mPhone = (m.phoneNumber || '').replace(/[^0-9]/g, '');
+        const mNum = (m.memberNumber || '').toLowerCase().trim();
+        return (contactClean && mPhone && contactClean === mPhone) || (cleanUsername && mNum === cleanUsername.toLowerCase());
+      });
+
+      if (!linkedMember) {
+        return res.status(400).json({ error: 'Non-admin users must be linked with an existing club member (އެގްޒިސްޓިންގ މެންބަރަކާ ގުޅުވަންޖެހޭނެ).' });
+      }
+    }
+
+    const resolvedFullName = (fullName || linkedMember?.fullName || cleanUsername).trim();
+    const resolvedContact = (contactNumber || linkedMember?.phoneNumber || '').trim();
+    const resolvedDesignation = designation || linkedMember?.excoDesignation || '';
+
     const newSalt = generateSalt();
-    const newHash = hashPin(cleanPin, newSalt);
+    const newHash = hashPin(String(pin), newSalt);
     const createdUser = await db.createUser({
-      fullName,
+      fullName: resolvedFullName,
       username: cleanUsername,
-      designation: designation || '',
-      contactNumber: contactNumber || '',
-      roleId: roleId || 'role_admin',
-      roleName: 'Admin',
-      status: 'active',
-      requirePinChange: false,
+      designation: resolvedDesignation,
+      contactNumber: resolvedContact,
+      memberId: linkedMember?.id || memberId || undefined,
+      memberNumber: linkedMember?.memberNumber || undefined,
+      idCardNumber: linkedMember?.idCardNumber || undefined,
+      roleId: targetRoleId,
+      roleName: resolvedRoleName as any,
+      status: status || (isActive === false ? 'inactive' : 'active'),
+      requirePinChange: true,
       notes: notes || '',
-      pin: cleanPin,
       pinHash: newHash,
-      pinSalt: newSalt
+      pinSalt: newSalt,
+      permissions: Array.isArray(permissions) ? permissions : (foundRole?.defaultPermissions || [])
     });
 
     await db.logAudit({
@@ -877,7 +1148,7 @@ app.post('/api/portal/users', authenticateSession, requirePermission('users', 'c
       action: 'CREATE_USER',
       module: 'users',
       recordId: createdUser.id,
-      newValue: { username: cleanUsername, fullName }
+      newValue: { username: cleanUsername, fullName: resolvedFullName, roleName: resolvedRoleName, memberId: linkedMember?.id }
     });
 
     return res.status(201).json(sanitizeUser(createdUser));
@@ -890,18 +1161,29 @@ app.put('/api/portal/users/:id', authenticateSession, requirePermission('users',
   try {
     const admin = (req as any).user;
     const { id } = req.params;
+    const updateData = { ...req.body };
 
-    if (req.body.pin) {
-      const cleanPin = String(req.body.pin).trim();
-      if (!/^\d+$/.test(cleanPin)) {
-        return res.status(400).json({ error: 'PIN must contain numeric digits only (e.g. 2613).' });
-      }
-      if (cleanPin.length < 4) {
-        return res.status(400).json({ error: 'PIN must be at least 4 numeric digits.' });
+    if (updateData.pin) {
+      const newSalt = generateSalt();
+      updateData.pinSalt = newSalt;
+      updateData.pinHash = hashPin(String(updateData.pin), newSalt);
+      delete updateData.pin;
+      delete updateData.confirmPin;
+    }
+
+    // If memberId is updated or provided, sync member details
+    if (updateData.memberId) {
+      const members = await db.getMembers();
+      const member = members.find(m => m.id === updateData.memberId);
+      if (member) {
+        updateData.memberNumber = member.memberNumber;
+        updateData.idCardNumber = member.idCardNumber || updateData.idCardNumber;
+        if (!updateData.contactNumber && member.phoneNumber) updateData.contactNumber = member.phoneNumber;
+        if (!updateData.fullName && member.fullName) updateData.fullName = member.fullName;
       }
     }
 
-    const updatedUser = await db.updateUser(id, req.body);
+    const updatedUser = await db.updateUser(id, updateData);
 
     await db.logAudit({
       userId: admin.id,
@@ -919,50 +1201,68 @@ app.put('/api/portal/users/:id', authenticateSession, requirePermission('users',
   }
 });
 
+// Admin-only PIN Change / Reset Endpoint for any user
 app.post('/api/portal/users/:id/reset-pin', authenticateSession, requirePermission('users', 'canEdit'), async (req: Request, res: Response) => {
   try {
     const admin = (req as any).user;
+    const isUserAdmin = (admin.roleName || admin.roleId || '').toLowerCase().includes('admin') || admin.roleId === 'role_admin' || admin.role === 'admin';
+    if (!isUserAdmin) {
+      return res.status(403).json({ error: 'Only administrators can change or reset user PINs (ޕިން ބަދަލުކުރެވޭނީ ހަމައެކަނި އެޑްމިނުންނަށެވެ).' });
+    }
+
     const { id } = req.params;
-    const { newPin } = req.body;
+    const { newPin, pin } = req.body;
+    const targetPin = String(newPin || pin || '').trim();
 
-    if (!newPin) {
-      return res.status(400).json({ error: 'New numeric PIN is required.' });
+    if (!targetPin || !/^\d{4,8}$/.test(targetPin)) {
+      return res.status(400).json({ error: 'PIN must be between 4 and 8 numeric digits.' });
     }
 
-    const cleanPin = String(newPin).trim();
-    if (!/^\d+$/.test(cleanPin)) {
-      return res.status(400).json({ error: 'PIN must contain numeric digits only (e.g. 2613).' });
-    }
-    if (cleanPin.length < 4) {
-      return res.status(400).json({ error: 'PIN must be at least 4 numeric digits.' });
-    }
-
-    const targetUser = await db.getUserById(id);
-    if (!targetUser) {
-      return res.status(404).json({ error: 'User not found.' });
-    }
-
-    const salt = generateSalt();
-    const pinHash = hashPin(cleanPin, salt);
+    const newSalt = generateSalt();
+    const newHash = hashPin(targetPin, newSalt);
     const updatedUser = await db.updateUser(id, {
-      pinHash,
-      pinSalt: salt,
-      requirePinChange: false,
-      failedLoginCount: 0,
-      lockedUntil: null
+      pinHash: newHash,
+      pinSalt: newSalt,
+      requirePinChange: false
     });
 
     await db.logAudit({
       userId: admin.id,
       username: admin.username,
       fullName: admin.fullName,
-      action: 'ADMIN_RESET_PIN',
+      action: 'ADMIN_CHANGE_USER_PIN',
       module: 'users',
       recordId: id,
-      reason: `Admin reset PIN for @${targetUser.username}`
+      newValue: { targetUsername: updatedUser.username }
     });
 
-    return res.json({ message: `PIN updated successfully for user @${targetUser.username}.`, user: sanitizeUser(updatedUser) });
+    return res.json({ message: `PIN for user @${updatedUser.username} updated successfully by Admin.`, user: sanitizeUser(updatedUser) });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin-only User Status (Lock/Unlock/Status toggle)
+app.put('/api/portal/users/:id/status', authenticateSession, requirePermission('users', 'canEdit'), async (req: Request, res: Response) => {
+  try {
+    const admin = (req as any).user;
+    const { id } = req.params;
+    const { isLocked, status } = req.body;
+
+    const newStatus = status ? status : (isLocked ? 'locked' : 'active');
+    const updatedUser = await db.updateUser(id, { status: newStatus });
+
+    await db.logAudit({
+      userId: admin.id,
+      username: admin.username,
+      fullName: admin.fullName,
+      action: 'UPDATE_USER_STATUS',
+      module: 'users',
+      recordId: id,
+      newValue: { status: newStatus }
+    });
+
+    return res.json(sanitizeUser(updatedUser));
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1037,7 +1337,47 @@ app.put('/api/portal/settings', authenticateSession, async (req: Request, res: R
   }
 });
 
-// SUPABASE DATABASE TABLES & SYNC ENDPOINTS
+// ==========================================
+// CLOUD FIRESTORE DATABASE TABLES, SYNC & UPLOAD ENDPOINTS
+// ==========================================
+
+app.post('/api/portal/upload', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const { fileName, fileType, fileData, folder = 'uploads' } = req.body;
+    if (!fileData) {
+      return res.status(400).json({ error: 'fileData is required' });
+    }
+
+    // If bucket is configured, upload to Firebase Storage, else return safe data URI
+    try {
+      if (bucket && bucket.name) {
+        const cleanFileName = `${Date.now()}_${(fileName || 'file').replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+        const filePath = `${folder}/${cleanFileName}`;
+        const file = bucket.file(filePath);
+
+        // Strip data: prefix if present
+        const base64Data = fileData.includes(',') ? fileData.split(',')[1] : fileData;
+        const buffer = Buffer.from(base64Data, 'base64');
+
+        await file.save(buffer, {
+          metadata: { contentType: fileType || 'application/octet-stream' },
+          public: true
+        });
+
+        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filePath}`;
+        return res.json({ url: publicUrl, fileName: cleanFileName, storage: 'firebase-storage' });
+      }
+    } catch (storageErr) {
+      console.warn('[Firebase Storage] Upload to bucket skipped, returning data URI:', storageErr);
+    }
+
+    // Fallback: return data URI directly
+    return res.json({ url: fileData, fileName: fileName || 'file', storage: 'inline' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/portal/db/tables', authenticateSession, async (req: Request, res: Response) => {
   try {
     const summary = await db.getDbTablesSummary();
@@ -1136,35 +1476,65 @@ app.get('/api/portal/dashboard/stats', authenticateSession, async (req: Request,
     const quizQuestions = await db.getQuizQuestions();
     const users = await db.getUsers();
     const messages = await db.getMessages();
-    const auditLogs = await db.getAuditLogs();
 
-    const activeQuiz = quizQuestions.find(q => q.status === 'open' || (q.status as string) === 'published' || (q.status as string) === 'active');
-    const correctParticipants = quizSubmissions.filter(s => s.isCorrect || (s as any).is_correct).length;
-    const pendingMessagesCount = messages.filter(m => m.status === 'pending' || (m.status as any) === 'in_review' || (m.status as any) === 'in_progress').length;
+    const activeQuestionsList = quizQuestions.filter(q => q.status === 'open' || (q.status as string) === 'published' || (q.status as string) === 'active');
+    const activeQuiz = activeQuestionsList.length > 0 ? activeQuestionsList[0] : null;
+
+    const budgetStats = await db.getBudgetStats().catch(() => ({
+      totalIncome: 0,
+      totalExpenses: 0,
+      netBalance: 0,
+      totalAccountsBalance: 0,
+      totalContributionsCollected: 0
+    }));
 
     return res.json({
+      // Quiz Module
+      totalQuizQuestions: quizQuestions.length,
+      totalQuestions: quizQuestions.length,
+      activeQuizQuestions: activeQuestionsList.length,
+      closedQuizQuestions: quizQuestions.filter(q => q.status === 'closed' || q.status === 'completed' || q.status === 'winner_announced' || q.status === 'answer_revealed').length,
+      totalQuizParticipants: quizSubmissions.length,
+      totalParticipants: quizSubmissions.length,
+      correctQuizParticipants: quizSubmissions.filter(s => s.isCorrect).length,
+      correctParticipants: quizSubmissions.filter(s => s.isCorrect).length,
+      totalQuizWinners: quizWinners.length,
+      totalWinners: quizWinners.length,
+      collectedPrizes: quizWinners.filter(w => w.prizeCollectionStatus === 'collected').length,
+      activeQuiz,
+
+      // Members Module
       totalMembers: members.length,
       activeMembers,
       pendingMembers,
       totalExco: excoMembers.length,
+
+      // Budget & Finance Module
+      budget: budgetStats,
+      totalIncome: budgetStats?.totalIncome || 0,
+      totalExpenses: budgetStats?.totalExpenses || 0,
+      netBalance: budgetStats?.netBalance || 0,
+      totalAccountsBalance: budgetStats?.totalAccountsBalance || 0,
+      totalContributionsCollected: budgetStats?.totalContributionsCollected || 0,
+
+      // Events & Meetings Module
       totalEvents: eventItems.length,
       upcomingEvents: eventItems.filter(e => e.status === 'upcoming').length,
+      completedEvents: eventItems.filter(e => e.status === 'completed').length,
       totalMeetings: meetingItems.length,
       upcomingMeetings: meetingItems.filter(m => m.status === 'scheduled').length,
-      totalQuestions: quizQuestions.length,
-      totalParticipants: quizSubmissions.length,
-      correctParticipants,
-      totalQuizParticipants: quizSubmissions.length,
-      totalWinners: quizWinners.length,
-      totalQuizWinners: quizWinners.length,
-      activeQuizQuestions: quizQuestions.filter(q => q.status === 'open' || (q.status as string) === 'published' || (q.status as string) === 'active').length,
+      completedMeetings: meetingItems.filter(m => m.status === 'completed').length,
+
+      // Inbox & Action Records Module
+      totalMessages: messages.length,
+      unreadMessages: messages.filter(m => m.status === 'pending' || (m.status as string) === 'in_review' || (m.status as string) === 'in_progress').length,
+      pendingMessages: messages.filter(m => m.status === 'pending' || (m.status as string) === 'in_review' || (m.status as string) === 'in_progress').length,
+      resolvedMessages: messages.filter(m => (m.status as string) === 'resolved' || (m.status as string) === 'archived' || (m.status as string) === 'closed').length,
+
+      // Users & Access Module
       totalUsers: users.length,
       activeUsers: users.filter(u => u.status === 'active').length,
-      pendingMessages: pendingMessagesCount,
-      unreadMessages: pendingMessagesCount,
-      activeQuiz: activeQuiz || null,
-      recentWinners: quizWinners.slice(-5).reverse(),
-      recentAuditLogs: auditLogs.slice(-10).reverse()
+      adminUsers: users.filter(u => u.roleName === 'Admin' || u.roleId === 'role_admin' || u.roleName?.toLowerCase().includes('admin')).length
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1174,7 +1544,10 @@ app.get('/api/portal/dashboard/stats', authenticateSession, async (req: Request,
 // USER PERFORMANCE & CONNECTIONS
 app.get('/api/portal/users/:userId/performance', authenticateSession, async (req: Request, res: Response) => {
   try {
-    const { userId } = req.params;
+    let { userId } = req.params;
+    if (userId === 'me' || !userId) {
+      userId = (req as any).user.id;
+    }
     const performance = await db.getUserPerformance(userId);
     return res.json(performance);
   } catch (err: any) {
@@ -1185,30 +1558,50 @@ app.get('/api/portal/users/:userId/performance', authenticateSession, async (req
 app.post('/api/portal/users/connect-member', authenticateSession, async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const { memberId, query } = req.body;
+    const isUserAdmin = (user.roleName || user.roleId || '').toLowerCase().includes('admin') || user.roleId === 'role_admin';
+    if (!isUserAdmin) {
+      return res.status(403).json({ error: 'Only administrators can connect or change member profiles (މެންބަރ ޕްރޮފައިލް ގުޅުވައި ބަދަލުކުރެވޭނީ ހަމައެކަނި އެޑްމިނުންނަށެވެ).' });
+    }
+
+    const { memberId, query, targetUserId } = req.body;
+    const effectiveUserId = (isUserAdmin && targetUserId) ? targetUserId : user.id;
     const members = await db.getMembers();
     let target = memberId ? members.find(m => m.id === memberId) : undefined;
     if (!target && query) {
       const q = String(query).toLowerCase().trim();
       const numOnly = q.replace(/[^0-9]/g, '');
+      const idOnly = q.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
       target = members.find(m => {
         const memNum = (m.memberNumber || (m as any).membershipNumber || '').toLowerCase().trim();
         const memNumOnly = memNum.replace(/[^0-9]/g, '');
         const idCard = (m.idCardNumber || '').toLowerCase().trim();
+        const idCardClean = (m.idCardNumber || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
         const phone = (m.phoneNumber || '').replace(/[^0-9]/g, '');
         const name = (m.fullName || '').toLowerCase().trim();
 
         if (memNum === q || idCard === q || name === q || name.includes(q)) return true;
+        if (idOnly && idCardClean && (idOnly === idCardClean || idCardClean.includes(idOnly))) return true;
         if (phone && q && phone.includes(q.replace(/[^0-9]/g, ''))) return true;
         if (numOnly && memNumOnly && (numOnly === memNumOnly || parseInt(numOnly, 10) === parseInt(memNumOnly, 10))) return true;
         return false;
       });
     }
     if (!target) {
-      return res.status(404).json({ error: 'No matching club member record found. Please verify your Member ID or registered phone number.' });
+      return res.status(404).json({ error: 'No matching club member record found. Please verify your National ID card number, Member ID, or registered phone number.' });
     }
-    const updated = await db.updateUser(user.id, { memberId: target.id, contactNumber: target.phoneNumber || user.contactNumber });
-    return res.json({ success: true, user: sanitizeUser(updated), member: target, message: `Successfully connected to member ${target.fullName} (${target.memberNumber || target.idCardNumber})` });
+    const updated = await db.updateUser(effectiveUserId, {
+      memberId: target.id,
+      memberNumber: target.memberNumber,
+      idCardNumber: target.idCardNumber || user.idCardNumber || '',
+      contactNumber: target.phoneNumber || user.contactNumber,
+      fullName: user.fullName || target.fullName
+    });
+    return res.json({
+      success: true,
+      user: sanitizeUser(updated),
+      member: target,
+      message: `Successfully connected to member ${target.fullName} (${target.memberNumber || target.idCardNumber})`
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1217,7 +1610,18 @@ app.post('/api/portal/users/connect-member', authenticateSession, async (req: Re
 app.post('/api/portal/users/disconnect-member', authenticateSession, async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const updated = await db.updateUser(user.id, { memberId: undefined });
+    const isUserAdmin = (user.roleName || user.roleId || '').toLowerCase().includes('admin') || user.roleId === 'role_admin';
+    if (!isUserAdmin) {
+      return res.status(403).json({ error: 'Only administrators can disconnect member profiles (މެންބަރ ޕްރޮފައިލް ވަކިކުރެވޭނީ ހަމައެކަނި އެޑްމިނުންނަށެވެ).' });
+    }
+
+    const { targetUserId } = req.body;
+    const effectiveUserId = (isUserAdmin && targetUserId) ? targetUserId : user.id;
+    const updated = await db.updateUser(effectiveUserId, {
+      memberId: undefined,
+      memberNumber: undefined,
+      idCardNumber: undefined
+    });
     return res.json({ success: true, user: sanitizeUser(updated) });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1320,7 +1724,7 @@ app.delete('/api/portal/slideshow/:id', authenticateSession, requirePermission('
 app.get('/api/portal/content', authenticateSession, async (req: Request, res: Response) => {
   try {
     const settings = await db.getSettings();
-    const contentSettings: any = {};
+    const contentSettings: any = { settings };
     settings.forEach(s => {
       if (!contentSettings[s.group]) contentSettings[s.group] = {};
       contentSettings[s.group][s.key] = s.value;
@@ -1333,17 +1737,37 @@ app.get('/api/portal/content', authenticateSession, async (req: Request, res: Re
 
 app.put('/api/portal/content', authenticateSession, requirePermission('content', 'canEdit'), async (req: Request, res: Response) => {
   try {
-    const updates = req.body;
-    const settingsList: any[] = [];
-    Object.keys(updates).forEach(group => {
-      if (typeof updates[group] === 'object') {
-        Object.keys(updates[group]).forEach(key => {
-          settingsList.push({ group, key, value: updates[group][key] });
-        });
-      }
-    });
+    const user = (req as any).user;
+    const raw = req.body;
+    let settingsList: any[] = [];
+
+    if (Array.isArray(raw)) {
+      settingsList = raw;
+    } else if (Array.isArray(raw.settings)) {
+      settingsList = raw.settings;
+    } else if (typeof raw === 'object' && raw !== null) {
+      Object.keys(raw).forEach(group => {
+        if (typeof raw[group] === 'object' && raw[group] !== null) {
+          Object.keys(raw[group]).forEach(key => {
+            settingsList.push({ group, key, value: raw[group][key] });
+          });
+        }
+      });
+    }
+
     const result = await db.updateSettings(settingsList);
-    return res.json(result);
+
+    if (user) {
+      await db.logAudit({
+        userId: user.id,
+        username: user.username,
+        fullName: user.fullName,
+        action: 'UPDATE_CONTENT_SETTINGS',
+        module: 'content'
+      });
+    }
+
+    return res.json({ success: true, settings: result });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1652,8 +2076,25 @@ app.put('/api/portal/ramazan-quiz/:id', authenticateSession, requirePermission('
 
 app.delete('/api/portal/ramazan-quiz/:id', authenticateSession, requirePermission('quiz', 'canDelete'), async (req: Request, res: Response) => {
   try {
-    await db.deleteQuizQuestion(req.params.id);
-    return res.json({ success: true });
+    const user = (req as any).user;
+    const { id } = req.params;
+    const result = await db.deleteQuizQuestion(id);
+
+    await db.logAudit({
+      userId: user.id,
+      username: user.username,
+      fullName: user.fullName,
+      action: 'DELETE_QUIZ_QUESTION',
+      module: 'quiz',
+      recordId: id,
+      reason: `Deleted quiz question #${id} with ${result.deletedSubmissionsCount} submissions and ${result.deletedWinnersCount} winners automatically removed.`
+    });
+
+    realtimeBroadcaster.broadcast('quiz_questions', 'delete', { id });
+    realtimeBroadcaster.broadcast('quiz_submissions', 'delete', { questionId: id });
+    realtimeBroadcaster.broadcast('quiz_winners', 'delete', { questionId: id });
+
+    return res.json({ success: true, ...result });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1663,6 +2104,7 @@ app.post('/api/portal/ramazan-quiz/:id/status', authenticateSession, requirePerm
   try {
     const { status } = req.body;
     const updated = await db.updateQuizQuestion(req.params.id, { status });
+    realtimeBroadcaster.broadcast('quiz_questions', 'update', { id: req.params.id, status });
     return res.json(updated);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1713,6 +2155,9 @@ app.post('/api/portal/ramazan-quiz/:id/draw', authenticateSession, requirePermis
 
     await db.updateQuizQuestion(id, { status: 'completed' });
 
+    realtimeBroadcaster.broadcast('quiz_winners', 'create', winner);
+    realtimeBroadcaster.broadcast('quiz_questions', 'update', { id, status: 'completed' });
+
     return res.json({ winner, eligibleCount: candidates.length });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1722,34 +2167,8 @@ app.post('/api/portal/ramazan-quiz/:id/draw', authenticateSession, requirePermis
 // QUIZ PARTICIPANTS
 app.get('/api/portal/quiz-participants', authenticateSession, async (req: Request, res: Response) => {
   try {
-    const { search, questionId, status } = req.query as { search?: string; questionId?: string; status?: string };
-    let submissions = await db.getQuizSubmissions(questionId && questionId !== 'all' ? questionId : undefined);
-
-    if (search) {
-      const s = String(search).toLowerCase().trim();
-      submissions = submissions.filter(sub => 
-        (sub.participantNumber && sub.participantNumber.toLowerCase().includes(s)) ||
-        (sub.normalizedIdNumber && sub.normalizedIdNumber.toLowerCase().includes(s)) ||
-        (sub.idNumber && sub.idNumber.toLowerCase().includes(s)) ||
-        (sub.contactNumber && sub.contactNumber.toLowerCase().includes(s)) ||
-        (sub.selectedOptionLabel && sub.selectedOptionLabel.toLowerCase().includes(s))
-      );
-    }
-
-    if (status && status !== 'all') {
-      if (status === 'correct') {
-        submissions = submissions.filter(sub => sub.isCorrect);
-      } else if (status === 'eligible') {
-        submissions = submissions.filter(sub => sub.isEligible);
-      } else if (status === 'disqualified') {
-        submissions = submissions.filter(sub => sub.isDisqualified);
-      }
-    }
-
-    return res.json({
-      participants: submissions,
-      total: submissions.length
-    });
+    const submissions = await db.getQuizSubmissions();
+    return res.json(submissions);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1759,7 +2178,30 @@ app.post('/api/portal/quiz-participants/:id/disqualify', authenticateSession, re
   try {
     const { isDisqualified, reason } = req.body;
     const updated = await db.disqualifyQuizSubmission(req.params.id, Boolean(isDisqualified), reason || '');
+    realtimeBroadcaster.broadcast('quiz_submissions', 'update', updated);
     return res.json(updated);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/portal/quiz-participants/:id', authenticateSession, requirePermission('quiz', 'canDelete'), async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    await db.deleteQuizSubmission(req.params.id);
+    await db.logAudit({
+      userId: user.id,
+      username: user.username,
+      fullName: user.fullName,
+      action: 'DELETE_QUIZ_SUBMISSION',
+      module: 'quiz',
+      recordId: req.params.id,
+      reason: `Deleted quiz submission #${req.params.id}`
+    });
+    realtimeBroadcaster.broadcast('quiz_submissions', 'delete', { id: req.params.id });
+    realtimeBroadcaster.broadcast('quiz_winners', 'update', {});
+    realtimeBroadcaster.broadcast('quiz_questions', 'update', {});
+    return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1767,97 +2209,85 @@ app.post('/api/portal/quiz-participants/:id/disqualify', authenticateSession, re
 
 app.get('/api/portal/quiz-participants/export/csv', authenticateSession, async (req: Request, res: Response) => {
   try {
-    const { questionId } = req.query as { questionId?: string };
-    const submissions = await db.getQuizSubmissions(questionId && questionId !== 'all' ? questionId : undefined);
-    const csvHeader = 'SubmissionID,QueueNumber,QuestionID,IDCardNumber,ContactNumber,OptionSelected,IsCorrect,IsEligible,IsDisqualified,DisqualificationReason,SubmittedAt\n';
-    const csvRows = submissions.map(s => 
-      `"${s.id}","${s.participantNumber}","${s.questionId}","${s.normalizedIdNumber || s.idNumber || s.maskedIdNumber}","${s.contactNumber || s.maskedContactNumber}","${s.selectedOptionLabel || ''}",${s.isCorrect},${s.isEligible},${s.isDisqualified},"${s.disqualificationReason || ''}","${s.submittedAt}"`
-    ).join('\n');
+    const submissions = await db.getQuizSubmissions();
+    const csvHeader = 'ID,ParticipantNumber,QuestionId,MaskedID,MaskedContact,IsCorrect,IsEligible,IsDisqualified,SubmittedAt\n';
+    const csvRows = submissions.map(s => `"${s.id}","${s.participantNumber}","${s.questionId}","${s.maskedIdNumber}","${s.maskedContactNumber}",${s.isCorrect},${s.isEligible},${s.isDisqualified},"${s.submittedAt}"`).join('\n');
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=quiz_submissions.csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=quiz_participants.csv');
     return res.send(csvHeader + csvRows);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
 });
 
-// MASTER PARTICIPANTS (Unique Participants by ID with persistent Queue Numbers)
+// MASTER PARTICIPANTS
 app.get('/api/portal/master-participants', authenticateSession, async (req: Request, res: Response) => {
   try {
+    const { search, status } = req.query;
     const submissions = await db.getQuizSubmissions();
     const ineligible = await db.getIneligibleParticipantIds();
-    const queues = await db.getParticipantQueues();
-    const queueMap = new Map<string, any>();
-    queues.forEach(q => queueMap.set(q.normalizedIdNumber, q));
-
+    const ineligibleSet = new Set(ineligible);
     const participantMap: { [key: string]: any } = {};
 
-    // 1. Seed from registered queue mappings
-    for (const q of queues) {
-      participantMap[q.normalizedIdNumber] = {
-        idNumber: q.normalizedIdNumber,
-        normalizedIdNumber: q.normalizedIdNumber,
-        queNumber: q.queNumber,
-        queIndex: q.queIndex,
-        participantNumber: q.queNumber,
-        contactNumber: q.contactNumber || '',
-        maskedIdNumber: q.normalizedIdNumber.length > 4 ? `${q.normalizedIdNumber.slice(0, 2)}***${q.normalizedIdNumber.slice(-2)}` : '***',
-        maskedContactNumber: q.contactNumber && q.contactNumber.length > 4 ? `${q.contactNumber.slice(0, 3)}****${q.contactNumber.slice(-2)}` : '****',
-        totalSubmissions: 0,
-        correctCount: 0,
-        disqualifiedCount: 0,
-        isBlocked: ineligible.includes(q.normalizedIdNumber),
-        isNotEligible: ineligible.includes(q.normalizedIdNumber),
-        firstRegisteredAt: q.firstRegisteredAt,
-        lastSubmittedAt: q.lastSubmittedAt
-      };
-    }
-
-    // 2. Aggregate all submissions
     submissions.forEach(s => {
-      const key = (s.normalizedIdNumber || s.idNumber || s.contactNumber || s.id).toUpperCase().replace(/\s+/g, '');
-      const qInfo = queueMap.get(key);
-      const qNum = qInfo?.queNumber || s.participantNumber || 'Q-????';
-      const qIdx = qInfo?.queIndex || 9999;
-
+      const normId = (s.normalizedIdNumber || s.idNumber || '').toUpperCase().trim();
+      const key = normId || (s.contactNumber ? `PHONE_${s.contactNumber}` : s.id);
+      
       if (!participantMap[key]) {
+        const isMasterBlocked = ineligibleSet.has(normId);
         participantMap[key] = {
-          idNumber: s.idNumber || s.normalizedIdNumber,
-          normalizedIdNumber: s.normalizedIdNumber || key,
-          queNumber: qNum,
-          queIndex: qIdx,
-          participantNumber: qNum,
+          id: key,
+          idNumber: s.idNumber || s.normalizedIdNumber || 'N/A',
+          normalizedIdNumber: normId,
           contactNumber: s.contactNumber || '',
-          maskedIdNumber: s.maskedIdNumber,
-          maskedContactNumber: s.maskedContactNumber,
+          maskedIdNumber: s.maskedIdNumber || '***',
+          maskedContactNumber: s.maskedContactNumber || '****',
+          fullName: (s as any).participantName || (s as any).fullName || '',
           totalSubmissions: 0,
           correctCount: 0,
           disqualifiedCount: 0,
-          isBlocked: ineligible.includes(key),
-          isNotEligible: ineligible.includes(key),
-          firstRegisteredAt: s.submittedAt,
-          lastSubmittedAt: s.submittedAt
+          isBlocked: isMasterBlocked,
+          isNotEligible: isMasterBlocked,
+          lastSubmittedAt: s.submittedAt,
+          questionIds: [] as string[]
         };
       }
+
       participantMap[key].totalSubmissions++;
       if (s.isCorrect) participantMap[key].correctCount++;
       if (s.isDisqualified) participantMap[key].disqualifiedCount++;
+      if (s.questionId && !participantMap[key].questionIds.includes(s.questionId)) {
+        participantMap[key].questionIds.push(s.questionId);
+      }
       if (s.submittedAt && (!participantMap[key].lastSubmittedAt || new Date(s.submittedAt) > new Date(participantMap[key].lastSubmittedAt))) {
         participantMap[key].lastSubmittedAt = s.submittedAt;
       }
-      if (s.contactNumber && !participantMap[key].contactNumber) {
-        participantMap[key].contactNumber = s.contactNumber;
-      }
     });
 
-    const list = Object.values(participantMap).sort((a: any, b: any) => {
-      if (typeof a.queIndex === 'number' && typeof b.queIndex === 'number' && a.queIndex !== b.queIndex) {
-        return a.queIndex - b.queIndex;
-      }
-      return (a.queNumber || '').localeCompare(b.queNumber || '');
-    });
+    let result = Object.values(participantMap);
 
-    return res.json(list);
+    if (search && typeof search === 'string' && search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter(p =>
+        (p.idNumber && p.idNumber.toLowerCase().includes(q)) ||
+        (p.normalizedIdNumber && p.normalizedIdNumber.toLowerCase().includes(q)) ||
+        (p.contactNumber && p.contactNumber.includes(q)) ||
+        (p.maskedIdNumber && p.maskedIdNumber.toLowerCase().includes(q)) ||
+        (p.maskedContactNumber && p.maskedContactNumber.includes(q)) ||
+        (p.fullName && p.fullName.toLowerCase().includes(q))
+      );
+    }
+
+    if (status === 'eligible') {
+      result = result.filter(p => !p.isNotEligible);
+    } else if (status === 'not_eligible' || status === 'disqualified') {
+      result = result.filter(p => p.isNotEligible);
+    }
+
+    // Sort by latest submission date descending
+    result.sort((a, b) => new Date(b.lastSubmittedAt || 0).getTime() - new Date(a.lastSubmittedAt || 0).getTime());
+
+    return res.json({ participants: result, total: result.length });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1865,14 +2295,55 @@ app.get('/api/portal/master-participants', authenticateSession, async (req: Requ
 
 app.post('/api/portal/master-participants/toggle-eligibility', authenticateSession, requirePermission('quiz', 'canEdit'), async (req: Request, res: Response) => {
   try {
-    const { idNumber, normalizedIdNumber, isBlocked, isNotEligible, reason } = req.body;
-    const targetId = normalizedIdNumber || idNumber;
-    if (!targetId) {
-      return res.status(400).json({ error: 'ID number is required.' });
-    }
-    const blocked = Boolean(isBlocked ?? isNotEligible);
-    await db.setMasterParticipantEligibility(targetId, blocked, reason);
-    return res.json({ success: true, isBlocked: blocked, isNotEligible: blocked });
+    const user = (req as any).user;
+    const { idNumber, isBlocked, isNotEligible, reason } = req.body;
+    const blocked = typeof isBlocked === 'boolean' ? isBlocked : Boolean(isNotEligible);
+    const norm = String(idNumber || '').trim().toUpperCase();
+
+    await db.setMasterParticipantEligibility(norm, blocked, reason);
+
+    await db.logAudit({
+      userId: user.id,
+      username: user.username,
+      fullName: user.fullName,
+      action: blocked ? 'DISQUALIFY_MASTER_PARTICIPANT' : 'RESTORE_MASTER_PARTICIPANT',
+      module: 'quiz',
+      recordId: norm,
+      reason: reason || (blocked ? 'Participant ID marked Not Eligible across all questions.' : 'Participant ID eligibility restored.')
+    });
+
+    realtimeBroadcaster.broadcast('masterIneligibleParticipants', 'update', { idNumber: norm, isBlocked: blocked });
+    realtimeBroadcaster.broadcast('quiz_submissions', 'update', { idNumber: norm });
+    realtimeBroadcaster.broadcast('quiz_questions', 'update', {});
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/portal/master-participants/:idNumber', authenticateSession, requirePermission('quiz', 'canDelete'), async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const idNumber = decodeURIComponent(req.params.idNumber);
+    const result = await db.deleteMasterParticipant(idNumber);
+
+    await db.logAudit({
+      userId: user.id,
+      username: user.username,
+      fullName: user.fullName,
+      action: 'DELETE_MASTER_PARTICIPANT',
+      module: 'quiz',
+      recordId: idNumber,
+      reason: `Deleted master participant ID ${idNumber} along with ${result.deletedSubmissionsCount} submissions and ${result.deletedWinnersCount} winners.`
+    });
+
+    realtimeBroadcaster.broadcast('masterIneligibleParticipants', 'delete', { idNumber });
+    realtimeBroadcaster.broadcast('quiz_submissions', 'delete', { idNumber });
+    realtimeBroadcaster.broadcast('quiz_winners', 'delete', { idNumber });
+    realtimeBroadcaster.broadcast('quiz_questions', 'update', {});
+
+    return res.json({ success: true, ...result });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1907,10 +2378,34 @@ app.post('/api/portal/quiz-winners/:id/reselect', authenticateSession, requirePe
   }
 });
 
+app.delete('/api/portal/quiz-winners/:id', authenticateSession, requirePermission('quiz', 'canDelete'), async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const isUserAdmin = (user.roleName || user.roleId || '').toLowerCase().includes('admin') || user.roleId === 'role_admin';
+    if (!isUserAdmin) {
+      return res.status(403).json({ error: 'Only administrators can delete quiz winners (ކުއިޒް ނަސީބުވެރިޔާ ފޮހެލެވޭނީ ހަމައެކަނި އެޑްމިނުންނަށެވެ).' });
+    }
+
+    await db.deleteQuizWinner(req.params.id);
+    await db.logAudit({
+      userId: user.id,
+      username: user.username,
+      fullName: user.fullName,
+      action: 'DELETE_QUIZ_WINNER',
+      module: 'quiz',
+      recordId: req.params.id,
+      reason: `Deleted quiz winner record #${req.params.id}`
+    });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // PRIZES & SPONSORS
 app.get('/api/portal/quiz-prizes', authenticateSession, async (req: Request, res: Response) => {
   try {
-    const prizes = await db.getQuizPrizes();
+    const prizes = await db.getPrizes();
     return res.json(prizes);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1946,7 +2441,7 @@ app.delete('/api/portal/quiz-prizes/:id', authenticateSession, requirePermission
 
 app.get('/api/portal/quiz-sponsors', authenticateSession, async (req: Request, res: Response) => {
   try {
-    const sponsors = await db.getQuizSponsors();
+    const sponsors = await db.getSponsors();
     return res.json(sponsors);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -2384,6 +2879,206 @@ app.delete('/api/portal/budget/expenses/:id', authenticateSession, async (req: R
   }
 });
 
+// Expense Payment Release Approval (President / Vice President / Admin)
+app.post('/api/portal/budget/expenses/:id/approve', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const { status, releasePayment, accountId, remarks } = req.body;
+
+    const expense = await db.approveExpensePayment(
+      req.params.id,
+      { id: user.id, fullName: user.fullName, username: user.username },
+      status || 'approved',
+      releasePayment !== undefined ? releasePayment : true,
+      accountId,
+      remarks
+    );
+
+    await db.createAuditLog({
+      userId: user.id,
+      username: user.username,
+      action: 'approve',
+      module: 'budget',
+      targetId: expense.id,
+      details: `Executive payment release approval for expense "${expense.title}" (${expense.amount} MVR) -> Status: ${expense.status}`
+    });
+
+    return res.json(expense);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// INVOICES & QUOTATIONS API
+// -------------------------------------------------------------
+app.get('/api/portal/budget/invoices/next-number', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const type = (req.query.type as 'invoice' | 'quotation') || 'invoice';
+    const nextNumber = await db.getNextInvoiceNumber(type);
+    return res.json({ nextNumber });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/portal/budget/invoices', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const { type, status, startDate, endDate, search } = req.query as Record<string, string>;
+    const list = await db.getInvoices({ type, status, startDate, endDate, search });
+    return res.json(list);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/portal/budget/invoices/:id', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const item = await db.getInvoiceById(req.params.id);
+    if (!item) {
+      return res.status(404).json({ error: 'Invoice or quotation not found' });
+    }
+    return res.json(item);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/portal/budget/invoices', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    
+    // User creating the invoice cannot approve immediately upon creation; all invoices start in pending_approval
+    const invoice = await db.createInvoice({
+      ...req.body,
+      status: 'pending_approval',
+      approvalStatus: 'pending',
+      approvedBy: undefined,
+      approvedByName: undefined,
+      approvedAt: undefined,
+      createdBy: user.id,
+      createdByName: user.fullName || user.username
+    });
+
+    await db.createAuditLog({
+      userId: user.id,
+      username: user.username,
+      action: 'create',
+      module: 'budget',
+      targetId: invoice.id,
+      details: `Generated ${invoice.type}: ${invoice.invoiceNumber} for "${invoice.billTo}" (${invoice.totalNetPayments} MVR) -> Pending Executive Approval`
+    });
+
+    return res.status(201).json(invoice);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/portal/budget/invoices/:id', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const invoice = await db.updateInvoice(req.params.id, req.body);
+    await db.createAuditLog({
+      userId: user.id,
+      username: user.username,
+      action: 'update',
+      module: 'budget',
+      targetId: invoice.id,
+      details: `Updated ${invoice.type}: ${invoice.invoiceNumber}`
+    });
+    return res.json(invoice);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/portal/budget/invoices/:id/approve', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const isPresidentOrVP = (user.roleName || user.roleId || '').toLowerCase().includes('president') ||
+      (user.roleName || user.roleId || '').toLowerCase().includes('admin') ||
+      (user.permissions || []).some((p: any) => p.module === 'budget' && p.canApprove);
+
+    if (!isPresidentOrVP) {
+      return res.status(403).json({ error: 'Executive signing privileges (President / Vice President) required to approve invoices.' });
+    }
+
+    const { status, remarks } = req.body;
+
+    const invoice = await db.approveInvoice(
+      req.params.id,
+      { id: user.id, fullName: user.fullName, username: user.username },
+      status || 'approved',
+      remarks
+    );
+
+    await db.createAuditLog({
+      userId: user.id,
+      username: user.username,
+      action: 'approve',
+      module: 'budget',
+      targetId: invoice.id,
+      details: `Executive approval for ${invoice.type} ${invoice.invoiceNumber} (${invoice.totalNetPayments} MVR) -> Status: ${invoice.status}`
+    });
+
+    return res.json(invoice);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/portal/budget/invoices/:id/collect', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const { amount, paymentMethod, accountId, category, receivedBy, receivedDate, referenceNumber, notes, status } = req.body;
+
+    const result = await db.collectInvoicePayment(req.params.id, {
+      amount: Number(amount),
+      paymentMethod,
+      accountId,
+      category,
+      receivedBy: (receivedBy || '').trim() || user.fullName || user.username || 'Treasurer',
+      receivedDate,
+      referenceNumber,
+      notes,
+      status,
+      recordedBy: user.fullName || user.username || 'Treasurer'
+    });
+
+    await db.createAuditLog({
+      userId: user.id,
+      username: user.username,
+      action: 'create',
+      module: 'budget',
+      targetId: result.invoice.id,
+      details: `Collected payment of ${result.incomeRecord.amount} MVR for ${result.invoice.type} ${result.invoice.invoiceNumber} (${result.invoice.billTo}) -> Added to Income. Receiver: ${result.invoice.receivedBy}`
+    });
+
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/portal/budget/invoices/:id', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    await db.deleteInvoice(req.params.id);
+    await db.createAuditLog({
+      userId: user.id,
+      username: user.username,
+      action: 'delete',
+      module: 'budget',
+      targetId: req.params.id,
+      details: `Deleted invoice/quotation record: ${req.params.id}`
+    });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Member Contributions & Funds Manager
 app.get('/api/portal/budget/contributions/settings', authenticateSession, async (req: Request, res: Response) => {
   try {
@@ -2465,8 +3160,8 @@ app.post('/api/portal/budget/contributions/pay', authenticateSession, async (req
       username: user.username,
       action: 'create',
       module: 'budget',
-      targetId: result.id,
-      details: `Processed contribution payment of ${result.paidAmount} MVR for member ${req.body.memberId} (Status: ${result.status})`
+      targetId: result.incomeRecord.id,
+      details: `Processed contribution payment of ${result.totalPaid} MVR for member ${req.body.memberId} (Discount: ${result.discountGiven}, Fines: ${result.finesCollected})`
     });
     return res.status(201).json(result);
   } catch (err: any) {
@@ -2602,8 +3297,6 @@ app.delete('/api/portal/executive/circulars/:id', authenticateSession, async (re
 
 // Serve frontend assets or Vite middleware in dev
 async function startServer() {
-  await db.verifyStartupSchema();
-
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -2620,6 +3313,10 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`ARC Portal server running on port ${PORT}`);
+    // Verify startup schema in background without blocking server startup
+    db.verifyStartupSchema().catch(err => {
+      console.error('[Startup] Schema verification error:', err);
+    });
   });
 }
 

@@ -121,9 +121,10 @@ export interface User {
   permissions: ModulePermission[];
   modulePermissions?: ModulePermission[];
   memberId?: string;
-  pin?: string;
-  pinSalt?: string;
+  memberNumber?: string;
+  idCardNumber?: string;
   pinHash?: string;
+  pinSalt?: string;
 }
 
 export interface MemberDashboardWidgetSettings {
@@ -186,15 +187,26 @@ export interface UserPerformanceData {
   };
   quiz: {
     totalAttempts: number;
+    revealedAnswersCount?: number;
+    pendingRevealCount?: number;
     correctAnswers: number;
     accuracyRate: number;
     submissions: Array<{
       id: string;
+      questionId?: string;
       questionNumber: number;
       questionTitle: string;
       selectedOptionText?: string;
-      isCorrect: boolean;
+      selectedOptionLabel?: string;
+      isAnswerRevealed?: boolean;
+      isCorrect?: boolean;
+      correctOptionText?: string;
+      correctOptionLabel?: string;
+      answerExplanation?: string;
+      status?: 'pending_reveal' | 'evaluated';
       submittedAt: string;
+      closeAt?: string;
+      revealAt?: string;
     }>;
     wins: Array<{
       id: string;
@@ -285,7 +297,7 @@ export interface SlideshowItem {
 
 export interface SiteSetting {
   id: string;
-  group: 'branding' | 'public_site' | 'security' | 'quiz';
+  group: 'branding' | 'public_site' | 'security' | 'quiz' | 'system' | 'budget' | 'invoice' | 'widgets' | 'content';
   key: string;
   value: any;
   updatedBy?: string;
@@ -398,40 +410,12 @@ export interface QuizQuestion {
   eligibleCount?: number;
 }
 
-export interface QuizParticipantQueue {
-  id: string; // normalizedIdNumber (e.g. 'A123456')
-  normalizedIdNumber: string;
-  queNumber: string; // e.g. 'Q-0001'
-  queIndex: number;
-  contactNumber?: string;
-  participantName?: string;
-  firstRegisteredAt: string;
-  lastSubmittedAt: string;
-}
-
-export interface MasterParticipant {
-  idNumber: string;
-  normalizedIdNumber: string;
-  queNumber: string;
-  queIndex?: number;
-  participantNumber: string;
-  contactNumber?: string;
-  maskedIdNumber: string;
-  maskedContactNumber: string;
-  totalSubmissions: number;
-  correctCount: number;
-  disqualifiedCount: number;
-  isBlocked: boolean;
-  isNotEligible: boolean;
-  firstRegisteredAt?: string;
-  lastSubmittedAt?: string;
-}
-
 export interface QuizSubmission {
   id: string;
   questionId: string;
   participantNumber: string; // e.g. 'RQ-0001'
   participantName?: string;
+  fullName?: string;
   normalizedIdNumber: string; // e.g. 'A123456'
   idNumber?: string;
   contactNumber?: string; // e.g. '7712345'
@@ -458,17 +442,17 @@ export interface QuizWinner {
   questionId: string;
   submissionId: string;
   participantNumber: string;
-  participantName?: string;
   maskedIdNumber: string;
   maskedContactNumber: string;
   // Unmasked fields accessible only in admin portal
   fullName?: string;
+  participantName?: string;
   contactNumber?: string;
   idNumber?: string;
   prizeId?: string;
-  sponsorId?: string;
   prizeTitle: string;
   prizeDescription?: string;
+  sponsorId?: string;
   sponsorName?: string;
   sponsorLogo?: string;
   eligibleCount: number;
@@ -715,7 +699,9 @@ export type IncomeCategory =
   | 'sponsorship'
   | 'donation'
   | 'event_fee'
+  | 'service_fee'
   | 'merchandise'
+  | 'rental'
   | 'grant'
   | 'other';
 
@@ -769,7 +755,91 @@ export interface ExpenseRecord {
   receiptNumber?: string;
   notes?: string;
   attachments?: string[];
+  
+  // Bill upload and vendor billing fields
+  billDocumentUrl?: string; // Base64 data or URL
+  billDocumentName?: string; // Filename e.g. "fuel_bill_001.pdf"
+  vendorName?: string; // Vendor / supplier name
+  billNumber?: string; // Vendor's invoice/bill number
+  billDate?: string; // Date on the bill
+  billTotal?: number; // Total billed amount
+  
+  // Executive Payment Release Approval tracking
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  paymentReleaseApproved?: boolean;
+  paymentReleasedAt?: string;
+  paymentReleasedBy?: string;
+  approvalRemarks?: string;
+
   createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type InvoiceType = 'invoice' | 'quotation';
+export type InvoiceStatus = 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'sent' | 'paid' | 'cancelled';
+
+export interface InvoiceLineItem {
+  id: string;
+  description: string;
+  qty: number;
+  rate: number;
+  amount: number; // qty * rate
+}
+
+export interface InvoiceRecord {
+  id: string;
+  type: InvoiceType; // 'invoice' | 'quotation'
+  invoiceNumber: string; // e.g. 'ARC/INV/2026/0001' or 'ARC/QUO/2026/0001'
+  invoiceDate: string; // e.g. '2026-02-09' (formatted 09/02/2026)
+  dueDate?: string;
+
+  // Client Details
+  billTo: string; // e.g. 'R.Maduvvari Health Center'
+  customerAddress?: string;
+  tin?: string; // Tax Identification Number (e.g. 'TIN: 1054321GST001' or empty)
+  remark?: string; // e.g. 'Supply of fuel for emergency generator'
+
+  // Items & Calculations
+  items: InvoiceLineItem[];
+  subTotal: number;
+  discount: number;
+  totalNetPayments: number; // subTotal - discount
+  amountPaid: number; // default 0
+  amountDue: number; // totalNetPayments - amountPaid
+
+  // Payment Method & Acknowledgment
+  paymentMethod: 'cash' | 'online' | 'both';
+  receivedBy?: string;
+  receivedDate?: string;
+  referenceNumber?: string;
+  depositAccountId?: string;
+  collectedIncomeRecordId?: string;
+  signature?: string;
+
+  // Bank & Payment Instructions (defaults to ARC club details)
+  bankName?: string; // 'Bank of Maldives (BML)'
+  accountName?: string; // 'AANANDHA RECREATION CLUB'
+  accountNumber?: string; // 'BML | (MVR) 7730000308018'
+  logoUrl?: string;
+
+  // Footer & Club Information
+  footerNoticeEnglish?: string;
+  footerNoticeDhivehi?: string;
+  clubPhone?: string;
+  clubEmail?: string;
+  clubAddress?: string;
+
+  // Executive Approval (President / Vice President)
+  status: InvoiceStatus;
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  approvedBy?: string;
+  approvedByName?: string;
+  approvedAt?: string;
+  approvalRemarks?: string;
+
+  createdBy: string;
+  createdByName?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -20,6 +20,8 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   const token = getStoredToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
     ...(options.headers as Record<string, string> || {})
   };
 
@@ -28,6 +30,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   const response = await fetch(endpoint, {
+    cache: 'no-store',
     ...options,
     headers
   });
@@ -123,6 +126,8 @@ export const api = {
   },
   disqualifyParticipant: (id: string, isDisqualified: boolean, reason: string) => 
     request<any>(`/api/portal/quiz-participants/${id}/disqualify`, { method: 'POST', body: JSON.stringify({ isDisqualified, reason }) }),
+  deleteQuizParticipant: (id: string) => request<any>(`/api/portal/quiz-participants/${id}`, { method: 'DELETE' }),
+  deleteQuizSubmission: (id: string) => request<any>(`/api/portal/quiz-participants/${id}`, { method: 'DELETE' }),
 
   getMasterParticipants: (params?: any) => {
     const query = new URLSearchParams(params || {}).toString();
@@ -130,6 +135,8 @@ export const api = {
   },
   toggleMasterParticipantEligibility: (idNumber: string, isNotEligible: boolean, reason?: string) =>
     request<any>('/api/portal/master-participants/toggle-eligibility', { method: 'POST', body: JSON.stringify({ idNumber, isNotEligible, reason }) }),
+  deleteMasterParticipant: (idNumber: string) =>
+    request<any>(`/api/portal/master-participants/${encodeURIComponent(idNumber)}`, { method: 'DELETE' }),
 
   exportParticipantsCSV: async (questionId?: string): Promise<string> => {
     const token = getStoredToken();
@@ -146,6 +153,8 @@ export const api = {
   updateWinner: (id: string, data: any) => request<any>(`/api/portal/quiz-winners/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   updateWinnerStatus: (id: string, data: any) => request<any>(`/api/portal/quiz-winners/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   reselectWinner: (id: string, reason: string) => request<any>(`/api/portal/quiz-winners/${id}/reselect`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  deleteWinner: (id: string) => request<any>(`/api/portal/quiz-winners/${id}`, { method: 'DELETE' }),
+  deleteQuizWinner: (id: string) => request<any>(`/api/portal/quiz-winners/${id}`, { method: 'DELETE' }),
 
   getUsers: () => request<any>('/api/portal/users'),
   getUserPerformance: (userId: string) => request<any>(`/api/portal/users/${userId}/performance`),
@@ -160,7 +169,6 @@ export const api = {
   getRoles: () => request<any>('/api/portal/roles'),
   createRole: (role: any) => request<any>('/api/portal/roles', { method: 'POST', body: JSON.stringify(role) }),
   updateRole: (id: string, role: any) => request<any>(`/api/portal/roles/${id}`, { method: 'PUT', body: JSON.stringify(role) }),
-  syncDb: () => request<any>('/api/portal/sync-db', { method: 'POST' }),
   getDbTables: () => request<any>('/api/portal/db/tables'),
   exportDbBackup: async (): Promise<Blob> => {
     const token = getStoredToken();
@@ -269,6 +277,33 @@ export const api = {
   createExpenseRecord: (data: any) => request<any>('/api/portal/budget/expenses', { method: 'POST', body: JSON.stringify(data) }),
   updateExpenseRecord: (id: string, data: any) => request<any>(`/api/portal/budget/expenses/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteExpenseRecord: (id: string) => request<any>(`/api/portal/budget/expenses/${id}`, { method: 'DELETE' }),
+  approveExpensePayment: (id: string, data?: { status?: string; releasePayment?: boolean; accountId?: string; remarks?: string }) =>
+    request<any>(`/api/portal/budget/expenses/${id}/approve`, { method: 'POST', body: JSON.stringify(data || {}) }),
+
+  // --- Invoices & Quotations API ---
+  getNextInvoiceNumber: (type: 'invoice' | 'quotation' = 'invoice') =>
+    request<{ nextNumber: string }>(`/api/portal/budget/invoices/next-number?type=${type}`),
+  getInvoices: (params?: { type?: string; status?: string; startDate?: string; endDate?: string; search?: string }) => {
+    const query = new URLSearchParams(params as any).toString();
+    return request<any[]>(`/api/portal/budget/invoices${query ? `?${query}` : ''}`);
+  },
+  getInvoiceById: (id: string) => request<any>(`/api/portal/budget/invoices/${id}`),
+  createInvoice: (data: any) => request<any>('/api/portal/budget/invoices', { method: 'POST', body: JSON.stringify(data) }),
+  updateInvoice: (id: string, data: any) => request<any>(`/api/portal/budget/invoices/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  approveInvoice: (id: string, data?: { status?: string; remarks?: string }) =>
+    request<any>(`/api/portal/budget/invoices/${id}/approve`, { method: 'POST', body: JSON.stringify(data || {}) }),
+  collectInvoicePayment: (id: string, data: {
+    amount: number;
+    paymentMethod: 'cash' | 'online' | 'both';
+    accountId: string;
+    category?: string;
+    receivedBy: string;
+    receivedDate?: string;
+    referenceNumber?: string;
+    notes?: string;
+    status?: string;
+  }) => request<{ invoice: any; incomeRecord: any }>(`/api/portal/budget/invoices/${id}/collect`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteInvoice: (id: string) => request<any>(`/api/portal/budget/invoices/${id}`, { method: 'DELETE' }),
 
   getContributionSettings: () => request<any>('/api/portal/budget/contributions/settings'),
   updateContributionSettings: (data: any) => request<any>('/api/portal/budget/contributions/settings', { method: 'PUT', body: JSON.stringify(data) }),
@@ -294,5 +329,50 @@ export const api = {
   getOfficialCirculars: () => request<any[]>('/api/portal/executive/circulars'),
   createOfficialCircular: (data: any) => request<any>('/api/portal/executive/circulars', { method: 'POST', body: JSON.stringify(data) }),
   updateOfficialCircular: (id: string, data: any) => request<any>(`/api/portal/executive/circulars/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteOfficialCircular: (id: string) => request<any>(`/api/portal/executive/circulars/${id}`, { method: 'DELETE' })
+  deleteOfficialCircular: (id: string) => request<any>(`/api/portal/executive/circulars/${id}`, { method: 'DELETE' }),
+
+  // --- Database Health & Realtime Sync APIs ---
+  getDbStatus: () => request<{
+    ok: boolean;
+    engine: string;
+    healthy: boolean;
+    totalCollections: number;
+    totalDocuments: number;
+    collectionStats: Record<string, number>;
+    lastPersistTimestamp: string;
+    totalWriteOperations: number;
+    databaseFileSizeBytes: number;
+    hasSafetyBackup: boolean;
+  }>('/api/system/db-status'),
+  syncDb: () => request<{
+    ok: boolean;
+    message: string;
+    engine: string;
+    healthy: boolean;
+    totalCollections: number;
+    totalDocuments: number;
+    collectionStats: Record<string, number>;
+    lastPersistTimestamp: string;
+    totalWriteOperations: number;
+    databaseFileSizeBytes: number;
+    hasSafetyBackup: boolean;
+  }>('/api/system/sync', { method: 'POST' }),
+  getRealtimeStatus: () => request<{
+    ok: boolean;
+    realtimeEngine: string;
+    activeClientsCount: number;
+    lastEvents: any[];
+    tableVersions: Record<string, number>;
+    serverTime: number;
+    uptimeSeconds: number;
+  }>('/api/realtime/status'),
+  syncAllTables: (reason?: string) => request<{ ok: boolean; message: string }>('/api/realtime/sync-all', {
+    method: 'POST',
+    body: JSON.stringify({ reason: reason || 'manual_sync_trigger' })
+  }),
+  broadcastTableEvent: (table: string, action: string = 'update', id?: string, data?: any) =>
+    request<{ ok: boolean; message: string }>('/api/realtime/broadcast', {
+      method: 'POST',
+      body: JSON.stringify({ table, action, id, data })
+    })
 };

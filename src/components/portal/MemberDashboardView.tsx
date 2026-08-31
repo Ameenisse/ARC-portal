@@ -104,6 +104,10 @@ const translations = {
     answered: 'ޖަވާބު ދެވިފައި',
     correct: 'ރަނގަޅު',
     incorrect: 'ނުބައި',
+    pendingReveal: 'ޖަވާބު ހާމަކުރުމުގެ އިންތިޒާރުގައި',
+    pendingRevealShort: 'އިންތިޒާރުގައި',
+    realAnswer: 'ޞައްޙަ ޖަވާބު:',
+    revealedAnswers: 'ޖަވާބު ހާމަކުރެވިފައި',
     noQuizSubmissions: 'އެއްވެސް ސުވާލަކަށް އަދި ޖަވާބު ދެއްވާފައެއް ނެތެވެ.',
     winsHistoryTitle: 'ނަސީބުވެރިންގެ ރެކޯޑުތައް',
     qPrefix: 'ސުވާލު #',
@@ -170,6 +174,10 @@ const translations = {
     answered: 'Submitted',
     correct: 'Correct',
     incorrect: 'Incorrect',
+    pendingReveal: 'Awaiting Real Answer',
+    pendingRevealShort: 'Pending Reveal',
+    realAnswer: 'Real Answer:',
+    revealedAnswers: 'Revealed Answers',
     noQuizSubmissions: 'No quiz answers submitted yet.',
     winsHistoryTitle: 'Lucky Draw Winner Records',
     qPrefix: 'Question #',
@@ -284,6 +292,11 @@ export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, 
 
   const linkedMember: ClubMember | undefined = data?.member;
   const budgetSummary = data?.budget?.summary;
+  const isAdmin = Boolean(
+    user.roleName === 'Admin' ||
+    user.roleId === 'role_admin' ||
+    user.roleName?.toLowerCase().includes('admin')
+  );
 
   return (
     <div className="space-y-8" dir={dir}>
@@ -416,16 +429,16 @@ export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, 
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 self-end md:self-center">
-                <button
-                  type="button"
-                  onClick={() => setShowConnectForm(!showConnectForm)}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
-                >
-                  <Link className="w-3.5 h-3.5 text-orange-400" />
-                  <span>{lang === 'english' ? 'Change Profile' : 'ޕްރޮފައިލް ބަދަލުކުރައްވާ'}</span>
-                </button>
-                {(user.roleName === 'Admin' || user.roleId === 'role_admin' || user.roleName?.toLowerCase().includes('admin')) && (
+              {isAdmin && (
+                <div className="flex items-center gap-2 self-end md:self-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowConnectForm(!showConnectForm)}
+                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Link className="w-3.5 h-3.5 text-orange-400" />
+                    <span>{lang === 'english' ? 'Change Profile' : 'ޕްރޮފައިލް ބަދަލުކުރައްވާ'}</span>
+                  </button>
                   <button
                     type="button"
                     onClick={handleDisconnectMember}
@@ -434,10 +447,10 @@ export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, 
                     <Unlink className="w-3.5 h-3.5" />
                     <span>{txt.disconnectMember}</span>
                   </button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
-          ) : widgetSettings.allowMemberConnectProfile ? (
+          ) : isAdmin ? (
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="space-y-1">
@@ -478,13 +491,25 @@ export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, 
               </form>
             </div>
           ) : (
-            <div className="text-center py-4 text-xs text-slate-400">
-              {txt.notConnected}
+            <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl flex items-center gap-3 text-xs text-slate-400">
+              <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />
+              <div>
+                <p className="font-semibold text-slate-300">
+                  {lang === 'english'
+                    ? 'Member profile is not connected yet.'
+                    : 'މެންބަރޝިޕް ޕްރޮފައިލް އަދި ގުޅުވާލެވިފައެއް ނެތެވެ.'}
+                </p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {lang === 'english'
+                    ? 'Profile connections and modifications are managed exclusively by the System Administrator.'
+                    : 'މެންބަރު ޕްރޮފައިލް ގުޅުވައި ބަދަލުކުރުމުގެ ހުއްދަ އޮންނާނީ ހަމައެކަނި ސިސްޓަމް އެޑްމިނިސްޓްރޭޓަރަށެވެ.'}
+                </p>
+              </div>
             </div>
           )}
 
-          {/* If already connected and wants to switch profile */}
-          {linkedMember && showConnectForm && (
+          {/* If already connected and wants to switch profile (Admin Only) */}
+          {isAdmin && linkedMember && showConnectForm && (
             <form onSubmit={handleConnectMember} className="mt-4 pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center gap-3">
               <div className="relative flex-1 w-full">
                 <input
@@ -559,11 +584,18 @@ export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, 
                 </div>
                 <div className="flex items-baseline gap-2">
                   <span className="text-3xl font-black font-mono text-white">{data.quiz.totalAttempts}</span>
-                  <span className="text-xs font-bold text-orange-400">({data.quiz.accuracyRate}% {txt.correctAccuracy})</span>
+                  {(data.quiz.revealedAnswersCount || 0) > 0 && (
+                    <span className="text-xs font-bold text-orange-400">({data.quiz.accuracyRate}% {txt.correctAccuracy})</span>
+                  )}
                 </div>
-                <p className="text-[11px] text-slate-400">
-                  {data.quiz.correctAnswers} {txt.correctAnswers}
-                </p>
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                  <span>{data.quiz.correctAnswers} {txt.correctAnswers}</span>
+                  {(data.quiz.pendingRevealCount || 0) > 0 && (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 text-[10px] font-medium border border-amber-500/20">
+                      {data.quiz.pendingRevealCount} {txt.pendingRevealShort}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Lucky Draw Wins */}
@@ -785,26 +817,39 @@ export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, 
                         <tbody className="divide-y divide-slate-800/60">
                           {data.quiz.submissions.map(sub => (
                             <tr key={sub.id} className="hover:bg-slate-800/40 transition-colors">
-                              <td className="py-3 px-3 font-bold font-mono text-orange-400">
+                              <td className="py-3 px-3 font-bold font-mono text-orange-400 align-top">
                                 #{sub.questionNumber}
                               </td>
-                              <td className="py-3 px-3 text-slate-300 font-semibold">
-                                {sub.selectedOptionText || txt.answered}
+                              <td className="py-3 px-3 text-slate-300 font-semibold align-top space-y-1">
+                                <div>{sub.selectedOptionText || txt.answered}</div>
+                                {sub.isAnswerRevealed && sub.correctOptionText && !sub.isCorrect && (
+                                  <div className="text-[11px] text-emerald-400 font-normal flex items-center gap-1">
+                                    <span className="text-slate-400 font-semibold">{txt.realAnswer}</span>
+                                    <span>{sub.correctOptionText}</span>
+                                  </div>
+                                )}
                               </td>
-                              <td className="py-3 px-3 text-center">
-                                {sub.isCorrect ? (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-bold text-[10px]">
-                                    <CheckCircle2 className="w-3 h-3" />
-                                    <span>{txt.correct}</span>
-                                  </span>
+                              <td className="py-3 px-3 text-center align-top">
+                                {sub.isAnswerRevealed ? (
+                                  sub.isCorrect ? (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-bold text-[10px] border border-emerald-500/20">
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      <span>{txt.correct}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-500/15 text-rose-400 font-bold text-[10px] border border-rose-500/20">
+                                      <XCircle className="w-3 h-3" />
+                                      <span>{txt.incorrect}</span>
+                                    </span>
+                                  )
                                 ) : (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-500/15 text-rose-400 font-bold text-[10px]">
-                                    <XCircle className="w-3 h-3" />
-                                    <span>{txt.incorrect}</span>
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-300 font-bold text-[10px] border border-amber-500/20">
+                                    <Clock className="w-3 h-3 text-amber-400" />
+                                    <span>{txt.pendingReveal}</span>
                                   </span>
                                 )}
                               </td>
-                              <td className={`py-3 px-3 ${lang === 'english' ? 'text-right' : 'text-left'} font-mono text-slate-500 text-[10px]`}>
+                              <td className={`py-3 px-3 ${lang === 'english' ? 'text-right' : 'text-left'} font-mono text-slate-500 text-[10px] align-top`}>
                                 {formatDateTime(sub.submittedAt)}
                               </td>
                             </tr>

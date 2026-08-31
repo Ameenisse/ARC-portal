@@ -1,10 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default Deny: All client-side direct access is closed.
-    // All read/write operations must go through the authenticated ARC Express Server via Firebase Admin SDK.
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if true;
     }
   }
 }

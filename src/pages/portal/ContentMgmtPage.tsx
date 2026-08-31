@@ -7,6 +7,7 @@ import { SlideshowItem, ExcoMember, SocialLink, ContactInfo, ClubEvent } from '.
 import { Modal } from '../../components/common/Modal';
 import { ImageUploadInput } from '../../components/common/ImageUploadInput';
 import { useToast } from '../../components/common/Toast';
+import { useTableSync } from '../../hooks/useRealtimeSync';
 import { 
   Image as ImageIcon, Globe, Target, Users, Share2, PhoneCall, Plus, Edit, Trash2, 
   Eye, EyeOff, Save, CheckCircle, User, Calendar, MapPin
@@ -222,6 +223,20 @@ export const ContentMgmtPage: React.FC = () => {
     else if (currentTab === 'contact') fetchContacts();
     else if (currentTab === 'events') fetchEvents();
   }, [currentTab]);
+
+  // Real-time table sync for Public Site CMS tables
+  useTableSync(
+    ['slideshow', 'siteSettings', 'contacts', 'socialLinks', 'excoMembers', 'events'],
+    () => {
+      if (currentTab === 'slideshow') fetchSlides();
+      else if (currentTab === 'content') fetchContentSettings();
+      else if (currentTab === 'vision_mission') fetchContentSettings();
+      else if (currentTab === 'exco_team') fetchExco();
+      else if (currentTab === 'social_media') fetchSocial();
+      else if (currentTab === 'contact') fetchContacts();
+      else if (currentTab === 'events') fetchEvents();
+    }
+  );
 
   // EVENT CRUD HANDLERS
   const handleOpenCreateEvent = () => {

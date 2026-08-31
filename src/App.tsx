@@ -1,9 +1,9 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { RealtimeProvider } from './context/RealtimeContext';
 import { ToastProvider } from './components/common/Toast';
 import { ProtectedRoute } from './components/common/ProtectedRoute';
-import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 // Public Pages
 import { HomePage } from './pages/public/HomePage';
@@ -29,9 +29,9 @@ import { EventsMeetingsMgmtPage } from './pages/portal/EventsMeetingsMgmtPage';
 
 export function App() {
   return (
-    <ErrorBoundary>
-      <ToastProvider>
-        <AuthProvider>
+    <ToastProvider>
+      <AuthProvider>
+        <RealtimeProvider>
           <BrowserRouter>
             <Routes>
               {/* Public Routes */}
@@ -98,9 +98,9 @@ export function App() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>
-        </AuthProvider>
-      </ToastProvider>
-    </ErrorBoundary>
+        </RealtimeProvider>
+      </AuthProvider>
+    </ToastProvider>
   );
 }
 

@@ -11,7 +11,6 @@ interface PublicFooterProps {
     footerDescription?: string;
     copyrightText?: string;
   };
-  contacts?: any[];
   socialLinks?: SocialLink[];
   hasEvents?: boolean;
 }

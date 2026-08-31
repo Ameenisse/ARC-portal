@@ -3,6 +3,7 @@ import { PortalLayout } from '../../components/portal/PortalLayout';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
 import { Modal } from '../../components/common/Modal';
+import { useTableSync } from '../../hooks/useRealtimeSync';
 import { api } from '../../services/api';
 import { InboxMessage, AppNotification, MessageActionRecord } from '../../types';
 import {
@@ -93,6 +94,11 @@ export const MessagesPage: React.FC = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Real-time table sync for inbox messages, contact messages, and app notifications
+  useTableSync(['inboxMessages', 'contactMessages', 'appNotifications', 'contacts'], () => {
+    fetchData();
+  });
 
   const handleSelectMessage = async (msg: InboxMessage) => {
     setSelectedMessage(msg);

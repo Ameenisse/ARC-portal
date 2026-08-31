@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { SlideshowItem } from '../../types';
 
 interface HeroSlideshowProps {
@@ -11,11 +11,13 @@ interface HeroSlideshowProps {
     showDots: boolean;
     pauseOnHover: boolean;
   };
+  children?: React.ReactNode;
 }
 
 export const HeroSlideshow: React.FC<HeroSlideshowProps> = ({
   slides,
-  settings = { autoplay: true, slideDuration: 5000, showArrows: true, showDots: true, pauseOnHover: true }
+  settings = { autoplay: true, slideDuration: 5000, showArrows: true, showDots: true, pauseOnHover: true },
+  children
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
@@ -32,7 +34,8 @@ export const HeroSlideshow: React.FC<HeroSlideshowProps> = ({
 
   if (!slides || slides.length === 0) return null;
 
-  const currentSlide = slides[currentIndex];
+  const currentSlide = slides[currentIndex] || slides[0];
+  if (!currentSlide) return null;
 
   const handlePrev = () => {
     setCurrentIndex(prev => (prev === 0 ? slides.length - 1 : prev - 1));
@@ -42,71 +45,54 @@ export const HeroSlideshow: React.FC<HeroSlideshowProps> = ({
     setCurrentIndex(prev => (prev + 1) % slides.length);
   };
 
-  const alignClasses = {
-    left: 'text-right items-end',
-    center: 'text-center items-center',
-    right: 'text-left items-start'
-  }[currentSlide.textAlignment || 'center'];
-
   return (
     <div
       id="hero_slideshow"
-      className="relative w-full h-[520px] sm:h-[600px] lg:h-[660px] bg-slate-950 overflow-hidden"
+      className={`relative w-full ${children ? 'min-h-[500px] sm:h-[580px] lg:h-[640px]' : 'h-[380px] sm:h-[480px] lg:h-[560px]'} bg-slate-950 overflow-hidden group`}
       onMouseEnter={() => settings.pauseOnHover && setIsPaused(true)}
       onMouseLeave={() => settings.pauseOnHover && setIsPaused(false)}
     >
       {/* Background Image with Fade Transition */}
       <div className="absolute inset-0 transition-all duration-700 ease-out">
-        <picture>
-          {currentSlide.mobileImage && (
-            <source media="(max-width: 640px)" srcSet={currentSlide.mobileImage} />
-          )}
-          <img
-            src={currentSlide.desktopImage}
-            alt={currentSlide.title}
-            className="w-full h-full object-cover scale-105 animate-pulse-subtle"
-          />
-        </picture>
-        {/* Dynamic Overlay Level */}
-        <div
-          className="absolute inset-0 bg-slate-950"
-          style={{ opacity: (currentSlide.overlayLevel ?? 45) / 100 }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-slate-950/40" />
+        {currentSlide.buttonLink ? (
+          <a
+            href={currentSlide.buttonLink}
+            className="block w-full h-full cursor-pointer"
+            id={`slide_link_${currentSlide.id}`}
+          >
+            <picture>
+              {currentSlide.mobileImage && (
+                <source media="(max-width: 640px)" srcSet={currentSlide.mobileImage} />
+              )}
+              <img
+                src={currentSlide.desktopImage}
+                alt={currentSlide.title || 'Hero Slide'}
+                className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+              />
+            </picture>
+          </a>
+        ) : (
+          <picture>
+            {currentSlide.mobileImage && (
+              <source media="(max-width: 640px)" srcSet={currentSlide.mobileImage} />
+            )}
+            <img
+              src={currentSlide.desktopImage}
+              alt={currentSlide.title || 'Hero Slide'}
+              className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+            />
+          </picture>
+        )}
+        {/* Subtle vignette/contrast overlay for clean legibility without solid backgrounds */}
+        <div className={`absolute inset-0 ${children ? 'bg-slate-950/45 bg-gradient-to-t from-slate-950/90 via-slate-950/40 to-slate-950/50' : 'bg-gradient-to-t from-slate-950/60 via-transparent to-transparent'} pointer-events-none`} />
       </div>
 
-      {/* Slide Content */}
-      <div className="relative h-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col justify-center">
-        <div className={`max-w-3xl flex flex-col ${alignClasses} space-y-4 animate-fade-in`}>
-          
-          <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-orange-500/20 border border-orange-400/40 text-orange-300 font-medium text-xs tracking-wider uppercase backdrop-blur-md">
-            އާނަންދާ ރީކްރިއޭޝަން ކްލަބް (ARC)
-          </span>
-
-          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-white font-heading leading-tight tracking-tight drop-shadow-md">
-            {currentSlide.title}
-          </h1>
-
-          {currentSlide.subtitle && (
-            <p className="text-base sm:text-xl text-slate-200 leading-relaxed font-normal max-w-2xl drop-shadow">
-              {currentSlide.subtitle}
-            </p>
-          )}
-
-          {currentSlide.buttonText && currentSlide.buttonLink && (
-            <div className="pt-4">
-              <a
-                id={`slide_cta_${currentSlide.id}`}
-                href={currentSlide.buttonLink}
-                className="inline-flex items-center gap-3 px-7 py-3.5 rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-base shadow-xl shadow-orange-500/25 hover:scale-105 active:scale-95 transition-all"
-              >
-                <span>{currentSlide.buttonText}</span>
-                <ArrowLeft className="w-5 h-5" />
-              </a>
-            </div>
-          )}
+      {/* Floating Content Overlaid on Slide Images */}
+      {children && (
+        <div className="relative z-10 h-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col justify-center items-center text-center">
+          {children}
         </div>
-      </div>
+      )}
 
       {/* Navigation Arrows */}
       {settings.showArrows && slides.length > 1 && (

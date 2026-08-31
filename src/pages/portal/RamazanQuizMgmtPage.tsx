@@ -10,7 +10,8 @@ import { MarkNotEligibleModal } from '../../components/portal/MarkNotEligibleMod
 import { ClockTimePickerModal } from '../../components/common/ClockTimePickerModal';
 import { ImageUploadInput } from '../../components/common/ImageUploadInput';
 import { useToast } from '../../components/common/Toast';
-import { formatDateTime, getThaanaOptionLabel, THAANA_LABELS } from '../../utils/formatters';
+import { useTableSync } from '../../hooks/useRealtimeSync';
+import { formatDateTime, formatToMaldivesInput, parseMaldivesInputToISO, getThaanaOptionLabel, THAANA_LABELS } from '../../utils/formatters';
 import { 
   Plus, Edit, Trash2, Play, Eye, Trophy, Sparkles, LayoutDashboard, HelpCircle, Clock,
   UserCheck, Award, Settings, Search, Download, RefreshCw, ShieldAlert, CheckCircle, XCircle,
@@ -132,6 +133,8 @@ export const RamazanQuizMgmtPage: React.FC = () => {
   const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  const isAdmin = (user?.roleName || user?.roleId || '').toLowerCase().includes('admin') || user?.roleId === 'role_admin' || hasPermission('quiz', 'canDelete');
+
   // Questions state
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [loadingQuestions, setLoadingQuestions] = useState(true);
@@ -142,6 +145,9 @@ export const RamazanQuizMgmtPage: React.FC = () => {
   const [questionToDelete, setQuestionToDelete] = useState<QuizQuestion | null>(null);
   const [prizeToDelete, setPrizeToDelete] = useState<QuizPrize | null>(null);
   const [sponsorToDelete, setSponsorToDelete] = useState<QuizSponsor | null>(null);
+  const [submissionToDelete, setSubmissionToDelete] = useState<any | null>(null);
+  const [masterParticipantToDelete, setMasterParticipantToDelete] = useState<any | null>(null);
+  const [winnerToDelete, setWinnerToDelete] = useState<any | null>(null);
 
   // Question Form State
   const [questionNumber, setQuestionNumber] = useState(1);
@@ -198,37 +204,69 @@ export const RamazanQuizMgmtPage: React.FC = () => {
   const [revealAt, setRevealAt] = useState('');
   const [drawStartAt, setDrawStartAt] = useState('');
 
-  const calculateDrawStartAt = (revealIso: string) => {
-    if (!revealIso) return '';
-    const revDate = new Date(revealIso);
-    if (isNaN(revDate.getTime())) return '';
-    return formatForInput(revDate.toISOString());
+  const formatForInput = (isoStr?: string) => {
+    return formatToMaldivesInput(isoStr);
+  };
+
+  const formatToISO = (inputVal: string) => {
+    return parseMaldivesInputToISO(inputVal);
+  };
+
+  const handlePublishAtChange = (newVal: string) => {
+    setPublishAt(newVal);
+    if (newVal) {
+      const pubIso = parseMaldivesInputToISO(newVal);
+      const pubMs = new Date(pubIso).getTime();
+      if (!isNaN(pubMs)) {
+        const curCloseIso = closeAt ? parseMaldivesInputToISO(closeAt) : '';
+        const curCloseMs = curCloseIso ? new Date(curCloseIso).getTime() : 0;
+        if (curCloseMs <= pubMs) {
+          const newCloseIso = new Date(pubMs + 12 * 3600 * 1000).toISOString();
+          setCloseAt(formatToMaldivesInput(newCloseIso));
+          setDrawStartAt(formatToMaldivesInput(newCloseIso));
+          setRevealAt(formatToMaldivesInput(new Date(pubMs + (12 * 3600 + 30) * 1000).toISOString()));
+        }
+      }
+    }
+  };
+
+  const handleCloseAtChange = (newVal: string) => {
+    setCloseAt(newVal);
+    if (newVal) {
+      const closeIso = parseMaldivesInputToISO(newVal);
+      const closeMs = new Date(closeIso).getTime();
+      if (!isNaN(closeMs)) {
+        const curDrawIso = drawStartAt ? parseMaldivesInputToISO(drawStartAt) : '';
+        const curDrawMs = curDrawIso ? new Date(curDrawIso).getTime() : 0;
+        if (curDrawMs < closeMs) {
+          setDrawStartAt(formatToMaldivesInput(closeIso));
+        }
+        const curRevealIso = revealAt ? parseMaldivesInputToISO(revealAt) : '';
+        const curRevealMs = curRevealIso ? new Date(curRevealIso).getTime() : 0;
+        if (curRevealMs < closeMs) {
+          setRevealAt(formatToMaldivesInput(new Date(closeMs + 30 * 1000).toISOString()));
+        }
+      }
+    }
+  };
+
+  const handleDrawStartAtChange = (newVal: string) => {
+    setDrawStartAt(newVal);
+    if (newVal) {
+      const drawIso = parseMaldivesInputToISO(newVal);
+      const drawMs = new Date(drawIso).getTime();
+      if (!isNaN(drawMs)) {
+        const curRevealIso = revealAt ? parseMaldivesInputToISO(revealAt) : '';
+        const curRevealMs = curRevealIso ? new Date(curRevealIso).getTime() : 0;
+        if (curRevealMs < drawMs) {
+          setRevealAt(formatToMaldivesInput(new Date(drawMs + 30 * 1000).toISOString()));
+        }
+      }
+    }
   };
 
   const handleRevealAtChange = (newVal: string) => {
     setRevealAt(newVal);
-    if (newVal) {
-      const calcDraw = calculateDrawStartAt(newVal);
-      if (calcDraw) setDrawStartAt(calcDraw);
-    }
-  };
-
-  const formatForInput = (isoStr?: string) => {
-    if (!isoStr) return '';
-    const d = new Date(isoStr);
-    if (isNaN(d.getTime())) return '';
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    const year = d.getFullYear();
-    const month = pad(d.getMonth() + 1);
-    const day = pad(d.getDate());
-    const hours = pad(d.getHours());
-    const minutes = pad(d.getMinutes());
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
-  };
-
-  const formatToISO = (inputVal: string) => {
-    if (!inputVal) return new Date().toISOString();
-    return new Date(inputVal).toISOString();
   };
 
   // Participants State (Answers Submissions)
@@ -447,6 +485,39 @@ export const RamazanQuizMgmtPage: React.FC = () => {
       fetchDashboardStats();
     }
   }, [currentTab, questionFilter, statusFilter, masterStatusFilter]);
+
+  // Real-time table sync for Ramazan Quiz tables
+  useTableSync(
+    [
+      'quiz_questions',
+      'quiz_submissions',
+      'quiz_winners',
+      'quiz_prizes',
+      'quiz_sponsors',
+      'quizQuestions',
+      'quizSubmissions',
+      'quizWinners',
+      'quizPrizes',
+      'quizSponsors',
+      'masterIneligibleParticipants'
+    ],
+    () => {
+      fetchQuestions();
+      if (currentTab === 'participants') {
+        fetchParticipants();
+      } else if (currentTab === 'master_participants') {
+        fetchMasterParticipants();
+      } else if (currentTab === 'winners') {
+        fetchWinners();
+      } else if (currentTab === 'settings') {
+        fetchSettings();
+        fetchPrizes();
+        fetchSponsors();
+      } else if (currentTab === 'dashboard') {
+        fetchDashboardStats();
+      }
+    }
+  );
 
   // Fetch Prizes
   const fetchPrizes = async () => {
@@ -717,18 +788,44 @@ export const RamazanQuizMgmtPage: React.FC = () => {
     const drawStartAtIso = drawStartAt ? formatToISO(drawStartAt) : closeAtIso;
     const revealAtIso = revealAt ? formatToISO(revealAt) : drawStartAtIso;
 
-    if (new Date(closeAtIso).getTime() <= new Date(publishAtIso).getTime()) {
-      showToast('error', 'Submit deadline time must be set after publish start time.');
+    const pubMs = new Date(publishAtIso).getTime();
+    const closeMs = new Date(closeAtIso).getTime();
+    const drawMs = new Date(drawStartAtIso).getTime();
+    const revealMs = new Date(revealAtIso).getTime();
+
+    if (isNaN(pubMs)) {
+      showToast('error', 'Please enter a valid publishing start date & time.');
+      return;
+    }
+    if (isNaN(closeMs)) {
+      showToast('error', 'Please enter a valid submit deadline date & time.');
+      return;
+    }
+    if (isNaN(drawMs)) {
+      showToast('error', 'Please enter a valid number rolling date & time.');
+      return;
+    }
+    if (isNaN(revealMs)) {
+      showToast('error', 'Please enter a valid winner announcement date & time.');
       return;
     }
 
-    if (new Date(drawStartAtIso).getTime() < new Date(closeAtIso).getTime()) {
-      showToast('error', 'Numbers rolling time must not be set before submit deadline time.');
+    // Chronological validation:
+    // 1. Deadline time cannot be set before publishing time
+    if (closeMs <= pubMs) {
+      showToast('error', 'Submit deadline time (ސުންގަޑި) cannot be set before publishing time (ޝާއިޢުކުރާ ގަޑި).');
       return;
     }
 
-    if (new Date(revealAtIso).getTime() <= new Date(drawStartAtIso).getTime()) {
-      showToast('error', 'Winner reveal time (ނަސީބުވެރިޔާ ހާމަކުރާ ގަޑި) must not be set before numbers rolling time (ނަންބަރު ރޯލްކުރަން ފަށާ ގަޑި).');
+    // 2. Number rolling time cannot be set before deadline time
+    if (drawMs < closeMs) {
+      showToast('error', 'Number rolling time (ނަންބަރު ރޯލްކުރާ ގަޑި) cannot be set before deadline time (ސުންގަޑި).');
+      return;
+    }
+
+    // 3. Winner announcement time cannot be set before number rolling time
+    if (revealMs < drawMs) {
+      showToast('error', 'Winner announcement time (ނަސީބުވެރިޔާ ހާމަކުރާ ގަޑި) cannot be set before number rolling time (ނަންބަރު ރޯލްކުރާ ގަޑި).');
       return;
     }
 
@@ -802,10 +899,12 @@ export const RamazanQuizMgmtPage: React.FC = () => {
     if (!questionToDelete) return;
     try {
       await api.deleteQuizQuestion(questionToDelete.id);
-      showToast('success', 'Question and its recorded winner/submissions deleted successfully.');
+      showToast('success', 'Question and its associated winner & submissions deleted successfully.');
       fetchQuestions();
       fetchDashboardStats();
       fetchWinners();
+      fetchParticipants();
+      fetchMasterParticipants();
     } catch (err: any) {
       showToast('error', err.message || 'Failed to delete question.');
     } finally {
@@ -939,6 +1038,53 @@ export const RamazanQuizMgmtPage: React.FC = () => {
       fetchWinners();
     });
     setNotEligibleModalOpen(true);
+  };
+
+  const handleDeleteSubmission = async () => {
+    if (!submissionToDelete) return;
+    try {
+      await api.deleteQuizParticipant(submissionToDelete.id);
+      showToast('success', 'Participant submission deleted successfully.');
+      setSubmissionToDelete(null);
+      fetchParticipants();
+      fetchMasterParticipants();
+      fetchWinners();
+      fetchQuestions();
+      fetchDashboardStats();
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to delete submission.');
+    }
+  };
+
+  const handleDeleteMasterParticipant = async () => {
+    if (!masterParticipantToDelete) return;
+    try {
+      const idNumber = masterParticipantToDelete.normalizedIdNumber || masterParticipantToDelete.idNumber || masterParticipantToDelete.id;
+      await api.deleteMasterParticipant(idNumber);
+      showToast('success', `Participant (ID: ${idNumber}) and all associated submissions deleted.`);
+      setMasterParticipantToDelete(null);
+      fetchMasterParticipants();
+      fetchParticipants();
+      fetchQuestions();
+      fetchWinners();
+      fetchDashboardStats();
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to delete participant from master list.');
+    }
+  };
+
+  const handleDeleteWinner = async () => {
+    if (!winnerToDelete) return;
+    try {
+      await api.deleteQuizWinner(winnerToDelete.id);
+      showToast('success', 'Winner record deleted.');
+      setWinnerToDelete(null);
+      fetchWinners();
+      fetchQuestions();
+      fetchDashboardStats();
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to delete winner.');
+    }
   };
 
   // Settings Save
@@ -1250,15 +1396,26 @@ export const RamazanQuizMgmtPage: React.FC = () => {
                   <div key={q.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
                       <div>
-                        <span className="text-xs font-bold uppercase tracking-wider text-orange-400">Day {q.questionNumber}</span>
-                        <div className="flex items-center gap-3 flex-wrap mt-2 text-xs text-slate-400">
-                          <span className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold uppercase tracking-wider text-orange-400">Day {q.questionNumber}</span>
+                          <span className="text-[11px] text-slate-500 font-mono">({q.id})</span>
+                        </div>
+                        <div className="flex items-center gap-2.5 flex-wrap mt-2 text-xs text-slate-400">
+                          <span className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800 text-slate-300 font-medium" title="Created Date & Time">
+                            <Clock className="w-3.5 h-3.5 text-slate-400" />
+                            <span>Created: {q.createdAt ? formatDateTime(q.createdAt) : (q.publishAt ? formatDateTime(q.publishAt) : 'N/A')}</span>
+                          </span>
+                          <span className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800 text-emerald-300 font-medium" title="Publish Start Date & Time">
+                            <Play className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Start: {q.publishAt ? formatDateTime(q.publishAt) : 'Not Set'}</span>
+                          </span>
+                          <span className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800 text-orange-300 font-medium" title="Submit Deadline">
                             <Clock className="w-3.5 h-3.5 text-orange-400" />
                             <span>Deadline: {q.closeAt ? formatDateTime(q.closeAt) : 'Not Set'}</span>
                           </span>
-                          <span className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                          <span className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800 text-amber-300 font-medium" title="Reveal / Winner Announcement Time">
                             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                            <span>Reveal Time: {q.revealAt ? formatDateTime(q.revealAt) : 'Not Set'}</span>
+                            <span>Reveal: {q.revealAt ? formatDateTime(q.revealAt) : 'Not Set'}</span>
                           </span>
                           {q.prizeTitle && (
                             <span className="flex items-center gap-1.5 bg-amber-950/60 text-amber-300 px-2.5 py-1 rounded-lg border border-amber-800/80 font-semibold">
@@ -1277,15 +1434,15 @@ export const RamazanQuizMgmtPage: React.FC = () => {
 
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase ${
-                          (q.status || (q as any).state) === 'open' ? 'bg-orange-950 text-orange-400 border border-orange-800' :
-                          (q.status || (q as any).state) === 'answer_revealed' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
-                          (q.status || (q as any).state) === 'winner_announced' ? 'bg-sky-950 text-sky-400 border border-sky-800' :
+                          q.status === 'open' ? 'bg-orange-950 text-orange-400 border border-orange-800' :
+                          q.status === 'answer_revealed' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
+                          q.status === 'winner_announced' ? 'bg-sky-950 text-sky-400 border border-sky-800' :
                           'bg-slate-800 text-slate-400'
                         }`}>
-                          {(q.status || (q as any).state || '').replace(/_/g, ' ')}
+                          {(q?.status || '').replace(/_/g, ' ')}
                         </span>
 
-                        {(q.status || (q as any).state) === 'draft' && (
+                        {q.status === 'draft' && (
                           <button
                             type="button"
                             onClick={() => handleStatusAction(q.id, 'open')}
@@ -1295,7 +1452,7 @@ export const RamazanQuizMgmtPage: React.FC = () => {
                           </button>
                         )}
 
-                        {(q.status || (q as any).state) === 'open' && (
+                        {q.status === 'open' && (
                           <button
                             type="button"
                             onClick={() => handleStatusAction(q.id, 'closed')}
@@ -1305,7 +1462,7 @@ export const RamazanQuizMgmtPage: React.FC = () => {
                           </button>
                         )}
 
-                        {(q.status || (q as any).state) === 'closed' && (
+                        {q.status === 'closed' && (
                           <button
                             type="button"
                             onClick={() => handleStatusAction(q.id, 'answer_revealed')}
@@ -1315,7 +1472,7 @@ export const RamazanQuizMgmtPage: React.FC = () => {
                           </button>
                         )}
 
-                        {['answer_revealed', 'draw_running'].includes(q.status || (q as any).state) && (
+                        {['answer_revealed', 'draw_running'].includes(q.status) && (
                           <button
                             type="button"
                             onClick={() => handleTriggerDraw(q.id)}
@@ -1490,17 +1647,29 @@ export const RamazanQuizMgmtPage: React.FC = () => {
                           </td>
                           <td className="p-3.5 text-slate-400 font-mono text-[11px]">{formatDateTime(p.submittedAt)}</td>
                           <td className="p-3.5 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleDisqualifyParticipant(p)}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-colors ${
-                                p.isDisqualified
-                                  ? 'bg-orange-950 text-orange-400 hover:bg-orange-900'
-                                  : 'bg-rose-950 text-rose-400 hover:bg-rose-900'
-                              }`}
-                            >
-                              {p.isDisqualified ? 'Restore Entry' : 'Disqualify'}
-                            </button>
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleDisqualifyParticipant(p)}
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-colors ${
+                                  p.isDisqualified
+                                    ? 'bg-orange-950 text-orange-400 hover:bg-orange-900'
+                                    : 'bg-rose-950 text-rose-400 hover:bg-rose-900'
+                                }`}
+                              >
+                                {p.isDisqualified ? 'Restore Entry' : 'Disqualify'}
+                              </button>
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSubmissionToDelete(p)}
+                                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/80 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-800 transition-colors"
+                                  title="Delete Submission (Admin Only)"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1588,17 +1757,29 @@ export const RamazanQuizMgmtPage: React.FC = () => {
                             </span>
                           </td>
                           <td className="p-3.5 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleToggleMasterEligibility(p)}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                                p.isNotEligible
-                                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                                  : 'bg-rose-600 hover:bg-rose-500 text-white'
-                              }`}
-                            >
-                              {p.isNotEligible ? 'Mark Eligible' : 'Mark Not Eligible'}
-                            </button>
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleMasterEligibility(p)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                  p.isNotEligible
+                                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                                    : 'bg-rose-600 hover:bg-rose-500 text-white'
+                                }`}
+                              >
+                                {p.isNotEligible ? 'Mark Eligible' : 'Mark Not Eligible'}
+                              </button>
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  onClick={() => setMasterParticipantToDelete(p)}
+                                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/80 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-800 transition-colors"
+                                  title="Delete Participant from Master List (Admin Only)"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1717,7 +1898,7 @@ export const RamazanQuizMgmtPage: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="pt-1">
+                        <div className="pt-1 space-y-2">
                           <button
                             type="button"
                             onClick={() => handleReselectWinner(w)}
@@ -1726,6 +1907,18 @@ export const RamazanQuizMgmtPage: React.FC = () => {
                             <RefreshCw className="w-3.5 h-3.5" />
                             <span>އާ ނަސީބުވެރިއެއް ހޮއްވަވާ</span>
                           </button>
+
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => setWinnerToDelete(w)}
+                              className="w-full py-2 bg-slate-950 hover:bg-rose-950/60 border border-slate-800 hover:border-rose-800 text-slate-400 hover:text-rose-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                              title="Delete Winner Record (Admin Only)"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                              <span>ނަސީބުވެރިޔާގެ ރެކޯޑު ފޮހެލާ (Delete Winner)</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2165,6 +2358,26 @@ export const RamazanQuizMgmtPage: React.FC = () => {
         maxWidth="4xl"
       >
         <form onSubmit={handleSaveQuestion} className="space-y-4">
+          {editingQuestion && (
+            <div className="flex items-center justify-between gap-3 flex-wrap p-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-400">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 font-medium">Question ID:</span>
+                <span className="font-mono text-white bg-slate-900 px-2 py-0.5 rounded border border-slate-800">{editingQuestion.id}</span>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="flex items-center gap-1 text-slate-300">
+                  <Clock className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Created: <strong className="text-white font-mono">{editingQuestion.createdAt ? formatDateTime(editingQuestion.createdAt) : (editingQuestion.publishAt ? formatDateTime(editingQuestion.publishAt) : 'N/A')}</strong></span>
+                </span>
+                {editingQuestion.updatedAt && (
+                  <span className="flex items-center gap-1 text-slate-400 text-[11px]">
+                    <span>Updated: {formatDateTime(editingQuestion.updatedAt)}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Day # *</label>
             <input
@@ -2316,46 +2529,59 @@ export const RamazanQuizMgmtPage: React.FC = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <DateTime24Input
-                label="Publish Start (DD/MM/YYYY 24-Hr)"
-                labelColorClass="text-slate-300"
+                label="1. ޝާއިޢުކުރާ ގަޑި (Publish Start DD/MM/YYYY)"
+                labelColorClass="text-sky-400"
                 value={publishAt}
-                onChange={setPublishAt}
+                onChange={handlePublishAtChange}
                 required
               />
 
               <DateTime24Input
-                label="Submit Deadline Time (DD/MM/YYYY 24-Hr)"
+                label="2. ސުންގަޑި (Submit Deadline DD/MM/YYYY)"
                 labelColorClass="text-amber-400"
                 value={closeAt}
-                onChange={setCloseAt}
+                onChange={handleCloseAtChange}
                 required
               />
 
               <DateTime24Input
-                label="Number Rolling Time (ނަންބަރު ރޯލްކުރަން ފަށާ ގަޑި)"
+                label="3. ނަންބަރު ރޯލްކުރާ ގަޑި (Number Rolling DD/MM/YYYY)"
                 labelColorClass="text-emerald-400"
                 value={drawStartAt}
-                onChange={setDrawStartAt}
+                onChange={handleDrawStartAtChange}
                 required
               />
 
               <DateTime24Input
-                label="Winner Announcement Time (ނަސީބުވެރިޔާ ހާމަކުރާ ގަޑި)"
+                label="4. ނަސީބުވެރިޔާ ހާމަކުރާ ގަޑި (Winner Reveal DD/MM/YYYY)"
                 labelColorClass="text-purple-400"
                 value={revealAt}
-                onChange={setRevealAt}
+                onChange={handleRevealAtChange}
                 required
               />
             </div>
 
-            <div className="p-3 bg-sky-950/80 border border-sky-800/80 rounded-xl text-[11px] text-sky-200 space-y-1">
+            <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl text-[11px] text-slate-300 space-y-1.5">
               <div className="flex items-center gap-2 font-bold text-amber-400">
-                <Sparkles className="w-4 h-4 shrink-0" />
-                <span>އޮޓޯ ތާވަލު (Automatic Schedule System):</span>
+                <Sparkles className="w-4 h-4 shrink-0 text-orange-400" />
+                <span>ކުއިޒް ހިނގާނެ ތަރުތީބު (Quiz Automated Lifecycle Flow):</span>
               </div>
-              <p>• <strong>ސުންގަޑި ހަމަވުމުން:</strong> ރަނގަޅު ޖަވާބު އޮޓޯއިން ހާމަވެ (Highlight) ފެންނާނެއެވެ.</p>
-              <p>• <strong>ނަންބަރު ރޯލްކުރަން ފަށާ ގަޑި:</strong> ވަކިން ޕަބްލިޝް ކުރަން ނުޖެހި، ރޯލިންގ އޮޓޯއިން ފެށި، ރަނގަޅު ޖވާބު ދިން ބައިވެރިންގެ ލިސްޓު ހާމަވާނެއެވެ.</p>
-              <p>• <strong>ނަސީބުވެރިޔާ ހާމަކުރާ ގަޑި:</strong> ގުރާ ނަގައި ނަސީބުވެރިޔާ އޮޓޯއިން ހޮވި އިޢުލާން ކުރެވޭނެއެވެ.</p>
+              <p className="flex items-start gap-1.5">
+                <span className="font-bold text-sky-400 shrink-0">1. ޝާއިޢުކުރާ ގަޑި:</span>
+                <span>ސުވާލާއި އިޚްތިޔާރުތައް ޕަބްލިކް ސައިޓުގައި ފެނި، ޖަވާބު ދިނުމުގެ ފުރުޞަތު ހުޅުވި ޓައިމަރު ހިނގަން ފަށާނެއެވެ.</span>
+              </p>
+              <p className="flex items-start gap-1.5">
+                <span className="font-bold text-amber-400 shrink-0">2. ސުންގަޑި:</span>
+                <span>ޖަވާބު ދިނުމުގެ ފުރުޞަތު ބަންދުވާނެއެވެ.</span>
+              </p>
+              <p className="flex items-start gap-1.5">
+                <span className="font-bold text-emerald-400 shrink-0">3. ނަންބަރު ރޯލްކުރާ ގަޑި:</span>
+                <span>ރަނގަޅު ޖަވާބު ބޯޑުގައި ހާމަވެ، ރަނގަޅު ޖަވާބު ދިން ބައިވެރިންގެ ނަންބަރުތައް ލައިވްކޮށް ރޯލްވާން ފަށާނެއެވެ. (ބައިވެރިއަކު ނެތްނަމަ ނަންބަރު ރޯލް ނުކޮށް 'ބައިވެރިއަކު ނެތް' ކަމަށް ދައްކާނެއެވެ).</span>
+              </p>
+              <p className="flex items-start gap-1.5">
+                <span className="font-bold text-purple-400 shrink-0">4. ނަސީބުވެރިޔާ ހާމަކުރާ ގަޑި:</span>
+                <span>ނަންބަރު ރޯލްވުން ހުއްޓި، ނަސީބުވެރިޔާ އޮޓޯއިން ހޮވި އިޢުލާން ކުރެވޭނެއެވެ.</span>
+              </p>
             </div>
           </div>
 
@@ -2752,6 +2978,42 @@ export const RamazanQuizMgmtPage: React.FC = () => {
         title="ސްޕޮންސަރު ޑިލީޓް ކުރުން (Delete Sponsor)"
         message={`ސްޕޮންސަރު "${sponsorToDelete?.name || ''}" ސިސްޓަމުން ފޮހެލަން ކަށަވަރު ކުރައްވާ.`}
         confirmText="ސްޕޮންސަރު ފޮހެލާ (Delete Sponsor)"
+        cancelText="ކެންސަލް (Cancel)"
+        isDanger={true}
+      />
+
+      {/* CONFIRM MODAL: Delete Quiz Submission / Participant */}
+      <ConfirmModal
+        isOpen={!!submissionToDelete}
+        onClose={() => setSubmissionToDelete(null)}
+        onConfirm={handleDeleteSubmission}
+        title="ބައިވެރިޔާގެ ޖަވާބު ފޮހެލުން (Delete Quiz Submission)"
+        message={`ބައިވެރިޔާ #${submissionToDelete?.participantNumber} (ID: ${submissionToDelete?.normalizedIdNumber || submissionToDelete?.idNumber || submissionToDelete?.maskedIdNumber}) ގެ ޖަވާބު ސިސްޓަމުން ދާއިމީކޮށް ފޮހެލަން ކަށަވަރު ކުރައްވާ.`}
+        confirmText="ޖަވާބު ފޮހެލާ (Delete Submission)"
+        cancelText="ކެންސަލް (Cancel)"
+        isDanger={true}
+      />
+
+      {/* CONFIRM MODAL: Delete Master Participant */}
+      <ConfirmModal
+        isOpen={!!masterParticipantToDelete}
+        onClose={() => setMasterParticipantToDelete(null)}
+        onConfirm={handleDeleteMasterParticipant}
+        title="ބައިވެރިޔާ މާސްޓަރ ލިސްޓުން ފޮހެލުން (Delete Master Participant)"
+        message={`ބައިވެރިޔާ (ID: ${masterParticipantToDelete?.normalizedIdNumber || masterParticipantToDelete?.idNumber || 'N/A'}) ގެ އެންމެހައި ޖަވާބުތަކާއި ރެކޯޑު ސިސްޓަމުން ދާއިމީކޮށް ފޮހެލަން ކަށަވަރު ކުރައްވާ. މިއާއެކު މި ބައިވެރިޔާ ހުރިހާ ސުވާލަކުން އުނިވާނެއެވެ.`}
+        confirmText="ބައިވެރިޔާ ފޮހެލާ (Delete Participant)"
+        cancelText="ކެންސަލް (Cancel)"
+        isDanger={true}
+      />
+
+      {/* CONFIRM MODAL: Delete Quiz Winner */}
+      <ConfirmModal
+        isOpen={!!winnerToDelete}
+        onClose={() => setWinnerToDelete(null)}
+        onConfirm={handleDeleteWinner}
+        title="ނަސީބުވެރިޔާގެ ރެކޯޑު ފޮހެލުން (Delete Winner Record)"
+        message={`ސުވާލު Day ${winnerToDelete?.questionNumber || 'Quiz'} ގެ ނަސީބުވެރިޔާ #${winnerToDelete?.participantNumber} ގެ ރެކޯޑު ފޮހެލަން ކަށަވަރު ކުރައްވާ. މިއާއެކު މި ސުވާލަށް އައު ނަސީބުވެރިއަކު ހޮވުމުގެ ފުރުސަތު ހުޅުވިގެންދާނެއެވެ.`}
+        confirmText="ރެކޯޑު ފޮހެލާ (Delete Winner)"
         cancelText="ކެންސަލް (Cancel)"
         isDanger={true}
       />

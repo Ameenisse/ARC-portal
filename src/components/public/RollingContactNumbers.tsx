@@ -41,22 +41,13 @@ export const RollingContactNumbers: React.FC<RollingContactNumbersProps> = ({
 }) => {
   // Only include eligible participants for rolling rotation and winner draw
   const eligibleContacts = contacts.filter(c => c.isEligible !== false && !c.isDisqualified);
-
-  const safeContacts = eligibleContacts.length > 0 ? eligibleContacts : [
-    { participantNumber: 'RQ-0001', contactNumber: '77***12', isEligible: true },
-    { participantNumber: 'RQ-0002', contactNumber: '99***45', isEligible: true },
-    { participantNumber: 'RQ-0003', contactNumber: '79***88', isEligible: true },
-    { participantNumber: 'RQ-0004', contactNumber: '91***34', isEligible: true },
-    { participantNumber: 'RQ-0005', contactNumber: '76***90', isEligible: true }
-  ];
-
   const totalIneligibleCount = contacts.filter(c => c.isDisqualified || c.isEligible === false).length;
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const currentIndexRef = useRef(0);
   currentIndexRef.current = currentIndex;
 
-  const [isRolling, setIsRolling] = useState(true);
+  const [isRolling, setIsRolling] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number>(durationSeconds);
   const [showListModal, setShowListModal] = useState(false);
   const [showInlineList, setShowInlineList] = useState(false);
@@ -109,31 +100,61 @@ export const RollingContactNumbers: React.FC<RollingContactNumbersProps> = ({
   const hasRollingStarted = drawStartMs ? (nowMs >= drawStartMs) : true;
   const timeUntilDrawStart = drawStartMs ? Math.max(0, Math.ceil((drawStartMs - nowMs) / 1000)) : 0;
 
+  // Determine predetermined target winner index from props if available
+  const getTargetWinnerIndex = (): number => {
+    if (eligibleContacts.length === 0) return 0;
+    if (winnerParticipantNumber || winnerContact) {
+      const idx = eligibleContacts.findIndex(c =>
+        (winnerParticipantNumber && c.participantNumber === winnerParticipantNumber) ||
+        (winnerContact && c.contactNumber === winnerContact)
+      );
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+
   // Reset winner pick ref when target time or winner props change
   useEffect(() => {
     hasPickedRef.current = false;
+    const targetIdx = getTargetWinnerIndex();
+    if (targetIdx !== -1) {
+      setCurrentIndex(targetIdx);
+    }
     if (isWinnerAnnounced) {
       setIsRolling(false);
       setTimeLeft(0);
     }
-  }, [drawStartAt, revealAt, winnerContact, winnerParticipantNumber, isWinnerAnnounced]);
+  }, [drawStartAt, revealAt, winnerContact, winnerParticipantNumber, isWinnerAnnounced, eligibleContacts.length]);
 
-  // Rolling index shuffle effect (shuffles contacts when rolling is active)
+  // Rolling index shuffle effect (shuffles real eligible contacts with deceleration towards target)
   useEffect(() => {
-    if (!isRolling) return;
+    if (!isRolling || eligibleContacts.length === 0) return;
+
+    // Adjust shuffle speed: decelerate slightly in the final 2 seconds
+    const intervalTime = timeLeft <= 1 ? 250 : timeLeft <= 2 ? 180 : 100;
 
     const interval = setInterval(() => {
-      setCurrentIndex(prev => (prev + 1) % safeContacts.length);
-    }, 110);
+      const targetIdx = getTargetWinnerIndex();
+      if (timeLeft <= 1 && targetIdx !== -1) {
+        // Steer directly into the predetermined target winner in final tick
+        setCurrentIndex(targetIdx);
+      } else {
+        setCurrentIndex(prev => (prev + 1) % eligibleContacts.length);
+      }
+    }, intervalTime);
 
     return () => clearInterval(interval);
-  }, [isRolling, safeContacts.length]);
+  }, [isRolling, eligibleContacts.length, timeLeft, winnerParticipantNumber, winnerContact]);
 
   // Countdown timer and automatic winner selection when announcement time is up
   useEffect(() => {
-    if (isWinnerAnnounced) {
+    if (isWinnerAnnounced || eligibleContacts.length === 0) {
       setIsRolling(false);
       setTimeLeft(0);
+      const targetIdx = getTargetWinnerIndex();
+      if (targetIdx !== -1) {
+        setCurrentIndex(targetIdx);
+      }
       return;
     }
 
@@ -161,14 +182,17 @@ export const RollingContactNumbers: React.FC<RollingContactNumbersProps> = ({
           setIsRolling(false);
 
           // Pick winner if not yet picked
-          if (!hasPickedRef.current) {
+          if (!hasPickedRef.current && eligibleContacts.length > 0) {
             hasPickedRef.current = true;
             const isLive = wasRollingActiveRef.current;
-            const activeIndex = currentIndexRef.current;
-            const selected = safeContacts[activeIndex] || safeContacts[0];
+            const targetIdx = getTargetWinnerIndex();
+            const finalIndex = targetIdx !== -1 ? targetIdx : currentIndexRef.current;
+            setCurrentIndex(finalIndex);
+
+            const selected = eligibleContacts[finalIndex] || eligibleContacts[0];
             const chosen: ContactItem = {
-              participantNumber: winnerParticipantNumber || selected.participantNumber,
-              contactNumber: winnerContact || selected.contactNumber
+              participantNumber: selected.participantNumber,
+              contactNumber: selected.contactNumber
             };
             setFinalWinner(chosen);
             if (isLive) {
@@ -186,14 +210,17 @@ export const RollingContactNumbers: React.FC<RollingContactNumbersProps> = ({
           wasRollingActiveRef.current = true;
         } else {
           setIsRolling(false);
-          if (!hasPickedRef.current) {
+          if (!hasPickedRef.current && eligibleContacts.length > 0) {
             hasPickedRef.current = true;
             const isLive = wasRollingActiveRef.current;
-            const activeIndex = currentIndexRef.current;
-            const selected = safeContacts[activeIndex] || safeContacts[0];
+            const targetIdx = getTargetWinnerIndex();
+            const finalIndex = targetIdx !== -1 ? targetIdx : currentIndexRef.current;
+            setCurrentIndex(finalIndex);
+
+            const selected = eligibleContacts[finalIndex] || eligibleContacts[0];
             const chosen: ContactItem = {
-              participantNumber: winnerParticipantNumber || selected.participantNumber,
-              contactNumber: winnerContact || selected.contactNumber
+              participantNumber: selected.participantNumber,
+              contactNumber: selected.contactNumber
             };
             setFinalWinner(chosen);
             if (isLive) {
@@ -210,7 +237,7 @@ export const RollingContactNumbers: React.FC<RollingContactNumbersProps> = ({
     checkAndCycle();
     const timer = setInterval(checkAndCycle, 500);
     return () => clearInterval(timer);
-  }, [drawStartAt, revealAt, durationSeconds, isWinnerAnnounced, safeContacts, winnerContact, winnerParticipantNumber]);
+  }, [drawStartAt, revealAt, durationSeconds, isWinnerAnnounced, eligibleContacts, winnerContact, winnerParticipantNumber]);
 
   const formatTimeLeft = (seconds: number) => {
     if (seconds <= 0) return '0s';
@@ -224,12 +251,29 @@ export const RollingContactNumbers: React.FC<RollingContactNumbersProps> = ({
     return `${m}m ${s < 10 ? '0' : ''}${s}s`;
   };
 
-  const currentItem = safeContacts[currentIndex] || safeContacts[0];
+  // If there are no eligible participants at all, render the clean 'no participants' state
+  if (eligibleContacts.length === 0) {
+    return (
+      <div id="no_participants_notice_box" className="mt-4 p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-slate-800 text-center space-y-2 shadow-lg">
+        <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+        </div>
+        <h4 className="text-sm font-bold text-white font-heading">
+          މި ސުވާލަށް ރަނގަޅު ޖަވާބު ދިން އެއްވެސް ބައިވެރިއަކު ނެތް
+        </h4>
+        <p className="text-xs text-slate-400 max-w-md mx-auto">
+          No participants for this question / no correct entries recorded.
+        </p>
+      </div>
+    );
+  }
 
-  const displayWinnerNum = finalWinner?.participantNumber || winnerParticipantNumber || currentItem.participantNumber;
-  const displayWinnerPhone = finalWinner?.contactNumber || winnerContact || currentItem.contactNumber;
+  const currentItem = eligibleContacts[currentIndex] || eligibleContacts[0];
 
-  const displayContacts = contacts.length > 0 ? contacts : safeContacts;
+  const displayWinnerNum = finalWinner?.participantNumber || winnerParticipantNumber || currentItem?.participantNumber || '';
+  const displayWinnerPhone = finalWinner?.contactNumber || winnerContact || currentItem?.contactNumber || '';
+
+  const displayContacts = contacts.length > 0 ? contacts : eligibleContacts;
 
   const filteredContacts = displayContacts.filter(c => {
     const matchesSearch =
@@ -276,7 +320,7 @@ export const RollingContactNumbers: React.FC<RollingContactNumbersProps> = ({
             </button>
           )}
           <span className="text-[11px] text-slate-400 bg-slate-900 px-2.5 py-0.5 rounded-full border border-slate-800">
-            ޤާބިލު: <strong className="text-orange-400 font-mono">{safeContacts.length}</strong>
+            ޤާބިލު: <strong className="text-orange-400 font-mono">{eligibleContacts.length}</strong>
           </span>
           {totalIneligibleCount > 0 && (
             <span className="text-[11px] text-red-200 bg-red-950/80 px-2.5 py-0.5 rounded-full border border-red-500/60 font-semibold inline-flex items-center gap-1 animate-pulse">
@@ -298,10 +342,18 @@ export const RollingContactNumbers: React.FC<RollingContactNumbersProps> = ({
               {isAnnouncementDone ? 'ހޮވުނު ފޯނު ނަންބަރު (Winner Phone)' : 'ރޯލްވަމުންދާ ފޯނު ނަންބަރު (Rolling Phone)'}
             </span>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              <span dir="ltr" className="font-mono text-2xl sm:text-3xl font-extrabold text-amber-300 tracking-[0.12em] tabular-nums inline-block drop-shadow-[0_0_10px_rgba(251,191,36,0.5)]">
+              <span
+                dir="ltr"
+                style={{ direction: 'ltr', unicodeBidi: 'isolate' }}
+                className="font-mono text-2xl sm:text-3xl font-extrabold text-amber-300 tracking-[0.12em] tabular-nums inline-block drop-shadow-[0_0_10px_rgba(251,191,36,0.5)]"
+              >
                 {isRolling ? currentItem.contactNumber : displayWinnerPhone}
               </span>
-              <span className="text-xs font-mono font-bold text-amber-400/90 bg-amber-950/70 px-2.5 py-1 rounded-lg border border-amber-800/50 shrink-0 tracking-wider tabular-nums">
+              <span
+                dir="ltr"
+                style={{ direction: 'ltr', unicodeBidi: 'isolate' }}
+                className="text-xs font-mono font-bold text-amber-400/90 bg-amber-950/70 px-2.5 py-1 rounded-lg border border-amber-800/50 shrink-0 tracking-wider tabular-nums"
+              >
                 ({isRolling ? currentItem.participantNumber : displayWinnerNum})
               </span>
             </div>
@@ -345,12 +397,12 @@ export const RollingContactNumbers: React.FC<RollingContactNumbersProps> = ({
               </span>
             </div>
             <span className="text-[11px] text-orange-400 font-mono font-bold bg-orange-950/60 px-2.5 py-0.5 rounded-full border border-orange-500/30">
-              ޖުމްލަ: {safeContacts.length} ޤާބިލު
+              ޖުމްލަ: {eligibleContacts.length} ޤާބިލު
             </span>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto pr-1">
-            {safeContacts.map((c, i) => (
+            {eligibleContacts.map((c, i) => (
               <div
                 key={c.participantNumber + i}
                 className={`p-2 rounded-xl border text-xs font-mono flex items-center justify-between gap-2 ${
@@ -421,7 +473,7 @@ export const RollingContactNumbers: React.FC<RollingContactNumbersProps> = ({
                     }`}
                   >
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>ޤާބިލު ({safeContacts.length})</span>
+                    <span>ޤާބިލު ({eligibleContacts.length})</span>
                   </button>
                   <button
                     type="button"

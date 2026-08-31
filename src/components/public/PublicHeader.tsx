@@ -17,8 +17,7 @@ interface PublicHeaderProps {
 
 export const PublicHeader: React.FC<PublicHeaderProps> = ({ branding, activePath = '/', hasEvents = false }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { user } = useAuth();
-  const isAuthenticated = Boolean(user);
+  const { isAuthenticated, user } = useAuth();
   const showLogoImage = Boolean(branding?.useLogo && branding?.logo && branding.logo.trim() !== '');
 
   const navLinks = [
@@ -87,7 +86,7 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({ branding, activePath
                 className="mr-2 flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 text-white text-xs font-bold shadow-md hover:scale-105 transition-all"
               >
                 <LayoutDashboard className="w-4 h-4" />
-                <span>ޕޯޓަލް ({user?.fullName.split(' ')[0]})</span>
+                <span>ޕޯޓަލް ({(user?.fullName || user?.username || 'User').split(' ')[0]})</span>
               </a>
             ) : (
               <a
@@ -144,7 +143,7 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({ branding, activePath
                 className="flex items-center justify-center gap-2 w-full px-4 py-3 rounded-xl bg-orange-500 text-white font-bold text-sm"
               >
                 <LayoutDashboard className="w-5 h-5" />
-                <span>ޕޯޓަލް އަށް ދިއުމަށް ({user?.fullName})</span>
+                <span>ޕޯޓަލް އަށް ދިއުމަށް ({user?.fullName || user?.username || 'User'})</span>
               </a>
             ) : (
               <a

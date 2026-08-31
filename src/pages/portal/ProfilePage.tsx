@@ -10,11 +10,17 @@ import { UserPerformanceModal } from '../../components/portal/UserPerformanceMod
 import {
   User as UserIcon,
   Shield,
+  CheckCircle,
   Save,
   Phone,
+  Building,
   Sliders,
+  Calendar,
+  Clock,
+  CheckSquare,
   BookOpen,
-  Activity
+  Activity,
+  Lock
 } from 'lucide-react';
 
 export const ProfilePage: React.FC = () => {
@@ -23,25 +29,9 @@ export const ProfilePage: React.FC = () => {
   const [isRulesModalOpen, setRulesModalOpen] = useState(false);
   const [isPerformanceModalOpen, setPerformanceModalOpen] = useState(false);
 
-  // Check if current user is Admin
-  const isAdmin = Boolean(
-    user && (
-      user.roleName === 'Admin' ||
-      user.roleId === 'role_admin' ||
-      user.roleName?.toLowerCase().includes('admin')
-    )
-  );
-
-  // If Admin user enters profile, redirect to Admin Controller Settings
-  useEffect(() => {
-    if (isAdmin) {
-      window.location.replace('/portal/settings');
-    }
-  }, [isAdmin]);
-
   // URL query parameter tab handling (e.g. /portal/profile?tab=performance)
   const queryParams = new URLSearchParams(window.location.search);
-  const initialTab = queryParams.get('tab') === 'performance' ? 'performance' : (queryParams.get('tab') === 'preferences' ? 'preferences' : 'info');
+  const initialTab = queryParams.get('tab') === 'performance' ? 'performance' : 'info';
 
   const [activeTab, setActiveTab] = useState<'info' | 'preferences' | 'permissions' | 'performance'>(initialTab as any);
 
@@ -68,10 +58,20 @@ export const ProfilePage: React.FC = () => {
     }
   }, [user]);
 
-  if (!user || isAdmin) return null;
+  if (!user) return null;
+
+  const isAdmin = Boolean(
+    user.roleName === 'Admin' ||
+    user.roleId === 'role_admin' ||
+    user.roleName?.toLowerCase().includes('admin')
+  );
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAdmin) {
+      showToast('error', 'Only administrators can change profile information.');
+      return;
+    }
     if (!fullName.trim()) {
       showToast('error', 'Full Name is required.');
       return;
@@ -233,12 +233,26 @@ export const ProfilePage: React.FC = () => {
             <div className="border-b border-slate-800 pb-4">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <UserIcon className="w-5 h-5 text-orange-400" />
-                <span>އަމިއްލަ މަޢުލޫމާތު ބަދަލުކުރުން</span>
+                <span>އަމިއްލަ މަޢުލޫމާތު ބަލާލުން / ބަދަލުކުރުން</span>
               </h3>
               <p className="text-xs text-slate-400 mt-1">
-                ޕޯޓަލްގައި ދައްކާނެ ނަމާއި މަޤާމު އަދި ގުޅޭނެ މަޢުލޫމާތު އަޕްޑޭޓް ކުރައްވާ.
+                ޕޯޓަލްގައި ދައްކާނެ ނަމާއި މަޤާމު އަދި ގުޅޭނެ މަޢުލޫމާތު.
               </p>
             </div>
+
+            {!isAdmin && (
+              <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-xl flex items-center gap-3 text-xs text-slate-300">
+                <Lock className="w-5 h-5 text-amber-400 shrink-0" />
+                <div>
+                  <p className="font-semibold text-white">
+                    ޕްރޯފައިލް މަޢުލޫމާތު ބަދަލުކުރެވޭނީ ހަމައެކަނި އެޑްމިނިސްޓްރޭޓަރަށެވެ.
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Profile information is locked and can only be changed by an Administrator.
+                  </p>
+                </div>
+              </div>
+            )}
 
             <form onSubmit={handleUpdateProfile} className="space-y-4 max-w-2xl">
               <div>
@@ -248,9 +262,10 @@ export const ProfilePage: React.FC = () => {
                 <input
                   type="text"
                   required
+                  disabled={!isAdmin}
                   value={fullName}
                   onChange={e => setFullName(e.target.value)}
-                  className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-orange-500"
+                  className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
                 />
               </div>
 
@@ -262,9 +277,10 @@ export const ProfilePage: React.FC = () => {
                     </label>
                     <input
                       type="text"
+                      disabled={!isAdmin}
                       value={designation}
                       onChange={e => setDesignation(e.target.value)}
-                      className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-orange-500"
+                      className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
                     />
                   </div>
                 )}
@@ -276,19 +292,22 @@ export const ProfilePage: React.FC = () => {
                   <input
                     type="text"
                     dir="ltr"
+                    disabled={!isAdmin}
                     value={contactNumber}
                     onChange={e => setContactNumber(e.target.value)}
-                    className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white font-mono focus:outline-none focus:border-orange-500"
+                    className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white font-mono focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
 
-              <ImageUploadInput
-                label="ޕްރޯފައިލް ފޮޓޯ (Profile Photo Image File)"
-                value={profileImage}
-                onChange={setProfileImage}
-                placeholder="Select or drop your profile image..."
-              />
+              {isAdmin ? (
+                <ImageUploadInput
+                  label="ޕްރޯފައިލް ފޮޓޯ (Profile Photo Image File)"
+                  value={profileImage}
+                  onChange={setProfileImage}
+                  placeholder="Select or drop your profile image..."
+                />
+              ) : null}
 
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-300 mb-1">
@@ -296,22 +315,25 @@ export const ProfilePage: React.FC = () => {
                 </label>
                 <textarea
                   rows={3}
+                  disabled={!isAdmin}
                   value={notes}
                   onChange={e => setNotes(e.target.value)}
-                  className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-orange-500"
+                  className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
                 />
               </div>
 
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  disabled={infoLoading}
-                  className="px-6 py-3 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-xs transition flex items-center gap-2 shadow-lg shadow-orange-500/20"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>{infoLoading ? 'ރައްކާކުރެވެނީ...' : 'މަޢުލޫމާތު ރައްކާކުރައްވާ'}</span>
-                </button>
-              </div>
+              {isAdmin && (
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={infoLoading}
+                    className="px-6 py-3 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-xs transition flex items-center gap-2 shadow-lg shadow-orange-500/20 cursor-pointer"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>{infoLoading ? 'ރައްކާކުރެވެނީ...' : 'މަޢުލޫމާތު ރައްކާކުރައްވާ'}</span>
+                  </button>
+                </div>
+              )}
             </form>
           </div>
         )}

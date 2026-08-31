@@ -3,6 +3,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { PortalLayout } from '../../components/portal/PortalLayout';
 import { useAuth } from '../../context/AuthContext';
 import { usePortalLanguage } from '../../hooks/usePortalLanguage';
+import { useTableSync } from '../../hooks/useRealtimeSync';
 import { api } from '../../services/api';
 import { useToast } from '../../components/common/Toast';
 import { Modal } from '../../components/common/Modal';
@@ -38,7 +39,9 @@ import {
   Lock,
   Award,
   Coins,
-  Heart
+  Heart,
+  Trash2,
+  Sliders
 } from 'lucide-react';
 import {
   BankAccount,
@@ -51,14 +54,18 @@ import {
   AccountTransferRecord,
   IncomeCategory,
   ExpenseCategory,
-  CategoryBudgetAllocation
+  CategoryBudgetAllocation,
+  InvoiceRecord
 } from '../../types';
-import { formatCurrency, formatDateTime } from '../../utils/formatters';
+import { formatCurrency, formatDateTime, formatDate } from '../../utils/formatters';
 import { AnnualContributionMatrix } from '../../components/portal/budget/AnnualContributionMatrix';
 import { CategoryAllocationsTab } from '../../components/portal/budget/CategoryAllocationsTab';
 import { BudgetReportsTab } from '../../components/portal/budget/BudgetReportsTab';
+import { InvoicesTab } from '../../components/portal/budget/InvoicesTab';
+import { BillViewerModal } from '../../components/portal/budget/BillViewerModal';
+import { FileText, Paperclip, Upload, ShieldCheck, Eye } from 'lucide-react';
 
-type BudgetTab = 'dashboard' | 'income' | 'expenses' | 'fund_manager' | 'allocations' | 'accounts' | 'settings' | 'reports';
+type BudgetTab = 'dashboard' | 'income' | 'expenses' | 'invoices' | 'fund_manager' | 'allocations' | 'accounts' | 'settings' | 'reports';
 
 export const BudgetPage: React.FC = () => {
   const { user, hasPermission, loading: authLoading } = useAuth();
@@ -75,8 +82,9 @@ export const BudgetPage: React.FC = () => {
   const canExport = hasPermission('budget', 'canExport');
   const canManageSettings = hasPermission('budget', 'canManageSettings');
 
+  const validTabs: BudgetTab[] = ['dashboard', 'income', 'expenses', 'invoices', 'fund_manager', 'allocations', 'accounts', 'settings', 'reports'];
   const tabParam = searchParams.get('tab') as BudgetTab | null;
-  const initialTab: BudgetTab = (tabParam && ['dashboard', 'income', 'expenses', 'fund_manager', 'allocations', 'accounts', 'settings', 'reports'].includes(tabParam))
+  const initialTab: BudgetTab = (tabParam && validTabs.includes(tabParam))
     ? tabParam
     : 'dashboard';
 
@@ -86,7 +94,7 @@ export const BudgetPage: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
 
   useEffect(() => {
-    if (tabParam && ['dashboard', 'income', 'expenses', 'fund_manager', 'allocations', 'accounts', 'settings', 'reports'].includes(tabParam)) {
+    if (tabParam && validTabs.includes(tabParam)) {
       setActiveTab(tabParam);
     }
   }, [tabParam]);
@@ -122,6 +130,10 @@ export const BudgetPage: React.FC = () => {
   const [selectedMemberForPay, setSelectedMemberForPay] = useState<any | null>(null);
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
   const [currentReceiptData, setCurrentReceiptData] = useState<any | null>(null);
+  
+  // Bill Viewer state
+  const [billViewerOpen, setBillViewerOpen] = useState(false);
+  const [viewingExpenseBill, setViewingExpenseBill] = useState<ExpenseRecord | null>(null);
 
   // Filter states
   const [incomeCategoryFilter, setIncomeCategoryFilter] = useState<string>('all');
@@ -132,25 +144,15 @@ export const BudgetPage: React.FC = () => {
   const [fundSearchTerm, setFundSearchTerm] = useState<string>('');
 
   // Account Form State
-  const [accountForm, setAccountForm] = useState<{
-    accountName: string;
-    accountNumber: string;
-    bankName: string;
-    type: BankAccountType;
-    currency: string;
-    openingBalance: number;
-    currentBalance: number;
-    status: 'active' | 'inactive';
-    notes: string;
-  }>({
+  const [accountForm, setAccountForm] = useState({
     accountName: '',
     accountNumber: '',
     bankName: 'Bank of Maldives (BML)',
-    type: 'bank',
+    type: 'bank' as BankAccountType,
     currency: 'MVR',
     openingBalance: 0,
     currentBalance: 0,
-    status: 'active',
+    status: 'active' as 'active' | 'inactive',
     notes: ''
   });
 
@@ -165,58 +167,43 @@ export const BudgetPage: React.FC = () => {
   });
 
   // Income Form State
-  const [incomeForm, setIncomeForm] = useState<{
-    title: string;
-    category: IncomeCategory;
-    amount: number;
-    date: string;
-    accountId: string;
-    paymentMethod: 'bank_transfer' | 'cash' | 'cheque' | 'gateway' | 'other';
-    referenceNumber: string;
-    receivedFrom: string;
-    payerMemberId?: string;
-    notes: string;
-    status: 'received' | 'pending' | 'cancelled';
-  }>({
+  const [incomeForm, setIncomeForm] = useState({
     title: '',
-    category: 'member_contribution',
+    category: 'member_contribution' as IncomeCategory,
     amount: 100,
     date: new Date().toISOString().slice(0, 10),
     accountId: '',
-    paymentMethod: 'bank_transfer',
+    paymentMethod: 'bank_transfer' as 'bank_transfer' | 'cash' | 'card' | 'cheque' | 'online' | 'other',
     referenceNumber: '',
     receivedFrom: '',
-    payerMemberId: '',
+    payerMemberId: '' as string | undefined,
     notes: '',
-    status: 'received'
+    status: 'received' as 'received' | 'pending' | 'cancelled'
   });
 
   // Expense Form State
-  const [expenseForm, setExpenseForm] = useState<{
-    title: string;
-    category: ExpenseCategory;
-    amount: number;
-    date: string;
-    accountId: string;
-    paymentMethod: 'bank_transfer' | 'cash' | 'cheque' | 'card' | 'other';
-    referenceNumber: string;
-    payee: string;
-    approvedBy: string;
-    status: 'paid' | 'pending_approval' | 'rejected';
-    receiptNumber: string;
-    notes: string;
-  }>({
+  const isPresidentOrVP = (user?.roleName || user?.roleId || '').toLowerCase().includes('president') ||
+    (user?.roleName || user?.roleId || '').toLowerCase().includes('admin') ||
+    user?.permissions?.some(p => p.moduleKey === 'budget' && p.canApprove);
+
+  const [expenseForm, setExpenseForm] = useState({
     title: '',
-    category: 'event_logistics',
+    category: 'event_logistics' as ExpenseCategory,
     amount: 100,
     date: new Date().toISOString().slice(0, 10),
     accountId: '',
-    paymentMethod: 'bank_transfer',
+    paymentMethod: 'bank_transfer' as 'bank_transfer' | 'cash' | 'card' | 'cheque' | 'online' | 'other',
     referenceNumber: '',
     payee: '',
     approvedBy: '',
-    status: 'paid',
+    status: 'pending_approval' as 'paid' | 'pending_approval' | 'rejected',
     receiptNumber: '',
+    vendorName: '',
+    billNumber: '',
+    billDate: new Date().toISOString().slice(0, 10),
+    billTotal: 100,
+    billDocumentUrl: '',
+    billDocumentName: '',
     notes: ''
   });
 
@@ -306,6 +293,26 @@ export const BudgetPage: React.FC = () => {
     loadData();
   }, [selectedYear]);
 
+  // Real-time table sync for all Budget & Finance tables
+  useTableSync(
+    [
+      'budget',
+      'budgetAccounts',
+      'incomeRecords',
+      'expenseRecords',
+      'accountTransfers',
+      'contributionSettings',
+      'memberContributions',
+      'budgetAllocations',
+      'invoices',
+      'members',
+      'clubMembers'
+    ],
+    () => {
+      loadData();
+    }
+  );
+
   const handleRefresh = () => {
     setRefreshing(true);
     loadData();
@@ -336,11 +343,13 @@ export const BudgetPage: React.FC = () => {
   // --- Handlers for Expense Approvals ---
   const handleApproveExpense = async (expense: ExpenseRecord) => {
     try {
-      await api.updateExpenseRecord(expense.id, {
-        status: 'paid',
-        approvedBy: user?.fullName || 'Executive Officer'
+      await api.approveExpensePayment(expense.id, {
+        status: 'approved',
+        releasePayment: true,
+        accountId: expense.accountId || accounts[0]?.id,
+        remarks: `Approved for payment release by ${user?.fullName || user?.username || 'Executive Officer'}`
       });
-      showToast('success', `Expense "${expense.title}" approved and marked as paid`);
+      showToast('success', `Payment released and expense "${expense.title}" approved successfully`);
       loadData();
     } catch (err: any) {
       showToast('error', err.message || 'Failed to approve expense');
@@ -350,9 +359,10 @@ export const BudgetPage: React.FC = () => {
   const handleRejectExpense = async (expense: ExpenseRecord) => {
     if (!window.confirm(`Reject expense request "${expense.title}"?`)) return;
     try {
-      await api.updateExpenseRecord(expense.id, {
+      await api.approveExpensePayment(expense.id, {
         status: 'rejected',
-        approvedBy: `${user?.fullName || 'Executive Officer'} (Rejected)`
+        releasePayment: false,
+        remarks: `Rejected by ${user?.fullName || user?.username || 'Executive Officer'}`
       });
       showToast('success', `Expense "${expense.title}" rejected`);
       loadData();
@@ -690,7 +700,8 @@ export const BudgetPage: React.FC = () => {
           {[
             { id: 'dashboard', labelEn: 'Module Dashboard', labelDv: 'ޑޭޝްބޯޑު', icon: TrendingUp },
             { id: 'income', labelEn: 'Income Tracker', labelDv: 'އާމްދަނީ', icon: DollarSign },
-            { id: 'expenses', labelEn: 'Expenses Tracker', labelDv: 'ޚަރަދުތައް', icon: TrendingDown },
+            { id: 'expenses', labelEn: 'Expenses & Bills', labelDv: 'ޚަރަދު އަދި ބިލްތައް', icon: TrendingDown },
+            { id: 'invoices', labelEn: 'Invoices & Quotations', labelDv: 'އިންވޮއިސް އަދި ކޯޓޭޝަން', icon: FileText },
             { id: 'allocations', labelEn: 'Budget Ceilings & Targets', labelDv: 'ބަޖެޓް ލިމިޓްތައް', icon: Target },
             { id: 'fund_manager', labelEn: 'Members Fund Manager', labelDv: 'މެންބަރުންގެ ފަންޑު', icon: Users },
             { id: 'accounts', labelEn: 'Accounts Manager', labelDv: 'އެކައުންޓްތައް', icon: Building2 },
@@ -996,7 +1007,7 @@ export const BudgetPage: React.FC = () => {
                           <div>
                             <span className="font-bold text-white text-xs block">{tx.title}</span>
                             <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                              <span>{tx.date}</span>
+                              <span>{formatDate(tx.date)}</span>
                               <span>•</span>
                               <span className="capitalize">{tx.category.replace(/_/g, ' ')}</span>
                               <span>•</span>
@@ -1205,7 +1216,7 @@ export const BudgetPage: React.FC = () => {
                               </div>
                             </td>
                             <td className="p-4 text-slate-400">{inc.accountName || 'Bank Account'}</td>
-                            <td className="p-4 text-slate-400 font-mono">{inc.date}</td>
+                            <td className="p-4 text-slate-400 font-mono">{formatDate(inc.date)}</td>
                             <td className="p-4 text-right font-mono font-bold text-emerald-400 text-sm">
                               +{Number(inc.amount).toLocaleString()}
                             </td>
@@ -1221,7 +1232,7 @@ export const BudgetPage: React.FC = () => {
                                       amount: inc.amount,
                                       date: inc.date,
                                       accountId: inc.accountId,
-                                      paymentMethod: inc.paymentMethod,
+                                      paymentMethod: inc.paymentMethod as any,
                                       referenceNumber: inc.referenceNumber || '',
                                       receivedFrom: inc.receivedFrom,
                                       payerMemberId: inc.payerMemberId || '',
@@ -1317,9 +1328,15 @@ export const BudgetPage: React.FC = () => {
                       paymentMethod: 'bank_transfer',
                       referenceNumber: '',
                       payee: '',
-                      approvedBy: user ? user.fullName : '',
-                      status: 'paid',
+                      approvedBy: isPresidentOrVP ? (user?.fullName || '') : '',
+                      status: isPresidentOrVP ? 'paid' : 'pending_approval',
                       receiptNumber: '',
+                      vendorName: '',
+                      billNumber: '',
+                      billDate: new Date().toISOString().slice(0, 10),
+                      billTotal: 500,
+                      billDocumentUrl: '',
+                      billDocumentName: '',
                       notes: ''
                     });
                     setExpenseModalOpen(true);
@@ -1327,25 +1344,26 @@ export const BudgetPage: React.FC = () => {
                   className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-500 to-red-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-rose-500/20 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Record New Expense</span>
+                  <span>Record New Expense & Bill</span>
                 </button>
               </div>
             </div>
 
             {/* Expenses Table */}
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-950/80 text-slate-400 uppercase tracking-wider border-b border-slate-800">
                     <tr>
                       <th className="p-4">Expense Title</th>
                       <th className="p-4">Category</th>
-                      <th className="p-4">Payee / Vendor</th>
+                      <th className="p-4">Vendor & Bill #</th>
+                      <th className="p-4 text-center">Attached Bill</th>
                       <th className="p-4">Disbursed From</th>
                       <th className="p-4">Approved By</th>
                       <th className="p-4">Date</th>
                       <th className="p-4 text-right">Amount (MVR)</th>
-                      <th className="p-4 text-center">Status</th>
+                      <th className="p-4 text-center">Payment Status</th>
                       <th className="p-4 text-center">Actions</th>
                     </tr>
                   </thead>
@@ -1353,100 +1371,140 @@ export const BudgetPage: React.FC = () => {
                     {expenseRecords
                       .filter(e => expenseCategoryFilter === 'all' || e.category === expenseCategoryFilter)
                       .filter(e => expenseStatusFilter === 'all' || e.status === expenseStatusFilter)
-                      .map(exp => (
-                        <tr key={exp.id} className="hover:bg-slate-800/40 transition">
-                          <td className="p-4">
-                            <span className="font-bold text-white block">{exp.title}</span>
-                            {exp.receiptNumber && (
-                              <span className="text-[10px] text-slate-400 font-mono">Receipt: {exp.receiptNumber}</span>
-                            )}
-                          </td>
-                          <td className="p-4">
-                            <span className="px-2.5 py-1 rounded-md bg-rose-500/10 text-rose-400 font-semibold text-[11px] capitalize">
-                              {exp.category.replace(/_/g, ' ')}
-                            </span>
-                          </td>
-                          <td className="p-4 text-slate-300 font-medium">{exp.payee || 'N/A'}</td>
-                          <td className="p-4 text-slate-400">{exp.accountName || 'Bank Account'}</td>
-                          <td className="p-4 text-slate-400">{exp.approvedBy || '-'}</td>
-                          <td className="p-4 text-slate-400 font-mono">{exp.date}</td>
-                          <td className="p-4 text-right font-mono font-bold text-rose-400 text-sm">
-                            -{exp.amount.toLocaleString()}
-                          </td>
-                          <td className="p-4 text-center">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                              exp.status === 'paid' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' :
-                              exp.status === 'pending_approval' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' :
-                              'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                            }`}>
-                              {exp.status.replace(/_/g, ' ')}
-                            </span>
-                          </td>
-                          <td className="p-4 text-center">
-                            <div className="flex items-center justify-center gap-1.5">
-                              {exp.status === 'pending_approval' && (
-                                <>
+                      .map(exp => {
+                        const isApproved = exp.status === 'paid' || exp.approvalStatus === 'approved' || exp.paymentReleaseApproved;
+                        const isPending = exp.status === 'pending_approval' || exp.approvalStatus === 'pending';
+
+                        return (
+                          <tr key={exp.id} className="hover:bg-slate-800/40 transition">
+                            <td className="p-4">
+                              <span className="font-bold text-white block">{exp.title}</span>
+                              {exp.receiptNumber && (
+                                <span className="text-[10px] text-slate-400 font-mono">Receipt: {exp.receiptNumber}</span>
+                              )}
+                            </td>
+                            <td className="p-4">
+                              <span className="px-2.5 py-1 rounded-md bg-rose-500/10 text-rose-400 font-semibold text-[11px] capitalize">
+                                {exp.category.replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="p-4">
+                              <div className="text-slate-200 font-medium">{exp.vendorName || exp.payee || 'N/A'}</div>
+                              {exp.billNumber && (
+                                <div className="text-[10px] text-slate-400 font-mono">Bill #{exp.billNumber}</div>
+                              )}
+                            </td>
+                            <td className="p-4 text-center">
+                              {exp.billDocumentUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setViewingExpenseBill(exp);
+                                    setBillViewerOpen(true);
+                                  }}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/30 text-xs font-bold transition-colors cursor-pointer"
+                                  title="View uploaded bill document"
+                                >
+                                  <Paperclip className="w-3.5 h-3.5" />
+                                  <span>View Bill</span>
+                                </button>
+                              ) : (
+                                <span className="text-[11px] text-slate-500 italic">No File</span>
+                              )}
+                            </td>
+                            <td className="p-4 text-slate-400">{exp.accountName || 'Primary Account'}</td>
+                            <td className="p-4 text-slate-400">
+                              {exp.approvedBy || exp.paymentReleasedBy || '-'}
+                            </td>
+                            <td className="p-4 text-slate-400 font-mono whitespace-nowrap">{formatDate(exp.date)}</td>
+                            <td className="p-4 text-right font-mono font-bold text-rose-400 text-sm whitespace-nowrap">
+                              -{Number(exp.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-4 text-center">
+                              {isApproved ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 uppercase">
+                                  <CheckCircle className="w-3 h-3" />
+                                  Paid & Released
+                                </span>
+                              ) : isPending ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 uppercase">
+                                  <Clock className="w-3 h-3" />
+                                  Pending Approval
+                                </span>
+                              ) : (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 uppercase">
+                                  Rejected
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-4 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                {isPresidentOrVP && isPending && (
                                   <button
                                     type="button"
                                     onClick={() => handleApproveExpense(exp)}
-                                    className="p-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-0.5"
-                                    title="Approve and mark as paid"
+                                    className="p-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-1 shadow-sm"
+                                    title="President / Vice President: Approve & Release Payment"
                                   >
-                                    <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                    <ShieldCheck className="w-3.5 h-3.5" />
                                     <span>Approve</span>
                                   </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRejectExpense(exp)}
-                                    className="p-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 text-xs font-bold flex items-center gap-0.5"
-                                    title="Reject expense request"
-                                  >
-                                    <X className="w-3.5 h-3.5 stroke-[3]" />
-                                    <span>Reject</span>
-                                  </button>
-                                </>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingExpense(exp);
-                                  setExpenseForm({
-                                    title: exp.title,
-                                    category: exp.category,
-                                    amount: exp.amount,
-                                    date: exp.date,
-                                    accountId: exp.accountId,
-                                    paymentMethod: exp.paymentMethod,
-                                    referenceNumber: exp.referenceNumber || '',
-                                    payee: exp.payee,
-                                    approvedBy: exp.approvedBy || '',
-                                    status: exp.status,
-                                    receiptNumber: exp.receiptNumber || '',
-                                    notes: exp.notes || ''
-                                  });
-                                  setExpenseModalOpen(true);
-                                }}
-                                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteExpense(exp.id)}
-                                className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingExpense(exp);
+                                    setExpenseForm({
+                                      title: exp.title,
+                                      category: exp.category,
+                                      amount: exp.amount,
+                                      date: exp.date,
+                                      accountId: exp.accountId,
+                                      paymentMethod: exp.paymentMethod,
+                                      referenceNumber: exp.referenceNumber || '',
+                                      payee: exp.payee || '',
+                                      approvedBy: exp.approvedBy || '',
+                                      status: exp.status,
+                                      receiptNumber: exp.receiptNumber || '',
+                                      vendorName: exp.vendorName || exp.payee || '',
+                                      billNumber: exp.billNumber || '',
+                                      billDate: exp.billDate || exp.date,
+                                      billTotal: exp.billTotal || exp.amount,
+                                      billDocumentUrl: exp.billDocumentUrl || '',
+                                      billDocumentName: exp.billDocumentName || '',
+                                      notes: exp.notes || ''
+                                    });
+                                    setExpenseModalOpen(true);
+                                  }}
+                                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                                  title="Edit Expense"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteExpense(exp.id)}
+                                  className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold"
+                                  title="Delete Expense"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                   </tbody>
                 </table>
               </div>
             </div>
 
           </div>
+        )}
+
+        {/* TAB 3.2: INVOICES & QUOTATIONS GENERATOR */}
+        {activeTab === 'invoices' && (
+          <InvoicesTab user={user} showToast={showToast} />
         )}
 
         {/* TAB 3.5: CATEGORY BUDGET ALLOCATIONS & CEILINGS */}
@@ -1893,7 +1951,7 @@ export const BudgetPage: React.FC = () => {
                           <span>{trf.toAccountName}</span>
                         </div>
                         <div className="text-[11px] text-slate-400">
-                          <span>{trf.date}</span> • <span>Ref: {trf.referenceNumber}</span> • <span>By: {trf.createdBy}</span>
+                          <span>{formatDate(trf.date)}</span> • <span>Ref: {trf.referenceNumber}</span> • <span>By: {trf.createdBy}</span>
                         </div>
                       </div>
                       <div className="font-mono font-bold text-sm text-blue-400">
@@ -1910,7 +1968,30 @@ export const BudgetPage: React.FC = () => {
 
         {/* TAB 6: MODULE SETTINGS */}
         {activeTab === 'settings' && (
-          <div className="max-w-3xl space-y-6">
+          <div className="max-w-4xl space-y-6">
+            {/* Centralized Admin Settings Notice */}
+            <div className="bg-gradient-to-r from-orange-500/10 via-amber-500/10 to-transparent border border-orange-500/30 rounded-3xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-orange-400 text-xs font-bold uppercase tracking-wider">
+                  <Sliders className="w-4 h-4" />
+                  <span>Centralized Admin Settings (އެޑްމިން ސެޓިންގްސް)</span>
+                </div>
+                <h3 className="text-base font-black text-white">
+                  Payment Instructions, Bank Transfer Details & Invoice Logo Settings
+                </h3>
+                <p className="text-xs text-slate-300">
+                  Bank Transfer payable to AANANDHA RECREATION CLUB, Account Number BML (MVR) 7730000308018, Invoice official logo upload, and branding can be managed in Admin Settings.
+                </p>
+              </div>
+              <a
+                href="/portal/settings?tab=budget"
+                className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-orange-500/20 transition whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Sliders className="w-4 h-4" />
+                <span>އެޑްމިން ސެޓިންގްސް އަށް ވަޑައިގަންނަވާ</span>
+              </a>
+            </div>
+
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
               <div>
                 <h3 className="text-lg font-extrabold text-white">Membership Fee & Fine Rules Configuration</h3>
@@ -2420,16 +2501,16 @@ export const BudgetPage: React.FC = () => {
         </Modal>
       )}
 
-      {/* --- MODAL 4: ADD/EDIT EXPENSE --- */}
+      {/* --- MODAL 4: ADD/EDIT EXPENSE & BILL --- */}
       {expenseModalOpen && (
         <Modal
           isOpen={expenseModalOpen}
           onClose={() => setExpenseModalOpen(false)}
-          title={editingExpense ? 'Edit Expense Record' : 'Record New Expense'}
+          title={editingExpense ? 'Edit Expense & Bill Record' : 'Record New Expense & Bill'}
         >
           <form onSubmit={handleSaveExpense} className="space-y-4">
             <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1">Expense Title</label>
+              <label className="text-xs font-bold text-slate-300 block mb-1">Expense Title / Purpose</label>
               <input
                 type="text"
                 value={expenseForm.title}
@@ -2440,9 +2521,124 @@ export const BudgetPage: React.FC = () => {
               />
             </div>
 
+            {/* Bill Upload & Vendor Info Box */}
+            <div className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                  <Receipt className="w-4 h-4" />
+                  <span>Vendor Bill / Invoice Details</span>
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">Attachment Optional</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-300 block mb-1">Vendor / Supplier Name</label>
+                  <input
+                    type="text"
+                    value={expenseForm.vendorName || expenseForm.payee}
+                    onChange={e => setExpenseForm({ ...expenseForm, vendorName: e.target.value, payee: e.target.value })}
+                    placeholder="e.g. Redwave, Male' Youth Center, Sonee Sports"
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2 text-xs text-white"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-300 block mb-1">Bill / Reference Number</label>
+                  <input
+                    type="text"
+                    value={expenseForm.billNumber}
+                    onChange={e => setExpenseForm({ ...expenseForm, billNumber: e.target.value, receiptNumber: e.target.value })}
+                    placeholder="e.g. RW-2026-9812 / INV-0491"
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2 text-xs text-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-300 block mb-1">Bill Date</label>
+                  <input
+                    type="date"
+                    value={expenseForm.billDate}
+                    onChange={e => setExpenseForm({ ...expenseForm, billDate: e.target.value, date: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2 text-xs text-white font-mono"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-300 block mb-1">Bill Total (MVR)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={expenseForm.billTotal || expenseForm.amount}
+                    onChange={e => {
+                      const val = Number(e.target.value);
+                      setExpenseForm({ ...expenseForm, billTotal: val, amount: val });
+                    }}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2 text-xs text-white font-mono font-bold"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Bill Upload File Area */}
+              <div>
+                <label className="text-[11px] font-semibold text-slate-300 block mb-1">Upload Bill Document (PDF / Image)</label>
+                {expenseForm.billDocumentUrl ? (
+                  <div className="flex items-center justify-between p-2.5 bg-slate-900 border border-amber-500/30 rounded-xl">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <FileText className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span className="text-xs text-slate-200 truncate font-medium">
+                        {expenseForm.billDocumentName || 'Attached_Bill_Document'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setExpenseForm({ ...expenseForm, billDocumentUrl: '', billDocumentName: '' })}
+                      className="p-1 rounded-lg hover:bg-rose-500/20 text-rose-400 text-xs transition-colors shrink-0"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative border-2 border-dashed border-slate-800 hover:border-amber-500/50 rounded-2xl p-4 text-center transition-colors bg-slate-900/50">
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          if (file.size > 8 * 1024 * 1024) {
+                            showToast('error', 'Bill document must be under 8MB');
+                            return;
+                          }
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            setExpenseForm({
+                              ...expenseForm,
+                              billDocumentUrl: reader.result as string,
+                              billDocumentName: file.name
+                            });
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                    <Upload className="w-6 h-6 text-slate-500 mx-auto mb-1.5" />
+                    <p className="text-xs text-slate-300 font-medium">Click or drag & drop bill image or PDF</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Supports PNG, JPG, PDF up to 8MB</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-bold text-slate-300 block mb-1">Category</label>
+                <label className="text-xs font-bold text-slate-300 block mb-1">Expense Category</label>
                 <select
                   value={expenseForm.category}
                   onChange={e => setExpenseForm({ ...expenseForm, category: e.target.value as any })}
@@ -2462,20 +2658,6 @@ export const BudgetPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-300 block mb-1">Amount (MVR)</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={expenseForm.amount}
-                  onChange={e => setExpenseForm({ ...expenseForm, amount: Number(e.target.value) })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white font-mono font-bold"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
                 <label className="text-xs font-bold text-slate-300 block mb-1">Disburse From Account</label>
                 <select
                   value={expenseForm.accountId}
@@ -2488,42 +2670,40 @@ export const BudgetPage: React.FC = () => {
                   ))}
                 </select>
               </div>
-
-              <div>
-                <label className="text-xs font-bold text-slate-300 block mb-1">Payee / Vendor Name</label>
-                <input
-                  type="text"
-                  value={expenseForm.payee}
-                  onChange={e => setExpenseForm({ ...expenseForm, payee: e.target.value })}
-                  placeholder="e.g. Redwave Store / Male Youth Center"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white"
-                  required
-                />
-              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            {/* Approval Workflow & Status */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
               <div>
-                <label className="text-xs font-bold text-slate-300 block mb-1">Approved By (EXCO Officer)</label>
+                <label className="text-xs font-bold text-slate-300 block mb-1">
+                  Executive Approval (President / VP)
+                </label>
                 <input
                   type="text"
                   value={expenseForm.approvedBy}
                   onChange={e => setExpenseForm({ ...expenseForm, approvedBy: e.target.value })}
-                  placeholder="e.g. Ibrahim Rasheed (President)"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white"
+                  placeholder={isPresidentOrVP ? user?.fullName || 'President / VP' : 'Requires President or VP Approval'}
+                  disabled={!isPresidentOrVP}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white disabled:opacity-60"
                 />
+                {!isPresidentOrVP && (
+                  <span className="text-[10px] text-amber-400 mt-1 block">
+                    * Submissions by general officers default to "Pending Approval".
+                  </span>
+                )}
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-300 block mb-1">Status</label>
+                <label className="text-xs font-bold text-slate-300 block mb-1">Payment Status</label>
                 <select
                   value={expenseForm.status}
                   onChange={e => setExpenseForm({ ...expenseForm, status: e.target.value as any })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white"
+                  disabled={!isPresidentOrVP}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white disabled:opacity-60"
                 >
-                  <option value="paid">Paid (Disburse immediately)</option>
-                  <option value="pending_approval">Pending Approval</option>
-                  <option value="rejected">Rejected</option>
+                  <option value="pending_approval">Pending Approval (President/VP Review)</option>
+                  {isPresidentOrVP && <option value="paid">Paid & Released (Disburse now)</option>}
+                  {isPresidentOrVP && <option value="rejected">Rejected</option>}
                 </select>
               </div>
             </div>
@@ -2540,12 +2720,28 @@ export const BudgetPage: React.FC = () => {
                 type="submit"
                 className="px-5 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold"
               >
-                Record Expense
+                {editingExpense ? 'Update Expense' : 'Save & Submit Expense'}
               </button>
             </div>
           </form>
         </Modal>
       )}
+
+      {/* --- BILL VIEWER & PAYMENT RELEASE MODAL --- */}
+      <BillViewerModal
+        isOpen={billViewerOpen}
+        onClose={() => {
+          setBillViewerOpen(false);
+          setViewingExpenseBill(null);
+        }}
+        expense={viewingExpenseBill}
+        accounts={accounts}
+        user={user}
+        onExpenseUpdated={(updated) => {
+          setExpenseRecords(prev => prev.map(e => e.id === updated.id ? updated : e));
+          loadData();
+        }}
+      />
 
       {/* --- MODAL 5: PROCESS MEMBER CONTRIBUTION PAYMENT --- */}
       {payModalOpen && selectedMemberForPay && (

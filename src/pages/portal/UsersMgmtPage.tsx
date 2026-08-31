@@ -8,10 +8,11 @@ import { Modal } from '../../components/common/Modal';
 import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { PinInput } from '../../components/common/PinInput';
 import { useToast } from '../../components/common/Toast';
+import { useTableSync } from '../../hooks/useRealtimeSync';
 import { ModulePermissionsGrid, ALL_SYSTEM_MODULES } from '../../components/portal/ModulePermissionsGrid';
 import { UserPerformanceModal } from '../../components/portal/UserPerformanceModal';
 import { 
-  Plus, Edit, Lock, Unlock, UserX, UserCheck, Shield, Key, Users, Sliders, Trash2, Activity, Award 
+  Plus, Edit, Lock, Unlock, UserX, UserCheck, Shield, Key, Users, Sliders, Trash2, Activity, Award, Sparkles, Copy, Check 
 } from 'lucide-react';
 
 export const UsersMgmtPage: React.FC = () => {
@@ -35,11 +36,10 @@ export const UsersMgmtPage: React.FC = () => {
   // Delete Confirmation State
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
 
-  // Admin Reset PIN State
-  const [resetPinUser, setResetPinUser] = useState<User | null>(null);
-  const [newResetPin, setNewResetPin] = useState('');
-  const [confirmResetPin, setConfirmResetPin] = useState('');
-  const [resetPinLoading, setResetPinLoading] = useState(false);
+  // Admin PIN Change Modal State
+  const [pinModalUser, setPinModalUser] = useState<User | null>(null);
+  const [adminNewPin, setAdminNewPin] = useState('2613');
+  const [adminPinLoading, setAdminPinLoading] = useState(false);
 
   // User Form State
   const [username, setUsername] = useState('');
@@ -91,6 +91,11 @@ export const UsersMgmtPage: React.FC = () => {
   useEffect(() => {
     fetchUsers();
   }, [currentTab]);
+
+  // Real-time table sync for users, roles, and members
+  useTableSync(['users', 'roles', 'members', 'clubMembers'], () => {
+    fetchUsers();
+  });
 
   const handleOpenCreateUser = () => {
     setEditingUser(null);
@@ -144,10 +149,10 @@ export const UsersMgmtPage: React.FC = () => {
 
   const handleTogglePerm = (modKey: string, field: keyof ModulePermission) => {
     setPermissions(prev => {
-      const curr = prev[modKey] || {
+      const curr: ModulePermission = prev[modKey] || {
         id: `perm_${modKey}`,
         userId: editingUser?.id || '',
-        moduleKey: modKey as any,
+        moduleKey: modKey as ModuleKey,
         canView: false,
         canCreate: false,
         canEdit: false,
@@ -174,29 +179,34 @@ export const UsersMgmtPage: React.FC = () => {
       return;
     }
 
-    if (!selectedMemberId) {
-      showToast('error', 'To create or link a user, you MUST select an existing club member (އެގްޒިސްޓިންގ މެންބަރަކާ ގުޅުވަންޖެހޭނެ).');
+    const selectedRole = roles.find(r => r.id === roleId);
+    const roleName = selectedRole?.name || '';
+    const isAdmin = roleId === 'role_admin' || roleName.toLowerCase() === 'admin';
+    const isMemberRole = roleId === 'role_member' || roleName === 'Club Member';
+    const isExcoRole = roleName === 'EXCO Member' || roleId === 'role_exco' || ['role_president', 'role_vp', 'role_treasurer', 'role_secretary'].includes(roleId);
+
+    if (!isAdmin && !selectedMemberId) {
+      showToast('error', 'All non-admin users (EXCO & Club Members) must be linked to an existing club member (އެގްޒިސްޓިންގ މެންބަރަކާ ގުޅުވަންޖެހޭނެ).');
       return;
     }
 
-    const selectedRole = roles.find(r => r.id === roleId);
-    const roleName = selectedRole?.name || '';
-    const isMemberRole = roleId === 'role_member' || roleName === 'Club Member';
-    const isExcoRole = roleName === 'EXCO Member' || roleId === 'role_exco' || ['role_president', 'role_vp', 'role_treasurer', 'role_secretary'].includes(roleId);
+    const linkedMemberObj = selectedMemberId ? members.find(m => m.id === selectedMemberId) : undefined;
 
     // For standard members, no administrative modules are assigned
     const permissionList = isMemberRole ? [] : Object.values(permissions);
 
     const payload = {
       username,
-      fullName: fullName || members.find(m => m.id === selectedMemberId)?.fullName || username,
-      designation: isExcoRole ? designation : '',
-      contactNumber,
-      memberId: selectedMemberId,
+      fullName: fullName || linkedMemberObj?.fullName || username,
+      designation: isExcoRole ? (designation || linkedMemberObj?.excoDesignation || '') : (isAdmin ? (designation || 'Administrator') : ''),
+      contactNumber: contactNumber || linkedMemberObj?.phoneNumber || '',
+      memberId: selectedMemberId || undefined,
+      memberNumber: linkedMemberObj?.memberNumber || undefined,
+      idCardNumber: linkedMemberObj?.idCardNumber || undefined,
       pin: pin || undefined,
       confirmPin: pin || undefined,
       roleId,
-      roleName: selectedRole?.name || (isMemberRole ? 'Club Member' : 'System User'),
+      roleName: selectedRole?.name || (isAdmin ? 'Admin' : (isMemberRole ? 'Club Member' : 'EXCO Member')),
       isActive,
       isLocked,
       permissions: permissionList
@@ -245,49 +255,36 @@ export const UsersMgmtPage: React.FC = () => {
     }
   };
 
-  const handleOpenResetPinModal = (u: User) => {
-    setResetPinUser(u);
-    setNewResetPin('');
-    setConfirmResetPin('');
+  const handleOpenChangePin = (u: User) => {
+    setPinModalUser(u);
+    setAdminNewPin('2613');
   };
 
-  const handlePerformResetPin = async (e: React.FormEvent) => {
+  const handleGenerateRandomPin = () => {
+    const randomPin = Math.floor(1000 + Math.random() * 9000).toString();
+    setAdminNewPin(randomPin);
+    showToast('info', `Generated new PIN: ${randomPin}`);
+  };
+
+  const handleSaveAdminPin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resetPinUser) return;
-
-    const cleanPin = newResetPin.trim();
-    if (!cleanPin || !confirmResetPin.trim()) {
-      showToast('error', 'Please enter and confirm the new numeric PIN.');
-      return;
-    }
-
-    if (!/^\d+$/.test(cleanPin)) {
-      showToast('error', 'PIN must contain numeric digits only (e.g. 2613).');
-      return;
-    }
-
-    if (cleanPin.length < 4) {
-      showToast('error', 'PIN must be at least 4 numeric digits.');
-      return;
-    }
-
-    if (cleanPin !== confirmResetPin.trim()) {
-      showToast('error', 'New PIN and Confirm PIN do not match.');
+    if (!pinModalUser) return;
+    const cleanPin = adminNewPin.trim();
+    if (!cleanPin || !/^\d{4,8}$/.test(cleanPin)) {
+      showToast('error', 'PIN must be between 4 and 8 numeric digits.');
       return;
     }
 
     try {
-      setResetPinLoading(true);
-      await api.resetUserPin(resetPinUser.id, cleanPin);
-      showToast('success', `PIN successfully reset for user @${resetPinUser.username}.`);
-      setResetPinUser(null);
-      setNewResetPin('');
-      setConfirmResetPin('');
+      setAdminPinLoading(true);
+      await api.resetUserPin(pinModalUser.id, cleanPin);
+      showToast('success', `PIN updated for user @${pinModalUser.username} (${cleanPin}).`);
+      setPinModalUser(null);
       fetchUsers();
     } catch (err: any) {
-      showToast('error', err.message || 'Failed to reset PIN.');
+      showToast('error', err.message || 'Failed to update PIN.');
     } finally {
-      setResetPinLoading(false);
+      setAdminPinLoading(false);
     }
   };
 
@@ -472,15 +469,41 @@ export const UsersMgmtPage: React.FC = () => {
                             </div>
                           </td>
                           <td className="p-3.5 font-medium">
-                            <div>{u.designation}</div>
-                            {u.memberId && (
-                              <div className="mt-1">
-                                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/80 font-mono">
-                                  <UserCheck className="w-3 h-3" />
-                                  <span>{members.find(m => m.id === u.memberId)?.memberNumber || 'Linked Member'}</span>
-                                </span>
-                              </div>
-                            )}
+                            <div className="text-white text-xs">{u.designation || (u.roleName === 'Admin' ? 'System Administrator' : 'Club Member')}</div>
+                            {(() => {
+                              const mem = members.find(m => m.id === u.memberId);
+                              if (mem) {
+                                return (
+                                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                                    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/80 font-mono">
+                                      <UserCheck className="w-3 h-3" />
+                                      <span>{mem.memberNumber}</span>
+                                    </span>
+                                    {mem.idCardNumber && (
+                                      <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono">
+                                        ID: {mem.idCardNumber}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              }
+                              if (u.roleName === 'Admin' || u.roleId === 'role_admin') {
+                                return (
+                                  <div className="mt-1">
+                                    <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                                      Admin (Not Linked)
+                                    </span>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div className="mt-1">
+                                  <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-800/80">
+                                    Unlinked Member
+                                  </span>
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td className="p-3.5">
                             <span className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 font-semibold text-orange-400 text-[10px]">
@@ -511,46 +534,38 @@ export const UsersMgmtPage: React.FC = () => {
                               <Activity className="w-3.5 h-3.5" />
                               <span>Performance</span>
                             </button>
-                            {hasPermission('users', 'canEdit') && (
-                              <button
-                                type="button"
-                                onClick={() => handleOpenResetPinModal(u)}
-                                className="p-1.5 rounded-lg bg-slate-800 text-orange-400 hover:text-white hover:bg-slate-700"
-                                title="Admin Reset PIN"
-                              >
-                                <Key className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                            {hasPermission('users', 'canEdit') && (
-                              <button
-                                type="button"
-                                onClick={() => handleToggleLock(u)}
-                                className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
-                                title={u.status === 'locked' ? 'Unlock Account' : 'Lockout Account'}
-                              >
-                                {u.status === 'locked' ? <Unlock className="w-3.5 h-3.5 text-orange-400" /> : <Lock className="w-3.5 h-3.5 text-amber-400" />}
-                              </button>
-                            )}
-                            {hasPermission('users', 'canEdit') && (
-                              <button
-                                type="button"
-                                onClick={() => handleOpenEditUser(u)}
-                                className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
-                                title="Edit User & Permissions"
-                              >
-                                <Edit className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                            {hasPermission('users', 'canDelete') && (
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteUser(u)}
-                                className="p-1.5 rounded-lg bg-slate-800 text-rose-400 hover:text-rose-300 hover:bg-rose-950/50"
-                                title="Delete User Account"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenChangePin(u)}
+                              className="p-1.5 rounded-lg bg-slate-800 text-amber-400 hover:text-white hover:bg-slate-700"
+                              title="Admin Change PIN (ޕިން ބަދަލުކުރުން)"
+                            >
+                              <Key className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleLock(u)}
+                              className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+                              title={u.status === 'locked' ? 'Unlock Account' : 'Lockout Account'}
+                            >
+                              {u.status === 'locked' ? <Unlock className="w-3.5 h-3.5 text-orange-400" /> : <Lock className="w-3.5 h-3.5 text-amber-400" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditUser(u)}
+                              className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+                              title="Edit User & Permissions"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteUser(u)}
+                              className="p-1.5 rounded-lg bg-slate-800 text-rose-400 hover:text-rose-300 hover:bg-rose-950/50"
+                              title="Delete User Account"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </td>
                         </tr>
                       )))}
@@ -626,43 +641,7 @@ export const UsersMgmtPage: React.FC = () => {
         maxWidth="3xl"
       >
         <form onSubmit={handleSaveUser} className="space-y-6">
-          {/* Link to Existing Club Member (Mandatory) */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
-            <label className="block text-xs font-bold uppercase text-orange-400 flex items-center gap-1.5">
-              <UserCheck className="w-4 h-4" />
-              <span> Link to Existing Club Member * (އެގްޒިސްޓިންގ މެންބަރަކާ ގުޅުވުން)</span>
-            </label>
-            <select
-              required
-              value={selectedMemberId}
-              onChange={e => {
-                const mId = e.target.value;
-                setSelectedMemberId(mId);
-                if (mId) {
-                  const found = members.find(m => m.id === mId);
-                  if (found) {
-                    setFullName(found.fullName);
-                    if (found.phoneNumber) setContactNumber(found.phoneNumber);
-                    if (found.excoDesignation) {
-                      setDesignation(found.excoDesignation);
-                    }
-                  }
-                }
-              }}
-              className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-orange-500 focus:outline-none"
-            >
-              <option value="">-- Select Existing Member (މެންބަރަކު ޚިޔާރުކުރައްވާ) * --</option>
-              {members.map(m => (
-                <option key={m.id} value={m.id}>
-                  {m.memberNumber} - {m.fullName} ({m.memberType}) {m.phoneNumber ? `[${m.phoneNumber}]` : ''}
-                </option>
-              ))}
-            </select>
-            <p className="text-[11px] text-slate-400">
-              Creating or editing a user account requires linking to an existing club member record to synchronize performance and attendance tracking.
-            </p>
-          </div>
-
+          {/* System Role */}
           <div>
             <label className="block text-xs font-bold uppercase text-slate-300 mb-1 flex items-center justify-between">
               <span>System Role (ސިސްޓަމް ރޯލް) *</span>
@@ -691,16 +670,60 @@ export const UsersMgmtPage: React.FC = () => {
               }}
               className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs font-semibold text-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/30 focus:outline-none transition cursor-pointer"
             >
-              <option value="role_admin">Admin (އެޑްމިން - Full Access)</option>
-              <option value="role_exco">EXCO Member (ހިންގާ ކޮމިޓީ)</option>
-              <option value="role_member">Club Member (ކްލަބް މެންބަރު - Member Dashboard)</option>
+              <option value="role_admin">Admin (އެޑްމިން - Full Access / Member link optional)</option>
+              <option value="role_exco">EXCO Member (ހިންގާ ކޮމިޓީ - Requires linked member)</option>
+              <option value="role_member">Club Member (ކްލަބް މެންބަރު - Requires linked member)</option>
               {roles.filter(r => !['role_admin', 'role_exco', 'role_member'].includes(r.id)).map(r => (
                 <option key={r.id} value={r.id}>{r.name} ({r.description || 'Executive Officer'})</option>
               ))}
             </select>
             <p className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0 inline-block"></span>
-              <span>Admin & Club Member roles do not require Designation. Designation is required for EXCO Members.</span>
+              <span>All EXCO and Club Member user accounts must link with an official club member record. Admins are exempt.</span>
+            </p>
+          </div>
+
+          {/* Link to Existing Club Member */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
+            <label className="block text-xs font-bold uppercase text-orange-400 flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <UserCheck className="w-4 h-4" />
+                <span>Link to Existing Club Member {roleId === 'role_admin' ? '(Optional for Admin)' : '* (Mandatory for EXCO / Members)'}</span>
+              </div>
+              {roleId === 'role_admin' && (
+                <span className="text-[10px] text-slate-400 font-normal lowercase">(admin users do not require member link)</span>
+              )}
+            </label>
+            <select
+              required={roleId !== 'role_admin'}
+              value={selectedMemberId}
+              onChange={e => {
+                const mId = e.target.value;
+                setSelectedMemberId(mId);
+                if (mId) {
+                  const found = members.find(m => m.id === mId);
+                  if (found) {
+                    setFullName(found.fullName);
+                    if (found.phoneNumber) setContactNumber(found.phoneNumber);
+                    if (found.excoDesignation) {
+                      setDesignation(found.excoDesignation);
+                    }
+                  }
+                }
+              }}
+              className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-orange-500 focus:outline-none"
+            >
+              <option value="">{roleId === 'role_admin' ? '-- No Linked Member (Admin Account) --' : '-- Select Existing Member (މެންބަރަކު ޚިޔާރުކުރައްވާ) * --'}</option>
+              {members.map(m => (
+                <option key={m.id} value={m.id}>
+                  {m.memberNumber} - {m.fullName} {m.idCardNumber ? `[ID: ${m.idCardNumber}]` : ''} ({m.memberType}) {m.phoneNumber ? `[${m.phoneNumber}]` : ''}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-400">
+              {roleId === 'role_admin'
+                ? 'Admins manage the entire portal and do not need to be tied to a club member record.'
+                : 'Linking connects the user to their official member record, enabling synchronized quiz participation, ID card matching, attendance history, and budget reports.'}
             </p>
           </div>
 
@@ -762,20 +785,13 @@ export const UsersMgmtPage: React.FC = () => {
             </div>
           </div>
 
-          {!editingUser ? (
+          {!editingUser && (
             <PinInput
               id="new_user_pin"
               value={pin}
               onChange={setPin}
               label="Initial Numeric PIN *"
               required
-            />
-          ) : (
-            <PinInput
-              id="edit_user_pin"
-              value={pin}
-              onChange={setPin}
-              label="Update User PIN (Optional - leave blank to keep unchanged)"
             />
           )}
 
@@ -852,67 +868,6 @@ export const UsersMgmtPage: React.FC = () => {
         </form>
       </Modal>
 
-      {/* Admin Reset User PIN Modal */}
-      <Modal
-        isOpen={!!resetPinUser}
-        onClose={() => {
-          setResetPinUser(null);
-          setNewResetPin('');
-          setConfirmResetPin('');
-        }}
-        title={`Reset Security PIN: @${resetPinUser?.username}`}
-        description="Set a new numeric PIN for this user account. Only administrators have permission to create or change user PINs."
-      >
-        <form onSubmit={handlePerformResetPin} className="space-y-4">
-          <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between text-xs">
-            <div>
-              <p className="font-bold text-white">{resetPinUser?.fullName}</p>
-              <p className="text-slate-400">@{resetPinUser?.username} &bull; {resetPinUser?.roleName}</p>
-            </div>
-            <span className="px-2 py-0.5 rounded bg-orange-500/20 text-orange-400 font-mono text-[11px] font-bold">
-              Admin PIN Override
-            </span>
-          </div>
-
-          <PinInput
-            id="admin_reset_new_pin"
-            value={newResetPin}
-            onChange={setNewResetPin}
-            label="New Numeric PIN (at least 4 digits) *"
-            required
-          />
-
-          <PinInput
-            id="admin_reset_confirm_pin"
-            value={confirmResetPin}
-            onChange={setConfirmResetPin}
-            label="Confirm New Numeric PIN *"
-            required
-          />
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => {
-                setResetPinUser(null);
-                setNewResetPin('');
-                setConfirmResetPin('');
-              }}
-              className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-semibold text-xs hover:bg-slate-700"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={resetPinLoading}
-              className="px-5 py-2 rounded-xl bg-orange-500 text-white font-bold text-xs hover:bg-orange-400 disabled:opacity-50"
-            >
-              {resetPinLoading ? 'Resetting PIN...' : 'Save New PIN'}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
       {/* User Performance Dashboard Modal */}
       <UserPerformanceModal
         isOpen={!!performanceUserId}
@@ -932,6 +887,85 @@ export const UsersMgmtPage: React.FC = () => {
         cancelText="ކެންސަލް (Cancel)"
         isDanger={true}
       />
+
+      {/* Admin Change User PIN Modal */}
+      <Modal
+        id="admin_change_pin_modal"
+        isOpen={!!pinModalUser}
+        onClose={() => setPinModalUser(null)}
+        title="Change User PIN (ޕިން ބަދަލުކުރުން)"
+        description={`Set a new numeric PIN for user @${pinModalUser?.username || ''} (${pinModalUser?.fullName || ''}).`}
+      >
+        <form onSubmit={handleSaveAdminPin} className="space-y-4">
+          <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1 text-xs">
+            <div className="flex items-center justify-between text-slate-400">
+              <span>User:</span>
+              <strong className="text-white">@{pinModalUser?.username}</strong>
+            </div>
+            <div className="flex items-center justify-between text-slate-400">
+              <span>Full Name:</span>
+              <strong className="text-slate-200">{pinModalUser?.fullName}</strong>
+            </div>
+            <div className="flex items-center justify-between text-slate-400">
+              <span>Role:</span>
+              <strong className="text-orange-400">{pinModalUser?.roleName}</strong>
+            </div>
+          </div>
+
+          <div>
+            <PinInput
+              id="admin_user_new_pin"
+              value={adminNewPin}
+              onChange={setAdminNewPin}
+              label="New Numeric PIN (އައު ޕިން ކޯޑު)"
+              required
+            />
+          </div>
+
+          <div className="flex items-center justify-between pt-1">
+            <button
+              type="button"
+              onClick={handleGenerateRandomPin}
+              className="px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Generate Random PIN</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (adminNewPin) {
+                  navigator.clipboard.writeText(adminNewPin);
+                  showToast('success', `Copied PIN (${adminNewPin}) to clipboard.`);
+                }
+              }}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>Copy PIN</span>
+            </button>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
+            <button
+              type="button"
+              onClick={() => setPinModalUser(null)}
+              className="px-4 py-2 rounded-xl bg-slate-800 text-xs text-slate-300 font-semibold hover:bg-slate-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={adminPinLoading}
+              className="px-5 py-2 rounded-xl bg-orange-500 text-white font-bold text-xs hover:bg-orange-400 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              <Key className="w-3.5 h-3.5" />
+              <span>{adminPinLoading ? 'Saving...' : 'Update User PIN'}</span>
+            </button>
+          </div>
+        </form>
+      </Modal>
 
     </PortalLayout>
   );

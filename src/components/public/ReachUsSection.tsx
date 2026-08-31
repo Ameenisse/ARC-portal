@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Phone, MessageSquare, MapPin, Clock, PhoneCall, Send, CheckCircle2, Sparkles } from 'lucide-react';
+import { Mail, Phone, MessageSquare, MapPin, PhoneCall, CheckCircle2, Send } from 'lucide-react';
 import { api } from '../../services/api';
 
 interface ReachUsProps {
@@ -28,7 +28,6 @@ export const ReachUsSection: React.FC<ReachUsProps> = ({ contacts = [] }) => {
   const secondaryPhone = getContactVal('secondary_phone') || '+960 330 1234';
   const whatsapp = getContactVal('whatsapp') || '+9607774321';
   const address = getContactVal('address') || 'އާނަންދާ ރީކްރިއޭޝަން ކްލަބް، މަޖީދީމަގު، މާލެ، ދިވެހިރާއްޖެ';
-  const workingHours = getContactVal('working_hours') || 'ހޮނިހިރު - ބުރާސްފަތި: 09:00 - 22:00';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,7 +70,7 @@ export const ReachUsSection: React.FC<ReachUsProps> = ({ contacts = [] }) => {
         </div>
 
         {/* Top Info Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           
           {/* Email */}
           <a
@@ -136,20 +135,6 @@ export const ReachUsSection: React.FC<ReachUsProps> = ({ contacts = [] }) => {
               <span className="text-sm font-semibold text-white mt-1 block leading-relaxed">
                 {address}
               </span>
-            </div>
-          </div>
-
-          {/* Working Hours */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex items-start gap-4 md:col-span-2 lg:col-span-2">
-            <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
-              <Clock className="w-6 h-6" />
-            </div>
-            <div>
-              <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold block">މަސައްކަތު ގަޑި</span>
-              <span className="text-sm font-semibold text-white mt-1 block leading-relaxed">
-                {workingHours}
-              </span>
-              <span className="text-xs text-slate-500 mt-1 block">ހުކުރު ދުވަހާއި ރަސްމީ ބަންދު ދުވަސްތަކުގައި ބަންދުވާނެއެވެ.</span>
             </div>
           </div>
 

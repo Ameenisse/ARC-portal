@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PortalLayout } from '../../components/portal/PortalLayout';
 import { ClubRulesModal } from '../../components/portal/ClubRulesModal';
+import { useTableSync } from '../../hooks/useRealtimeSync';
 import { api } from '../../services/api';
 import { ClubRulesData, ClubRuleChapter, ClubRuleArticle } from '../../types';
 import {
@@ -70,6 +71,13 @@ export const ClubRulesMgmtPage: React.FC = () => {
   useEffect(() => {
     fetchClubRules();
   }, []);
+
+  // Real-time sync for club rules, directives, and circulars
+  useTableSync(['clubRules', 'presidentialDirectives', 'officialCirculars'], () => {
+    if (!saving) {
+      fetchClubRules();
+    }
+  });
 
   const fetchClubRules = async () => {
     try {

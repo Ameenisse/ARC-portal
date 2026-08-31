@@ -21,15 +21,59 @@ export function getSystemTimezone(): string {
   return activeSystemTimezone;
 }
 
+/**
+ * Universal cross-browser, cross-device date parser supporting ISO strings,
+ * timezone offsets (+05:00, Z), and non-standard browser date strings.
+ */
 export function parseDate(dateVal: string | number | Date | null | undefined): Date | null {
   if (!dateVal) return null;
-  const d = new Date(dateVal);
-  if (isNaN(d.getTime())) return null;
-  return d;
+  if (dateVal instanceof Date) {
+    return isNaN(dateVal.getTime()) ? null : dateVal;
+  }
+  if (typeof dateVal === 'number') {
+    const d = new Date(dateVal);
+    return isNaN(dateVal) || isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof dateVal === 'string') {
+    const trimmed = dateVal.trim();
+    if (!trimmed) return null;
+
+    // Handle DD/MM/YYYY or DD-MM-YYYY formats
+    const ddmmyyyy = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
+    const match = trimmed.match(ddmmyyyy);
+    if (match) {
+      const [_, day, month, year, hour, minute, second] = match;
+      const h = hour ? parseInt(hour, 10) : 12;
+      const m = minute ? parseInt(minute, 10) : 0;
+      const s = second ? parseInt(second, 10) : 0;
+      const iso = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}+05:00`;
+      const d = new Date(iso);
+      if (!isNaN(d.getTime())) return d;
+    }
+
+    // Handle standard YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const d = new Date(`${trimmed}T12:00:00+05:00`);
+      if (!isNaN(d.getTime())) return d;
+    }
+
+    // Handle YYYY-MM-DDTHH:mm or YYYY-MM-DD HH:mm without offset
+    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?$/.test(trimmed)) {
+      const cleanIso = trimmed.replace(' ', 'T');
+      const fullTime = cleanIso.length === 16 ? `${cleanIso}:00` : cleanIso;
+      const dWithOffset = new Date(`${fullTime}+05:00`);
+      if (!isNaN(dWithOffset.getTime())) return dWithOffset;
+    }
+
+    // Direct ISO string parse (e.g. 2026-08-24T09:00:00.000Z or +05:00)
+    const d = new Date(trimmed);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
 }
 
 /**
- * Formats a date into DD/MM/YYYY in System Timezone (Default: GMT+05:00)
+ * Formats a date into DD/MM/YYYY strictly in Maldives Timezone (GMT+05:00)
  */
 export function formatDate(dateVal: string | number | Date | null | undefined, fallback = 'N/A'): string {
   const d = parseDate(dateVal);
@@ -56,7 +100,7 @@ export function formatDate(dateVal: string | number | Date | null | undefined, f
 }
 
 /**
- * Formats time into 24-hour clock (HH:mm or HH:mm:ss) in System Timezone (Default: GMT+05:00)
+ * Formats time into 24-hour clock (HH:mm or HH:mm:ss) in Maldives Timezone (GMT+05:00)
  */
 export function formatTime(dateVal: string | number | Date | null | undefined, includeSeconds = false, fallback = 'N/A'): string {
   const d = parseDate(dateVal);
@@ -98,6 +142,70 @@ export function formatDateTime(dateVal: string | number | Date | null | undefine
   const dateStr = formatDate(d);
   const timeStr = formatTime(d, includeSeconds);
   return `${dateStr} ${timeStr}`;
+}
+
+/**
+ * Formats an ISO or Date value to "YYYY-MM-DDTHH:mm" strictly in Maldives Time (GMT+05:00)
+ * for HTML datetime-local inputs, guaranteed identical across any client device/browser.
+ */
+export function formatToMaldivesInput(dateVal: string | number | Date | null | undefined): string {
+  const d = parseDate(dateVal);
+  if (!d) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: activeSystemTimezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).formatToParts(d);
+
+    const year = parts.find(p => p.type === 'year')?.value || String(d.getFullYear());
+    const month = parts.find(p => p.type === 'month')?.value || String(d.getMonth() + 1).padStart(2, '0');
+    const day = parts.find(p => p.type === 'day')?.value || String(d.getDate()).padStart(2, '0');
+    const hour = parts.find(p => p.type === 'hour')?.value || String(d.getHours()).padStart(2, '0');
+    const minute = parts.find(p => p.type === 'minute')?.value || String(d.getMinutes()).padStart(2, '0');
+
+    return `${year}-${month}-${day}T${hour}:${minute}`;
+  } catch {
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+}
+
+/**
+ * Converts a "YYYY-MM-DDTHH:mm" string entered in Maldives Time into a standard ISO 8601 string
+ * preserving the exact entered Maldives date and time without local browser timezone distortion.
+ */
+export function parseMaldivesInputToISO(inputVal: string): string {
+  if (!inputVal) return new Date().toISOString();
+  const trimmed = inputVal.trim();
+  
+  if (trimmed.includes('Z') || /[+-]\d{2}:\d{2}$/.test(trimmed)) {
+    const d = new Date(trimmed);
+    return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?$/.test(trimmed)) {
+    const clean = trimmed.replace(' ', 'T');
+    const withSec = clean.length === 16 ? `${clean}:00` : clean;
+    const d = new Date(`${withSec}+05:00`);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString();
+    }
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const d = new Date(`${trimmed}T12:00:00+05:00`);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString();
+    }
+  }
+
+  const fallback = new Date(trimmed);
+  return isNaN(fallback.getTime()) ? new Date().toISOString() : fallback.toISOString();
 }
 
 export const THAANA_LABELS = ['ހ', 'ށ', 'ނ', 'ރ', 'ބ', 'ޅ', 'ކ', 'އ', 'ވ', 'މ', 'ފ', 'ދ'];

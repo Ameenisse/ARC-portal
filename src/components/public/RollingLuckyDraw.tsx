@@ -78,11 +78,26 @@ export const RollingLuckyDraw: React.FC<RollingLuckyDrawProps> = ({
     let elapsed = 0;
     const totalMs = durationSeconds * 1000;
 
+    // Determine predetermined target winner or pick one at start of draw
+    const targetWinnerNum = winnerNumber || safeEligible[Math.floor(Math.random() * safeEligible.length)];
+    const targetMatchContact = participantContacts.find(c => c.participantNumber === targetWinnerNum);
+    const targetWinnerContact = winnerContact || targetMatchContact?.contactNumber || '';
+
     const roll = () => {
-      const randomIdx = Math.floor(Math.random() * safeEligible.length);
-      const num = safeEligible[randomIdx];
-      const match = participantContacts.find(c => c.participantNumber === num);
-      const contactVal = match?.contactNumber || `7${(randomIdx * 7 + 1) % 9}***${10 + (randomIdx * 13) % 89}`;
+      const remainingMs = totalMs - elapsed;
+      let num = '';
+      let contactVal = '';
+
+      if (remainingMs <= 300 && targetWinnerNum) {
+        // Lock directly onto target winner during final tick
+        num = targetWinnerNum;
+        contactVal = targetWinnerContact || targetMatchContact?.contactNumber || '';
+      } else {
+        const randomIdx = Math.floor(Math.random() * safeEligible.length);
+        num = safeEligible[randomIdx];
+        const match = participantContacts.find(c => c.participantNumber === num);
+        contactVal = match?.contactNumber || (participantContacts[randomIdx]?.contactNumber || '');
+      }
 
       setDisplayedNumber(num);
       setDisplayedContact(contactVal);
@@ -90,17 +105,16 @@ export const RollingLuckyDraw: React.FC<RollingLuckyDrawProps> = ({
       elapsed += speed;
 
       // Slow down in the final 3 seconds
-      if (totalMs - elapsed < 3000) {
+      if (remainingMs < 3000) {
         speed += 25;
       }
 
       if (elapsed < totalMs) {
         intervalRef.current = setTimeout(roll, speed);
       } else {
-        // Draw Finish - Auto Pick & Announce Winner
-        const finalWinner = winnerNumber || safeEligible[Math.floor(Math.random() * safeEligible.length)];
-        const matchContact = participantContacts.find(c => c.participantNumber === finalWinner);
-        const finalContact = winnerContact || matchContact?.contactNumber || '77***89';
+        // Draw Finish - Land exactly on the target winner
+        const finalWinner = targetWinnerNum;
+        const finalContact = targetWinnerContact || contactVal;
 
         setDisplayedNumber(finalWinner);
         setDisplayedContact(finalContact);

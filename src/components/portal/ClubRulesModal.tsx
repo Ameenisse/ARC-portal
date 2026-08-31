@@ -18,11 +18,12 @@ import {
 interface ClubRulesModalProps {
   isOpen: boolean;
   onClose: () => void;
+  rules?: ClubRulesData;
 }
 
-export const ClubRulesModal: React.FC<ClubRulesModalProps> = ({ isOpen, onClose }) => {
+export const ClubRulesModal: React.FC<ClubRulesModalProps> = ({ isOpen, onClose, rules: initialRules }) => {
   const [loading, setLoading] = useState(true);
-  const [rules, setRules] = useState<ClubRulesData | null>(null);
+  const [rules, setRules] = useState<ClubRulesData | null>(initialRules || null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedChapterId, setSelectedChapterId] = useState<string>('all');
   const [expandedChapters, setExpandedChapters] = useState<Record<string, boolean>>({});
@@ -31,6 +32,17 @@ export const ClubRulesModal: React.FC<ClubRulesModalProps> = ({ isOpen, onClose 
   const [lang, setLang] = useState<'dhivehi' | 'english' | 'both'>('dhivehi');
 
   useEffect(() => {
+    if (initialRules) {
+      setRules(initialRules);
+      if (initialRules.chapters) {
+        const exp: Record<string, boolean> = {};
+        initialRules.chapters.forEach(c => { exp[c.id] = true; });
+        setExpandedChapters(exp);
+      }
+      setLoading(false);
+      return;
+    }
+
     if (isOpen) {
       setLoading(true);
       api.getClubRules()
@@ -45,7 +57,7 @@ export const ClubRulesModal: React.FC<ClubRulesModalProps> = ({ isOpen, onClose 
         .catch(console.error)
         .finally(() => setLoading(false));
     }
-  }, [isOpen]);
+  }, [isOpen, initialRules]);
 
   if (!isOpen) return null;
 

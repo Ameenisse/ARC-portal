@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { BookOpen, CheckCircle, Clock, ShieldCheck, HelpCircle, Trophy, Send, Sparkles, Calendar, Award, Building2, ArrowRight, RotateCcw } from 'lucide-react';
+import { BookOpen, CheckCircle, Clock, ShieldCheck, HelpCircle, Trophy, Send, Sparkles, Calendar, Award, Building2, ArrowRight, RotateCcw, AlertTriangle } from 'lucide-react';
 import { api } from '../../services/api';
+import { useTableSync } from '../../hooks/useRealtimeSync';
 import { RollingContactNumbers } from './RollingContactNumbers';
 import { formatDateTime, formatDate, getThaanaOptionLabel, setSystemTimezone } from '../../utils/formatters';
 
@@ -106,6 +107,22 @@ export const QuizSection: React.FC = () => {
     return () => clearInterval(pollInterval);
   }, []);
 
+  // Instant real-time database sync for active quiz question, submissions, and winners
+  useTableSync(['quiz_questions', 'quiz_submissions', 'quiz_winners', 'quiz_prizes', 'quizQuestions', 'quizSubmissions', 'quizWinners'], () => {
+    fetchQuiz(false);
+  });
+
+  // When question switches to the newly published question, reset selection and submission states
+  useEffect(() => {
+    if (quizData?.question?.id) {
+      setSelectedOptionId('');
+      setSubmitSuccess(null);
+      setError(null);
+      setLastDrawnWinner(null);
+      setShowWinnerOverlay(false);
+    }
+  }, [quizData?.question?.id]);
+
   // Countdown timer effect
   useEffect(() => {
     const isScheduledState = quizData?.state === 'scheduled' || (!quizData?.question && Boolean(quizData?.nextQuestion));
@@ -209,8 +226,20 @@ export const QuizSection: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!idNumber || !contactNumber || !selectedOptionId || !consentAccepted) {
-      alert('އިނާމަށް ޝަރުތުހަމަވުމަށް ހުރިހާ މަޢުލޫމާތެއް ފުރިހަމަކުރައްވައި، އިޤްރާރުގައި ފާހަގަޖައްސަވާ.');
+    if (!selectedOptionId) {
+      setError('ސުވާލުގެ ޖަވާބެއް ޚިޔާރުކުރައްވާ (Please select an answer option).');
+      return;
+    }
+    if (!idNumber || !idNumber.trim()) {
+      setError('އައިޑީ ކާޑު ނަންބަރު ލިޔުއްވާ (Please enter your ID card number).');
+      return;
+    }
+    if (!contactNumber || !contactNumber.trim()) {
+      setError('ގުޅޭނެ ފޯނު ނަންބަރު ލިޔުއްވާ (Please enter your contact phone number).');
+      return;
+    }
+    if (!consentAccepted) {
+      setError('ކުއިޒުގެ ޤަވާއިދުތަކަށް އެއްބަސްވެ އިޤްރާރުގައި ފާހަގަޖައްސަވާ (Please accept the quiz terms and conditions).');
       return;
     }
 
@@ -219,8 +248,8 @@ export const QuizSection: React.FC = () => {
       setError(null);
       const res = await api.submitQuiz({
         questionId: quizData.question.id,
-        idNumber,
-        contactNumber,
+        idNumber: idNumber.trim().toUpperCase(),
+        contactNumber: contactNumber.trim(),
         selectedOptionId,
         consentAccepted
       });
@@ -250,6 +279,8 @@ export const QuizSection: React.FC = () => {
   const question = quizData.question || quizData.nextQuestion;
   const state = quizData.question ? quizData.state : 'scheduled';
   const { stats, winner, sponsors } = quizData;
+
+  const hasZeroParticipants = (stats?.eligibleCount === 0 || participantContacts.length === 0) && (stats?.totalParticipants === 0 || stats?.eligibleCount === 0);
 
   const nowMs = Date.now() + serverOffsetMs;
   const drawTimeMs = question?.drawStartAt ? new Date(question.drawStartAt).getTime() : (question?.closeAt ? new Date(question.closeAt).getTime() : 0);
@@ -390,7 +421,12 @@ export const QuizSection: React.FC = () => {
                     <Clock className="w-4 h-4 text-slate-400 shrink-0" />
                     <span>ސުންގަޑި ހަމަވެއްޖެ (Deadline Passed)</span>
                   </div>
-                  {nowMs < drawTimeMs ? (
+                  {hasZeroParticipants ? (
+                    <div className="inline-flex items-center gap-1.5 text-[11px] text-slate-300 bg-slate-800/80 px-3 py-1 rounded-xl border border-slate-700/80 shadow-sm">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>ބައިވެރިން ނެތުމުން ނަސީބުވެރިއަކު ނުހޮވޭ (No participants for draw)</span>
+                    </div>
+                  ) : nowMs < drawTimeMs ? (
                     <div className="inline-flex items-center gap-1.5 text-[11px] text-amber-300 bg-amber-950/60 px-3 py-1 rounded-xl border border-amber-500/40 shadow-sm">
                       <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                       <span>ނަންބަރު އެނބުރޭ ގަޑި: <strong className="font-mono font-bold text-amber-200">{formatDateTimeDhivehi(question.drawStartAt || question.closeAt)}</strong></span>
@@ -590,17 +626,14 @@ export const QuizSection: React.FC = () => {
               </div>
               <h4 className="text-xl font-bold text-white font-heading">ޖަވާބު ކާމިޔާބުކަމާއެކު ފޮނުވިއްޖެ!</h4>
               <p className="text-orange-200 text-sm max-w-md mx-auto">
-                {submitSuccess.message || 'ޖަވާބު ރައްކާކުރެވިއްޖެ! ތިޔަ ފަރާތުގެ ކިއު ނަންބަރު ހުރިހާ ސުވާލަކަށްވެސް އެއްގޮތަކަށް ދެމިއޮންނާނެއެވެ.'}
+                {submitSuccess.message}
               </p>
-              <div className="pt-2 bg-slate-950/60 border border-orange-500/30 rounded-2xl p-4 max-w-xs mx-auto">
-                <span className="text-xs uppercase tracking-wider text-orange-400 font-bold block">
-                  ދާއިމީ ކިއު ނަންބަރު (Permanent Que No):
+              <div className="pt-2">
+                <span className="text-xs uppercase tracking-wider text-orange-400 font-semibold block">
+                  އާންމުކޮށް ފެންނާނެ ކިއު ނަންބަރު:
                 </span>
-                <span className="font-mono text-3xl font-extrabold text-amber-300 tracking-widest block mt-1 drop-shadow-md">
-                  {submitSuccess.participantNumber || submitSuccess.queNumber}
-                </span>
-                <span className="text-[11px] text-slate-400 block mt-1">
-                  ކޮންމެ ސުވާލަކަށް ޖަވާބު ދެއްވިނަމަވެސް ތިޔަ ފަރާތުގެ ކިއު ނަންބަރަކީ މިއީއެވެ.
+                <span className="font-mono text-3xl font-bold text-white tracking-widest block mt-1">
+                  {submitSuccess.participantNumber}
                 </span>
               </div>
               <div className="pt-2 flex justify-center">
@@ -750,13 +783,21 @@ export const QuizSection: React.FC = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-800">
                     <div className="text-center pt-1 sm:pt-0">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">ކިއު ނަންބަރު (Queue No)</span>
-                      <span className="text-2xl sm:text-3xl font-black font-mono text-orange-400 block mt-0.5 tracking-widest drop-shadow-[0_0_15px_rgba(249,115,22,0.4)]">
+                      <span
+                        dir="ltr"
+                        style={{ direction: 'ltr', unicodeBidi: 'isolate' }}
+                        className="text-2xl sm:text-3xl font-black font-mono text-orange-400 inline-block mt-0.5 tracking-widest tabular-nums drop-shadow-[0_0_15px_rgba(249,115,22,0.4)]"
+                      >
                         {winner?.participantNumber || lastDrawnWinner?.participantNumber || participantContacts[0]?.participantNumber || 'RQ-0001'}
                       </span>
                     </div>
                     <div className="text-center pt-2 sm:pt-0 sm:pl-3">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">ފޯނު ނަންބަރު (Phone No)</span>
-                      <span className="text-2xl sm:text-3xl font-black font-mono text-amber-300 block mt-0.5 tracking-widest drop-shadow-[0_0_15px_rgba(251,191,36,0.4)]">
+                      <span
+                        dir="ltr"
+                        style={{ direction: 'ltr', unicodeBidi: 'isolate' }}
+                        className="text-2xl sm:text-3xl font-black font-mono text-amber-300 inline-block mt-0.5 tracking-widest tabular-nums drop-shadow-[0_0_15px_rgba(251,191,36,0.4)]"
+                      >
                         {winner?.maskedContactNumber || lastDrawnWinner?.contactNumber || participantContacts[0]?.contactNumber || '77***12'}
                       </span>
                     </div>

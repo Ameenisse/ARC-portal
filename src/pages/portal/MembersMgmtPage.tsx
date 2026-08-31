@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { PortalLayout } from '../../components/portal/PortalLayout';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
+import { useTableSync } from '../../hooks/useRealtimeSync';
 import { api } from '../../services/api';
 import { ClubMember } from '../../types';
+import { formatDate } from '../../utils/formatters';
 import { ConfirmModal } from '../../components/common/ConfirmModal';
 import {
   Users,
@@ -61,8 +63,8 @@ export const MembersMgmtPage: React.FC = () => {
   const canEdit = hasPermission('members', 'canEdit');
   const canDelete = hasPermission('members', 'canDelete');
 
-  const fetchMembers = async () => {
-    setLoading(true);
+  const fetchMembers = async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
       const data = await api.getMembers({
         search: searchTerm,
@@ -71,15 +73,22 @@ export const MembersMgmtPage: React.FC = () => {
       });
       setMembers(data);
     } catch (err: any) {
-      showToast('error', err.message || 'Failed to fetch members');
+      if (!isBackground) {
+        showToast('error', err.message || 'Failed to fetch members');
+      }
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchMembers();
   }, [searchTerm, typeFilter, statusFilter]);
+
+  // Real-time table sync: auto-refetch when clubMembers or users are mutated
+  useTableSync(['clubMembers', 'members', 'users'], () => {
+    fetchMembers(true);
+  });
 
   const handleOpenAddModal = () => {
     setEditingMember(null);
@@ -328,7 +337,7 @@ export const MembersMgmtPage: React.FC = () => {
                     {member.joinedDate && (
                       <div className="flex items-center gap-2 text-xs text-slate-500">
                         <Calendar className="w-3.5 h-3.5" />
-                        <span>ގުޅުނު ތާރީޚު: {member.joinedDate}</span>
+                        <span>ގުޅުނު ތާރީޚު: {formatDate(member.joinedDate || member.createdAt)}</span>
                       </div>
                     )}
                   </div>

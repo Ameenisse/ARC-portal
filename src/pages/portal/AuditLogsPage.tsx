@@ -138,10 +138,10 @@ export const AuditLogsPage: React.FC = () => {
                       <td className="p-3.5 font-sans font-medium text-orange-400">{log.action}</td>
                       <td className="p-3.5">
                         <span className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-slate-300 uppercase text-[10px]">
-                          {(log as any).moduleKey || log.module}
+                          {log.module}
                         </span>
                       </td>
-                      <td className="p-3.5 text-slate-400">{(log as any).ipAddress || log.deviceReference || '127.0.0.1'}</td>
+                      <td className="p-3.5 text-slate-400">{log.deviceReference || '127.0.0.1'}</td>
                     </tr>
                   ))}
                 </tbody>

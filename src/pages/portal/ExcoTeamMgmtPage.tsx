@@ -113,50 +113,54 @@ export const ExcoTeamMgmtPage: React.FC = () => {
         {loading ? (
           <div className="py-12 text-center text-slate-400">Loading EXCO members...</div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
             {members.map(m => (
-              <div key={m.id} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-between">
-                <div className="h-48 relative bg-slate-800 flex items-center justify-center">
+              <div key={m.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col justify-between shadow-sm hover:border-slate-700 transition-all">
+                <div className="h-32 sm:h-36 relative bg-slate-800 flex items-center justify-center overflow-hidden">
                   {m.image && m.image.trim() !== '' ? (
                     <img src={m.image} alt={m.fullName} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
                   ) : (
-                    <div className="w-full h-full bg-gradient-to-b from-slate-700 to-slate-900 flex flex-col items-center justify-center p-3 text-center">
-                      <div className="w-12 h-12 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mb-1">
-                        <User className="w-6 h-6" />
+                    <div className="w-full h-full bg-gradient-to-b from-slate-700 to-slate-900 flex flex-col items-center justify-center p-2 text-center">
+                      <div className="w-9 h-9 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mb-1">
+                        <User className="w-4 h-4" />
                       </div>
-                      <span className="text-[11px] text-slate-300 font-bold truncate max-w-[140px]">{m.fullName}</span>
+                      <span className="text-[10px] text-slate-300 font-bold truncate max-w-[110px]">{m.fullName}</span>
                     </div>
                   )}
-                  <div className="absolute top-3 right-3">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                      m.status === 'active' ? 'bg-orange-950 text-orange-400 border border-orange-800' : 'bg-slate-800 text-slate-400'
+                  <div className="absolute top-2 right-2">
+                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase ${
+                      m.status === 'active' ? 'bg-orange-950/90 text-orange-400 border border-orange-800' : 'bg-slate-800 text-slate-400'
                     }`}>
                       {m.status}
                     </span>
                   </div>
                 </div>
 
-                <div className="p-4 space-y-2 flex-1 flex flex-col justify-between">
+                <div className="p-2.5 sm:p-3 space-y-1.5 flex-1 flex flex-col justify-between">
                   <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400">{m.designation}</span>
-                    <h4 className="text-base font-bold text-white font-heading mt-0.5">{m.fullName}</h4>
-                    <p className="text-xs text-slate-400 mt-1 line-clamp-2">{m.description}</p>
+                    <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-orange-400 block truncate">{m.designation}</span>
+                    <h4 className="text-xs sm:text-sm font-bold text-white font-heading mt-0.5 truncate">{m.fullName}</h4>
+                    {m.description && (
+                      <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-1 leading-tight">{m.description}</p>
+                    )}
                   </div>
 
-                  <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                  <div className="flex justify-end gap-1.5 pt-2 border-t border-slate-800">
                     <button
                       type="button"
                       onClick={() => handleOpenEdit(m)}
-                      className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+                      className="p-1 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+                      title="Edit"
                     >
-                      <Edit className="w-4 h-4" />
+                      <Edit className="w-3.5 h-3.5" />
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDelete(m.id)}
-                      className="p-1.5 rounded-lg bg-rose-950 text-rose-300 hover:bg-rose-900"
+                      className="p-1 rounded-lg bg-rose-950 text-rose-300 hover:bg-rose-900"
+                      title="Delete"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>

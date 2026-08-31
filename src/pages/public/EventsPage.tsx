@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { PublicHeader } from '../../components/public/PublicHeader';
 import { PublicFooter } from '../../components/public/PublicFooter';
 import { EventsSection } from '../../components/public/EventsSection';
+import { useTableSync } from '../../hooks/useRealtimeSync';
 import { api } from '../../services/api';
 import { PublicSiteData } from '../../types';
 import { Calendar, ArrowRight, Home } from 'lucide-react';
@@ -10,12 +11,24 @@ export const EventsPage: React.FC = () => {
   const [data, setData] = useState<PublicSiteData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchSiteData = (silent = false) => {
+    if (!silent) setLoading(true);
     api.getPublicSiteData()
       .then(res => setData(res))
       .catch(console.error)
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!silent) setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    fetchSiteData(false);
   }, []);
+
+  // Real-time table sync for published events
+  useTableSync(['events', 'eventItems'], () => {
+    fetchSiteData(true);
+  });
 
   const events = data?.events || [];
   const hasEvents = events.length > 0;
@@ -70,7 +83,6 @@ export const EventsPage: React.FC = () => {
 
       <PublicFooter
         branding={data?.branding || { clubName: 'އާނަންދާ ރީކްރިއޭޝަން ކްލަބް', clubAbbreviation: 'ARC' }}
-        contacts={data?.contacts}
         socialLinks={data?.socialLinks}
         hasEvents={hasEvents}
       />

@@ -458,7 +458,7 @@ export const BudgetReportsTab: React.FC<BudgetReportsTabProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
-                  {membersList.slice(0, 15).map(member => {
+                  {membersList.map(member => {
                     const memberPayments = yearContributions.filter(c => c.memberId === member.id && c.status === 'paid');
                     const paidMonthsCount = memberPayments.length;
                     const paidTotal = memberPayments.reduce((s, c) => s + Number(c.paidAmount || c.totalPayable || 0), 0);

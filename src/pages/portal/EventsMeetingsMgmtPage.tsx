@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { PortalLayout } from '../../components/portal/PortalLayout';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/common/Toast';
+import { useTableSync } from '../../hooks/useRealtimeSync';
 import { api } from '../../services/api';
 import { ClubMember, EventItem, MeetingItem, AttendanceRecord, MeetingVotingItem } from '../../types';
+import { formatDate } from '../../utils/formatters';
 import {
   Award,
   Calendar,
@@ -124,6 +126,11 @@ export const EventsMeetingsMgmtPage: React.FC = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Real-time table sync for events, meetings, attendance, and voting tables
+  useTableSync(['events', 'eventItems', 'meetingItems', 'members', 'clubMembers'], () => {
+    fetchData();
+  });
 
   // --- EVENT HANDLERS ---
   const handleOpenAddEvent = () => {
@@ -656,7 +663,7 @@ export const EventsMeetingsMgmtPage: React.FC = () => {
                     {events.slice(0, 3).map(evt => (
                       <div key={evt.id} className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl flex items-start justify-between gap-4">
                         <div>
-                          <span className="text-xs text-orange-400 font-mono">{evt.heldDate} ({evt.startTime} - {evt.endTime})</span>
+                          <span className="text-xs text-orange-400 font-mono">{formatDate(evt.heldDate)} ({evt.startTime} - {evt.endTime})</span>
                           <h4 className="text-base font-bold text-white mt-1">{evt.title}</h4>
                           <p className="text-xs text-slate-400 mt-1 line-clamp-1">{evt.summary}</p>
                           <div className="flex items-center gap-3 text-xs text-slate-500 mt-2">
@@ -701,7 +708,7 @@ export const EventsMeetingsMgmtPage: React.FC = () => {
                             }`}>
                               {mtg.meetingType === 'exco' ? 'އެކްސްކޯ ބައްދަލުވުން' : 'އާންމު މެންބަރުންގެ ބައްދަލުވުން'}
                             </span>
-                            <span className="text-xs text-slate-400 font-mono">{mtg.heldDate}</span>
+                            <span className="text-xs text-slate-400 font-mono">{formatDate(mtg.heldDate)}</span>
                           </div>
                           <h4 className="text-base font-bold text-white mt-1.5">{mtg.title}</h4>
                           <p className="text-xs text-slate-400 mt-1 line-clamp-1">{mtg.summary}</p>
@@ -768,7 +775,7 @@ export const EventsMeetingsMgmtPage: React.FC = () => {
                         <span className="px-2.5 py-0.5 bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded-full font-medium">
                           {evt.eventType}
                         </span>
-                        <span className="text-slate-400 font-mono">{evt.heldDate}</span>
+                        <span className="text-slate-400 font-mono">{formatDate(evt.heldDate)}</span>
                       </div>
 
                       <h3 className="text-lg font-bold text-white group-hover:text-orange-400 transition">{evt.title}</h3>
@@ -837,7 +844,7 @@ export const EventsMeetingsMgmtPage: React.FC = () => {
                         }`}>
                           {mtg.meetingType === 'exco' ? 'އެކްސްކޯ ބައްދަލުވުން (EXCO Only)' : 'އާންމު މެންބަރުންގެ ބައްދަލުވުން (All Members)'}
                         </span>
-                        <span className="text-xs text-slate-400 font-mono">{mtg.heldDate} ({mtg.startTime} - {mtg.endTime})</span>
+                        <span className="text-xs text-slate-400 font-mono">{formatDate(mtg.heldDate)} ({mtg.startTime} - {mtg.endTime})</span>
                       </div>
                       <h3 className="text-xl font-bold text-white mt-2">{mtg.title}</h3>
                       <p className="text-sm text-slate-300 mt-1">{mtg.summary}</p>
@@ -1086,7 +1093,7 @@ export const EventsMeetingsMgmtPage: React.FC = () => {
                               }`}>
                                 {mtg.meetingType === 'exco' ? 'EXCO Only' : 'All Members'}
                               </span>
-                              <span className="text-xs text-slate-400 font-mono">{mtg.heldDate}</span>
+                              <span className="text-xs text-slate-400 font-mono">{formatDate(mtg.heldDate)}</span>
                             </div>
                             <h4 className="text-lg font-bold text-white mt-1">{mtg.title}</h4>
                             <p className="text-xs text-slate-400">{mtg.summary}</p>
@@ -1202,7 +1209,7 @@ export const EventsMeetingsMgmtPage: React.FC = () => {
                     const excused = att.filter(a => a.status === 'excused');
                     const totalRecorded = att.length;
                     const attRate = totalRecorded > 0 ? Math.round((present.length / totalRecorded) * 100) : 0;
-                    const photoCount = Array.isArray(evt.photoGallery) ? evt.photoGallery.length : ((evt as any).photoGalleryUrl ? (evt as any).photoGalleryUrl.split('\n').filter(Boolean).length : 0);
+                    const photoCount = Array.isArray(evt.photoGallery) ? evt.photoGallery.length : 0;
 
                     return (
                       <div key={evt.id} className="p-5 bg-slate-950/80 border border-slate-800 rounded-xl space-y-4">
@@ -1216,7 +1223,7 @@ export const EventsMeetingsMgmtPage: React.FC = () => {
                               }`}>
                                 {evt.status === 'completed' ? 'Completed' : 'Upcoming'}
                               </span>
-                              <span className="text-xs text-slate-400 font-mono">{evt.heldDate} • {evt.venue}</span>
+                              <span className="text-xs text-slate-400 font-mono">{formatDate(evt.heldDate)} • {evt.venue}</span>
                             </div>
                             <h4 className="text-lg font-bold text-white mt-1">{evt.title}</h4>
                             <p className="text-xs text-slate-400">{evt.summary}</p>

@@ -1,19 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { PortalLayout } from '../../components/portal/PortalLayout';
+import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { useToast } from '../../components/common/Toast';
-import { Trophy, PhoneCall, CheckCircle, RefreshCw, Upload, Eye, FileText, User, Building2, AlertCircle } from 'lucide-react';
+import { Trophy, PhoneCall, CheckCircle, RefreshCw, Upload, Eye, FileText, User, Building2, AlertCircle, Trash2 } from 'lucide-react';
 import { formatDateTime } from '../../utils/formatters';
 import { Modal } from '../../components/common/Modal';
+import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { MarkNotEligibleModal } from '../../components/portal/MarkNotEligibleModal';
 
 export const QuizWinnersPage: React.FC = () => {
+  const { user, hasPermission } = useAuth();
   const { showToast } = useToast();
   const [winners, setWinners] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const isAdmin = (user?.roleName || user?.roleId || '').toLowerCase().includes('admin') || user?.roleId === 'role_admin' || hasPermission('quiz', 'canDelete');
+
   // Modals state
   const [activeWinner, setActiveWinner] = useState<any | null>(null);
+  const [winnerToDelete, setWinnerToDelete] = useState<any | null>(null);
   
   // Contact Modal
   const [contactModalOpen, setContactModalOpen] = useState(false);
@@ -145,6 +151,18 @@ export const QuizWinnersPage: React.FC = () => {
     setNotEligibleModalOpen(true);
   };
 
+  const handleDeleteWinner = async () => {
+    if (!winnerToDelete) return;
+    try {
+      await api.deleteQuizWinner(winnerToDelete.id);
+      showToast('success', 'Winner record deleted successfully.');
+      setWinnerToDelete(null);
+      fetchWinners();
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to delete winner.');
+    }
+  };
+
   return (
     <PortalLayout currentModule="quiz_winners" title="Lucky Draw Winners">
       <div className="space-y-6">
@@ -262,7 +280,7 @@ export const QuizWinnersPage: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="pt-1">
+                    <div className="pt-1 space-y-2">
                       <button
                         type="button"
                         onClick={() => handleReselectWinner(w)}
@@ -271,6 +289,18 @@ export const QuizWinnersPage: React.FC = () => {
                         <RefreshCw className="w-3.5 h-3.5" />
                         <span>Re-Select New Winner</span>
                       </button>
+
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => setWinnerToDelete(w)}
+                          className="w-full py-2 bg-slate-950 hover:bg-rose-950/60 border border-slate-800 hover:border-rose-800 text-slate-400 hover:text-rose-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                          title="Delete Winner Record (Admin Only)"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                          <span>Delete Winner Record</span>
+                        </button>
+                      )}
                     </div>
 
                   </div>
@@ -435,6 +465,18 @@ export const QuizWinnersPage: React.FC = () => {
             await notEligibleCallback(reason);
           }
         }}
+      />
+
+      {/* MODAL: Confirm Delete Winner */}
+      <ConfirmModal
+        isOpen={!!winnerToDelete}
+        onClose={() => setWinnerToDelete(null)}
+        onConfirm={handleDeleteWinner}
+        title="Delete Quiz Winner Record"
+        message={`Are you sure you want to delete winner #${winnerToDelete?.participantNumber} (Day ${winnerToDelete?.questionNumber || 'Quiz'})? This will remove this recorded winner record.`}
+        confirmText="Delete Winner Record"
+        cancelText="Cancel"
+        isDanger={true}
       />
 
     </PortalLayout>

@@ -19,7 +19,8 @@ import {
   Mail,
   User as UserIcon,
   Phone,
-  FileText
+  FileText,
+  Wallet
 } from 'lucide-react';
 
 interface UserPerformanceModalProps {
@@ -38,7 +39,7 @@ export const UserPerformanceModal: React.FC<UserPerformanceModalProps> = ({
   const [data, setData] = useState<UserPerformanceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'attendance' | 'quiz' | 'activity'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'attendance' | 'quiz' | 'budget' | 'activity'>('overview');
 
   useEffect(() => {
     if (isOpen && userId) {
@@ -199,6 +200,18 @@ export const UserPerformanceModal: React.FC<UserPerformanceModalProps> = ({
               </button>
               <button
                 type="button"
+                onClick={() => setActiveTab('budget')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeTab === 'budget'
+                    ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20'
+                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                <Wallet className="w-3.5 h-3.5" />
+                <span>ބަޖެޓާއި ފީ {data.budget?.summary?.pendingCount ? `(${data.budget.summary.pendingCount} Pending)` : ''}</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setActiveTab('activity')}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                   activeTab === 'activity'
@@ -243,7 +256,7 @@ export const UserPerformanceModal: React.FC<UserPerformanceModalProps> = ({
                     {data.quiz.accuracyRate}%
                   </div>
                   <p className="text-[10px] text-slate-400">
-                    {data.quiz.correctAnswers} correct / {data.quiz.totalAttempts} answers
+                    {data.quiz.correctAnswers} correct / {data.quiz.revealedAnswersCount || 0} evaluated {data.quiz.pendingRevealCount ? `(${data.quiz.pendingRevealCount} pending reveal)` : ''}
                   </p>
                 </div>
 
@@ -397,8 +410,15 @@ export const UserPerformanceModal: React.FC<UserPerformanceModalProps> = ({
                 </div>
               )}
 
-              <div className="text-xs text-slate-400">
-                ޖުމްލަ ޖަވާބު ދެވިފައިވާ ސުވާލު: <strong className="text-white">{data.quiz.submissions.length}</strong> | ރަނގަޅު ޖަވާބު: <strong className="text-emerald-400">{data.quiz.correctAnswers}</strong>
+              <div className="text-xs text-slate-400 flex flex-wrap items-center gap-3">
+                <span>ޖުމްލަ ޖަވާބު ދެވިފައިވާ ސުވާލު: <strong className="text-white">{data.quiz.submissions.length}</strong></span>
+                <span>ޖަވާބު ހާމަކުރެވިފައި: <strong className="text-white">{data.quiz.revealedAnswersCount || 0}</strong></span>
+                <span>ރަނގަޅު ޖަވާބު: <strong className="text-emerald-400">{data.quiz.correctAnswers}</strong></span>
+                {(data.quiz.pendingRevealCount || 0) > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-bold border border-amber-500/20">
+                    {data.quiz.pendingRevealCount} ޖަވާބު ހާމަކުރުމުގެ އިންތިޒާރުގައި
+                  </span>
+                )}
               </div>
 
               {data.quiz.submissions.length === 0 ? (
@@ -419,30 +439,136 @@ export const UserPerformanceModal: React.FC<UserPerformanceModalProps> = ({
                     <tbody className="divide-y divide-slate-800/60 text-slate-300">
                       {data.quiz.submissions.map(sub => (
                         <tr key={sub.id} className="hover:bg-slate-800/40 transition-colors">
-                          <td className="p-3 font-semibold text-white">
+                          <td className="p-3 font-semibold text-white align-top">
                             ސުވާލު #{sub.questionNumber}: {sub.questionTitle}
                           </td>
-                          <td className="p-3 text-slate-300 font-mono text-[11px]">
-                            {sub.selectedOptionText || 'Selected Choice'}
+                          <td className="p-3 text-slate-300 font-mono text-[11px] align-top space-y-1">
+                            <div>{sub.selectedOptionText || 'Selected Choice'}</div>
+                            {sub.isAnswerRevealed && sub.correctOptionText && !sub.isCorrect && (
+                              <div className="text-[10px] text-emerald-400 font-sans">
+                                ޞައްޙަ ޖަވާބު: {sub.correctOptionText}
+                              </div>
+                            )}
                           </td>
-                          <td className="p-3 text-center">
-                            {sub.isCorrect ? (
-                              <span className="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full font-bold text-[10px]">
-                                Correct ✓
-                              </span>
+                          <td className="p-3 text-center align-top">
+                            {sub.isAnswerRevealed ? (
+                              sub.isCorrect ? (
+                                <span className="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full font-bold text-[10px]">
+                                  Correct ✓
+                                </span>
+                              ) : (
+                                <span className="px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/30 rounded-full font-bold text-[10px]">
+                                  Incorrect ✗
+                                </span>
+                              )
                             ) : (
-                              <span className="px-2.5 py-0.5 bg-slate-800 text-slate-400 rounded-full font-bold text-[10px]">
-                                Submitted
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-full font-bold text-[10px]">
+                                <Clock className="w-3 h-3" />
+                                <span>Pending Reveal</span>
                               </span>
                             )}
                           </td>
-                          <td className="p-3 text-left text-slate-500 font-mono text-[10px]">
+                          <td className="p-3 text-left text-slate-500 font-mono text-[10px] align-top">
                             {sub.submittedAt ? new Date(sub.submittedAt).toLocaleDateString() : '-'}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB: BUDGET & DUES */}
+          {activeTab === 'budget' && (
+            <div className="space-y-4">
+              {data.budget ? (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Paid</span>
+                      <div className="text-xl font-black text-emerald-400 font-mono">
+                        MVR {data.budget.summary.totalPaid.toLocaleString()}
+                      </div>
+                      <p className="text-[10px] text-slate-400">{data.budget.summary.paidCount} months cleared</p>
+                    </div>
+
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Pending Dues</span>
+                      <div className="text-xl font-black text-amber-400 font-mono">
+                        MVR {data.budget.summary.totalPending.toLocaleString()}
+                      </div>
+                      <p className="text-[10px] text-slate-400">{data.budget.summary.pendingCount} months pending</p>
+                    </div>
+
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Fines</span>
+                      <div className="text-xl font-black text-rose-400 font-mono">
+                        MVR {data.budget.summary.totalFines.toLocaleString()}
+                      </div>
+                      <p className="text-[10px] text-slate-400">{data.budget.summary.overdueCount} overdue</p>
+                    </div>
+
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Monthly Rate</span>
+                      <div className="text-xl font-black text-sky-400 font-mono">
+                        MVR {data.budget.summary.monthlyFee}
+                      </div>
+                      <p className="text-[10px] text-slate-400">Due day: {data.budget.summary.dueDayOfMonth}th</p>
+                    </div>
+                  </div>
+
+                  {data.budget.contributions.length > 0 ? (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                      <table className="w-full text-right text-xs">
+                        <thead className="bg-slate-950/80 text-slate-400 border-b border-slate-800 uppercase font-semibold text-[10px]">
+                          <tr>
+                            <th className="p-3">މަސް / އަހަރު</th>
+                            <th className="p-3">ފީގެ އަދަދު</th>
+                            <th className="p-3">ދެއްކި އަދަދު</th>
+                            <th className="p-3 text-center">ޙާލަތު</th>
+                            <th className="p-3 text-left">ރިމާކްސް</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                          {data.budget.contributions.map(c => (
+                            <tr key={c.id} className="hover:bg-slate-800/40 transition-colors">
+                              <td className="p-3 font-semibold text-white">
+                                {c.year} - {new Date(c.year, c.month - 1).toLocaleString('default', { month: 'short' })}
+                              </td>
+                              <td className="p-3 font-mono text-[11px] text-slate-300">
+                                MVR {c.totalPayable}
+                              </td>
+                              <td className="p-3 font-mono text-[11px] text-emerald-400">
+                                MVR {c.paidAmount || 0}
+                              </td>
+                              <td className="p-3 text-center">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                  c.status === 'paid' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' :
+                                  c.status === 'overdue' ? 'bg-rose-950 text-rose-400 border border-rose-800' :
+                                  'bg-amber-950 text-amber-400 border border-amber-800'
+                                }`}>
+                                  {c.status}
+                                </span>
+                              </td>
+                              <td className="p-3 text-left text-slate-500 text-[10px]">
+                                {c.notes || '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center text-slate-500 text-xs bg-slate-900 border border-slate-800 rounded-2xl">
+                      މި މެންބަރަށް އަދި ވަކި މަހެއްގެ ފީ ރެކޯޑެއް ހެދިފައެއް ނެތެވެ.
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="p-8 text-center text-slate-500 text-xs bg-slate-900 border border-slate-800 rounded-2xl">
+                  ބަޖެޓު އަދި ފީގެ ރެކޯޑުތައް ލޯޑު ނުކުރެވުނު.
                 </div>
               )}
             </div>

@@ -3,6 +3,7 @@ import { api } from '../../services/api';
 import { PublicSiteData } from '../../types';
 import { PublicHeader } from '../../components/public/PublicHeader';
 import { PublicFooter } from '../../components/public/PublicFooter';
+import { useTableSync } from '../../hooks/useRealtimeSync';
 import { Trophy, CheckCircle, BookOpen, Calendar } from 'lucide-react';
 
 export const QuizResultsPage: React.FC = () => {
@@ -10,7 +11,7 @@ export const QuizResultsPage: React.FC = () => {
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const loadData = () => {
     Promise.all([
       api.getPublicSiteData(),
       api.getQuizResultsHistory()
@@ -19,7 +20,16 @@ export const QuizResultsPage: React.FC = () => {
       setResults(quizRes.results || []);
     }).catch(console.error)
     .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadData();
   }, []);
+
+  // Real-time table sync for completed quiz results and winners
+  useTableSync(['quiz_questions', 'quiz_winners', 'quizQuestions', 'quizWinners'], () => {
+    loadData();
+  });
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">

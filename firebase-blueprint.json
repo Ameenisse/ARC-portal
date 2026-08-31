@@ -2,177 +2,156 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "User profile with role and PIN authentication details",
+      "description": "ARC Portal system user account",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "fullName": { "type": "string" },
         "username": { "type": "string" },
-        "designation": { "type": "string" },
-        "contactNumber": { "type": "string" },
+        "fullName": { "type": "string" },
         "roleId": { "type": "string" },
         "roleName": { "type": "string" },
-        "memberId": { "type": "string" },
-        "profilePhotoUrl": { "type": "string" },
         "status": { "type": "string" },
-        "requirePinChange": { "type": "boolean" },
-        "pinHash": { "type": "string" },
-        "pinSalt": { "type": "string" },
-        "failedLoginCount": { "type": "number" },
-        "lockedUntil": { "type": "string" },
-        "lastLoginAt": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "createdBy": { "type": "string" },
-        "updatedAt": { "type": "string" },
-        "updatedBy": { "type": "string" }
+        "createdAt": { "type": "string" }
       },
-      "required": ["id", "fullName", "username", "pinHash", "pinSalt"]
+      "required": ["id", "username", "fullName", "roleId", "status"]
     },
-    "Role": {
-      "title": "Role",
-      "description": "System or custom role definition",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "description": { "type": "string" },
-        "isSystem": { "type": "boolean" },
-        "status": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
-      },
-      "required": ["id", "name"]
-    },
-    "Member": {
-      "title": "Member",
-      "description": "Official club member record",
+    "ClubMember": {
+      "title": "ClubMember",
+      "description": "Registered ARC club member",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "memberNumber": { "type": "string" },
         "fullName": { "type": "string" },
         "idCardNumber": { "type": "string" },
-        "dateOfBirth": { "type": "string" },
-        "gender": { "type": "string" },
-        "address": { "type": "string" },
-        "contactNumber": { "type": "string" },
-        "email": { "type": "string" },
-        "joinedDate": { "type": "string" },
-        "membershipType": { "type": "string" },
-        "designation": { "type": "string" },
-        "profilePhotoUrl": { "type": "string" },
-        "notes": { "type": "string" },
-        "status": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "phoneNumber": { "type": "string" },
+        "status": { "type": "string" }
       },
-      "required": ["id", "memberNumber", "fullName"]
+      "required": ["id", "memberNumber", "fullName", "idCardNumber", "status"]
     },
-    "SiteSetting": {
-      "title": "SiteSetting",
-      "description": "Configuration or branding setting",
+    "Role": {
+      "title": "Role",
+      "description": "RBAC permission role",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "settingGroup": { "type": "string" },
-        "settingKey": { "type": "string" },
-        "value": { "type": "object" },
-        "valueType": { "type": "string" },
-        "isPublic": { "type": "boolean" },
-        "updatedAt": { "type": "string" }
+        "name": { "type": "string" },
+        "isSystem": { "type": "boolean" }
       },
-      "required": ["id", "settingGroup", "settingKey", "value"]
+      "required": ["id", "name"]
+    },
+    "BudgetAccount": {
+      "title": "BudgetAccount",
+      "description": "Financial bank or cash account",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "accountName": { "type": "string" },
+        "accountNumber": { "type": "string" },
+        "bankName": { "type": "string" },
+        "currentBalance": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "accountName", "status"]
+    },
+    "IncomeRecord": {
+      "title": "IncomeRecord",
+      "description": "Club income transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "accountId": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "title", "amount", "accountId", "date"]
+    },
+    "ExpenseRecord": {
+      "title": "ExpenseRecord",
+      "description": "Club expense transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "accountId": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "title", "amount", "accountId", "date"]
+    },
+    "Event": {
+      "title": "Event",
+      "description": "Club event or activity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "title", "status"]
     },
     "QuizQuestion": {
       "title": "QuizQuestion",
-      "description": "Ramadan quiz question and metadata",
+      "description": "Daily Ramazan quiz question",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "questionNumber": { "type": "number" },
         "questionText": { "type": "string" },
-        "title": { "type": "string" },
-        "description": { "type": "string" },
-        "questionImageUrl": { "type": "string" },
-        "correctOptionId": { "type": "string" },
-        "options": { "type": "array" },
-        "publishAt": { "type": "string" },
-        "closeAt": { "type": "string" },
-        "revealAt": { "type": "string" },
-        "status": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "status": { "type": "string" }
       },
-      "required": ["id", "questionNumber", "questionText", "options"]
+      "required": ["id", "questionNumber", "questionText", "status"]
     },
-    "QuizSubmission": {
-      "title": "QuizSubmission",
-      "description": "Quiz participant answer submission",
+    "SystemInstallation": {
+      "title": "SystemInstallation",
+      "description": "Installation marker and configuration metadata",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "participantNumber": { "type": "string" },
-        "questionId": { "type": "string" },
-        "participantName": { "type": "string" },
-        "idCardNumber": { "type": "string" },
-        "normalizedIdNumber": { "type": "string" },
-        "contactNumber": { "type": "string" },
-        "selectedOptionId": { "type": "string" },
-        "submittedAt": { "type": "string" },
-        "isCorrect": { "type": "boolean" },
-        "isEligible": { "type": "boolean" },
-        "isDisqualified": { "type": "boolean" },
-        "isInvalid": { "type": "boolean" }
+        "initialized": { "type": "boolean" },
+        "initializedAt": { "type": "string" },
+        "version": { "type": "number" }
       },
-      "required": ["id", "questionId", "participantName", "normalizedIdNumber", "selectedOptionId"]
-    },
-    "AuditLog": {
-      "title": "AuditLog",
-      "description": "System audit trail record",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "timestamp": { "type": "string" },
-        "userId": { "type": "string" },
-        "username": { "type": "string" },
-        "fullName": { "type": "string" },
-        "action": { "type": "string" },
-        "module": { "type": "string" },
-        "recordId": { "type": "string" },
-        "ipAddress": { "type": "string" },
-        "userAgent": { "type": "string" }
-      },
-      "required": ["id", "timestamp", "action", "module"]
+      "required": ["initialized", "version"]
     }
   },
   "firestore": {
+    "/system/installation": {
+      "schema": "SystemInstallation",
+      "description": "One-time bootstrap installation state"
+    },
     "/users/{userId}": {
       "schema": "User",
-      "description": "User accounts and auth metadata"
+      "description": "Portal user accounts"
+    },
+    "/clubMembers/{memberId}": {
+      "schema": "ClubMember",
+      "description": "Club members directory"
     },
     "/roles/{roleId}": {
       "schema": "Role",
-      "description": "Club portal roles"
+      "description": "System and custom roles"
     },
-    "/members/{memberId}": {
-      "schema": "Member",
-      "description": "Club member directory records"
+    "/budgetAccounts/{accountId}": {
+      "schema": "BudgetAccount",
+      "description": "Financial ledger accounts"
     },
-    "/siteSettings/{settingId}": {
-      "schema": "SiteSetting",
-      "description": "Club site configurations and branding"
+    "/incomeRecords/{incomeId}": {
+      "schema": "IncomeRecord",
+      "description": "Income records"
+    },
+    "/expenseRecords/{expenseId}": {
+      "schema": "ExpenseRecord",
+      "description": "Expense records"
+    },
+    "/events/{eventId}": {
+      "schema": "Event",
+      "description": "Club events and programs"
     },
     "/quizQuestions/{questionId}": {
       "schema": "QuizQuestion",
-      "description": "Ramadan quiz daily questions"
-    },
-    "/quizSubmissions/{submissionId}": {
-      "schema": "QuizSubmission",
-      "description": "User submissions for questions"
-    },
-    "/auditLogs/{logId}": {
-      "schema": "AuditLog",
-      "description": "System audit logs"
+      "description": "Ramazan quiz questions"
     }
   }
 }

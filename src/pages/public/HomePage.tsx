@@ -9,18 +9,34 @@ import { QuizSection } from '../../components/public/QuizSection';
 import { EventsSection } from '../../components/public/EventsSection';
 import { ExcoSection } from '../../components/public/ExcoSection';
 import { ReachUsSection } from '../../components/public/ReachUsSection';
+import { useTableSync } from '../../hooks/useRealtimeSync';
 import { Sparkles, ArrowRight } from 'lucide-react';
 
 export const HomePage: React.FC = () => {
   const [data, setData] = useState<PublicSiteData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchSiteData = (silent = false) => {
+    if (!silent) setLoading(true);
     api.getPublicSiteData()
       .then(res => setData(res))
       .catch(err => console.error('Failed to load public site data:', err))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!silent) setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    fetchSiteData(false);
   }, []);
+
+  // Real-time table sync for Public Home Page
+  useTableSync(
+    ['slideshow', 'siteSettings', 'contacts', 'socialLinks', 'excoMembers', 'events', 'quiz_questions'],
+    () => {
+      fetchSiteData(true);
+    }
+  );
 
   if (loading || !data) {
     return (
@@ -42,42 +58,71 @@ export const HomePage: React.FC = () => {
 
       <main className="flex-1">
         
-        {/* Section 1: Hero Slideshow */}
-        {sectionVisibility.slideshow && slideshow.length > 0 && (
-          <HeroSlideshow slides={slideshow} />
-        )}
-
-        {/* Section 2: Welcome Section */}
-        {sectionVisibility.welcome && (
-          <section className="py-20 bg-slate-900 border-y border-slate-800 relative">
-            <div className="max-w-5xl mx-auto px-4 text-center space-y-6">
-              <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 font-semibold text-xs uppercase tracking-wider">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>އަޅުގަނޑުމެންގެ ކްލަބް</span>
-              </span>
-              <h2 className="text-3xl sm:text-5xl font-extrabold font-heading text-white tracking-tight">
-                {branding.welcomeHeading}
-              </h2>
-              <p className="text-lg text-slate-300 leading-relaxed font-normal max-w-3xl mx-auto">
-                {branding.welcomeMessage}
-              </p>
-              <div className="pt-4 flex flex-wrap justify-center gap-4">
-                <a
-                  href="/quiz"
-                  className="px-6 py-3 rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-sm shadow-lg shadow-orange-500/20 hover:scale-105 transition-all flex items-center gap-2"
-                >
-                  <span>ރަމަޟާން ކުއިޒްގައި ބައިވެރިވެލައްވާ</span>
-                  <ArrowRight className="w-4 h-4 rotate-180" />
-                </a>
-                <a
-                  href="/about"
-                  className="px-6 py-3 rounded-2xl bg-slate-800 border border-slate-700 hover:border-slate-600 text-white font-semibold text-sm transition-all"
-                >
-                  އަޅުގަނޑުމެންނާ ބެހޭ (About Us)
-                </a>
+        {/* Section 1: Hero Slideshow with Overlaid Welcome Text & Buttons (No Solid Background) */}
+        {sectionVisibility.slideshow && slideshow.length > 0 ? (
+          <HeroSlideshow slides={slideshow}>
+            {sectionVisibility.welcome && (
+              <div className="space-y-6 py-6 animate-fade-in">
+                <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-orange-500/20 border border-orange-400/40 text-orange-300 font-semibold text-xs uppercase tracking-wider backdrop-blur-md shadow-sm">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>އަޅުގަނޑުމެންގެ ކްލަބް</span>
+                </span>
+                <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold font-heading text-white tracking-tight drop-shadow-lg max-w-4xl mx-auto leading-tight">
+                  {branding.welcomeHeading}
+                </h1>
+                <p className="text-base sm:text-xl text-slate-100 leading-relaxed font-normal max-w-3xl mx-auto drop-shadow-md">
+                  {branding.welcomeMessage}
+                </p>
+                <div className="pt-2 flex flex-wrap justify-center gap-4">
+                  <a
+                    href="/quiz"
+                    className="px-7 py-3.5 rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-sm shadow-xl shadow-orange-500/30 hover:scale-105 active:scale-95 transition-all flex items-center gap-2.5 backdrop-blur-sm"
+                  >
+                    <span>ރަމަޟާން ކުއިޒްގައި ބައިވެރިވެލައްވާ</span>
+                    <ArrowRight className="w-4 h-4 rotate-180" />
+                  </a>
+                  <a
+                    href="/about"
+                    className="px-7 py-3.5 rounded-2xl bg-slate-900/80 border border-slate-700/80 hover:bg-slate-900 hover:border-slate-500 text-white font-semibold text-sm transition-all backdrop-blur-md hover:scale-105 active:scale-95"
+                  >
+                    އަޅުގަނޑުމެންނާ ބެހޭ (About Us)
+                  </a>
+                </div>
               </div>
-            </div>
-          </section>
+            )}
+          </HeroSlideshow>
+        ) : (
+          sectionVisibility.welcome && (
+            <section className="py-20 bg-slate-900 border-b border-slate-800 relative">
+              <div className="max-w-5xl mx-auto px-4 text-center space-y-6">
+                <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 font-semibold text-xs uppercase tracking-wider">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>އަޅުގަނޑުމެންގެ ކްލަބް</span>
+                </span>
+                <h2 className="text-3xl sm:text-5xl font-extrabold font-heading text-white tracking-tight">
+                  {branding.welcomeHeading}
+                </h2>
+                <p className="text-lg text-slate-300 leading-relaxed font-normal max-w-3xl mx-auto">
+                  {branding.welcomeMessage}
+                </p>
+                <div className="pt-4 flex flex-wrap justify-center gap-4">
+                  <a
+                    href="/quiz"
+                    className="px-6 py-3 rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-sm shadow-lg shadow-orange-500/20 hover:scale-105 transition-all flex items-center gap-2"
+                  >
+                    <span>ރަމަޟާން ކުއިޒްގައި ބައިވެރިވެލައްވާ</span>
+                    <ArrowRight className="w-4 h-4 rotate-180" />
+                  </a>
+                  <a
+                    href="/about"
+                    className="px-6 py-3 rounded-2xl bg-slate-800 border border-slate-700 hover:border-slate-600 text-white font-semibold text-sm transition-all"
+                  >
+                    އަޅުގަނޑުމެންނާ ބެހޭ (About Us)
+                  </a>
+                </div>
+              </div>
+            </section>
+          )
         )}
 
         {/* Section 3: Ramazan Quiz (Featured First) */}

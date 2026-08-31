@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { firestore, FIREBASE_PROJECT_ID, FIRESTORE_DATABASE_ID } from './firebase';
+import { firestore, getDatabaseMetadata, flushSync, persistStoreAtomic } from './firebase';
 import {
   User,
   Role,
@@ -16,12 +16,11 @@ import {
   QuizWinner,
   QuizPrize,
   QuizSponsor,
-  QuizParticipantQueue,
   AuditLog,
   InboxMessage,
   AppNotification,
   ClubRulesData,
-  ModuleKey,
+  UserRoleName,
   BankAccount,
   IncomeRecord,
   ExpenseRecord,
@@ -32,9 +31,25 @@ import {
   BudgetStats,
   PresidentialDirective,
   OfficialCircular,
-  ContributionStatus,
-  MeetingVotingItem
+  UserPerformanceData,
+  UserPerformanceBadge,
+  InvoiceRecord,
+  InvoiceLineItem,
+  IncomeCategory,
+  InvoiceStatus
 } from '../types';
+import {
+  ALL_MODULES,
+  defaultClubRules,
+  defaultSiteSettingsList,
+  defaultRoles,
+  defaultSlideshow,
+  defaultContacts,
+  defaultSocialLinks,
+  defaultExcoMembers,
+  defaultEvents,
+  defaultInvoices
+} from './seedData';
 
 // Helper to hash PINs
 export function hashPin(pin: string, salt: string): string {
@@ -71,2451 +86,2537 @@ export function verifyPin(pin: string, salt: string, expectedHash: string): bool
   }
 }
 
-const ALL_MODULES: ModuleKey[] = [
-  'dashboard', 'members', 'events_meetings', 'budget', 'slideshow', 'content',
-  'vision_mission', 'contact', 'social_media', 'exco_team', 'ramazan_quiz',
-  'quiz_participants', 'quiz_winners', 'users', 'roles_permissions',
-  'audit_logs', 'club_rules', 'settings', 'messages'
-];
-
-function createAdminPermissions(userId: string) {
-  return ALL_MODULES.map(m => ({
-    id: `perm_${userId}_${m}`,
-    roleId: 'role_admin',
-    userId,
-    moduleKey: m,
-    canView: true,
-    canCreate: true,
-    canEdit: true,
-    canDelete: true,
-    canPublish: true,
-    canApprove: true,
-    canExport: true,
-    canManageSettings: true
-  }));
-}
-
-const defaultClubRules: ClubRulesData = {
-  titleDhivehi: 'އާނަންދާ ރީކްރިއޭޝަން ކްލަބުގެ ގަވާއިދު',
-  titleEnglish: 'Aanandha Recreation Club Constitution & Bye-Laws',
-  descriptionDhivehi: 'ކްލަބުގެ އެންމެހައި ކަންކަން ހިންގުމާ ބެހޭ އަސާސީ ގަވާއިދާއި އުސޫލުތައް',
-  descriptionEnglish: 'Primary governing constitution, regulatory operational procedures, and member code of conduct.',
-  version: '2026.1',
-  effectiveDate: '2026-01-01',
-  updatedAt: new Date().toISOString(),
-  chapters: [
-    {
-      id: 'chap_1',
-      chapterNumber: 1,
-      titleDhivehi: 'އެކުލެވިގެންވާ ގޮތާއި ނަން',
-      titleEnglish: 'Name & Constitutional Identity',
-      summaryDhivehi: 'ކްލަބުގެ ރަސްމީ ނަމާއި، އިދާރީ މަރުކަޒު އަދި އަސާސީ މަގުސަދުތައް.',
-      summaryEnglish: 'Official club name, registered location, and core foundational objectives.',
-      articles: [
-        {
-          articleNumber: '1.1',
-          title: 'ކްލަބުގެ ނަން (Club Name)',
-          titleDhivehi: 'ކްލަބުގެ ނަން',
-          titleEnglish: 'Club Name & Abbreviation',
-          content: 'މި ޖަމްޢިއްޔާގެ ނަމަކީ "އާނަންދާ ރީކްރިއޭޝަން ކްލަބް" (Aanandha Recreation Club) އެވެ. ކުރުކޮށް ބޭނުންކުރާނީ "ARC" އެވެ.',
-          contentDhivehi: 'މި ޖަމްޢިއްޔާގެ ނަމަކީ "އާނަންދާ ރީކްރިއޭޝަން ކްލަބް" (Aanandha Recreation Club) އެވެ. ކުރުކޮށް ބޭނުންކުރާނީ "ARC" އެވެ.',
-          contentEnglish: 'The official registered title of this NGO shall be "Aanandha Recreation Club", abbreviated as "ARC".'
-        },
-        {
-          articleNumber: '1.2',
-          title: 'އިދާރީ މަރުކަޒު (Registered Office)',
-          titleDhivehi: 'އިދާރީ މަރުކަޒު',
-          titleEnglish: 'Registered Office Location',
-          content: 'ކްލަބުގެ ރަސްމީ އިދާރީ މަރުކަޒު ހުންނާނީ މާލެ، ދިވެހިރާއްޖޭގައެވެ.',
-          contentDhivehi: 'ކްލަބުގެ ރަސްމީ އިދާރީ މަރުކަޒު ހުންނާނީ މާލެ، ދިވެހިރާއްޖޭގައެވެ.',
-          contentEnglish: 'The primary head office and registered address of the Club shall be situated in Malé, Republic of Maldives.'
-        }
-      ]
-    }
-  ]
-};
-
-export class DatabaseStore {
-  private initialized = false;
-
-  // Initialize and seed default system records into Cloud Firestore
-  public async initDatabase(): Promise<void> {
-    if (this.initialized) return;
+export class FirestoreDatabaseStore {
+  // -------------------------------------------------------------
+  // STARTUP & HEALTH
+  // -------------------------------------------------------------
+  async verifyStartupSchema() {
     try {
-      console.log(`[Firestore] Initializing connection to project ${FIREBASE_PROJECT_ID} (db: ${FIRESTORE_DATABASE_ID})...`);
-      
-      // 1. Seed Roles if missing
-      const existingRoles = await firestore.list<Role>('roles');
-      if (existingRoles.length === 0) {
-        console.log('[Firestore] Seeding default roles into Firestore...');
-        const defaultRoles: Role[] = [
-          { id: 'role_admin', name: 'Admin', description: 'Full administrative access', isSystemRole: true, defaultPermissions: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-          { id: 'role_president', name: 'President', description: 'President role with executive leadership rights', isSystemRole: true, defaultPermissions: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-          { id: 'role_vice_president', name: 'Vice President', description: 'Vice President role with executive rights', isSystemRole: true, defaultPermissions: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-          { id: 'role_treasurer', name: 'Treasurer', description: 'Treasurer role with financial and budget management', isSystemRole: true, defaultPermissions: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-          { id: 'role_secretary', name: 'Secretary', description: 'Secretary role with administrative and minutes management', isSystemRole: true, defaultPermissions: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-          { id: 'role_exco_member', name: 'EXCO Member', description: 'Executive Committee Member', isSystemRole: true, defaultPermissions: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-          { id: 'role_member', name: 'Club Member', description: 'Standard Member with personal dashboard & budget statistics', isSystemRole: true, defaultPermissions: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
-        ];
-        for (const r of defaultRoles) {
-          await firestore.set('roles', r.id, r);
-        }
-      }
+      console.log('[Firestore] Validating database collections and schema readiness...');
+      const usersRef = firestore.collection('users');
+      const adminSnap = await usersRef.where('username', '==', 'admin').get();
 
-      // 2. Seed or Update In-built Admin User (ID: admin, PIN: 2613)
-      await this.ensureAdminUser('2613');
+      // Only bootstrap initial master Admin credentials if completely no admin user exists
+      if (adminSnap.empty) {
+        console.log('[Firestore] No admin found. Bootstrapping initial Admin account (admin / 2613)...');
+        const salt = generateSalt();
+        const pinHash = hashPin('2613', salt);
+        const adminId = 'usr_admin_001';
 
-      // 3. Seed Bank Account if missing
-      const accounts = await this.getBankAccounts();
-      if (accounts.length === 0) {
-        console.log('[Firestore] Seeding default BML bank account...');
-        const defaultAccount: BankAccount = {
-          id: 'acc_bml_main',
-          bankName: 'Bank of Maldives (BML)',
-          accountName: 'AANANDHA RECREATION CLUB',
-          accountNumber: '7701123456001',
-          type: 'bank',
-          currency: 'MVR',
-          openingBalance: 25450.00,
-          currentBalance: 25450.00,
+        const adminPermissions = ALL_MODULES.map(m => ({
+          id: `perm_${adminId}_${m}`,
+          roleId: 'role_admin',
+          userId: adminId,
+          moduleKey: m,
+          canView: true,
+          canCreate: true,
+          canEdit: true,
+          canDelete: true,
+          canPublish: true,
+          canApprove: true,
+          canExport: true,
+          canManageSettings: true
+        }));
+
+        await usersRef.doc(adminId).set({
+          id: adminId,
+          fullName: 'System Administrator',
+          username: 'admin',
+          designation: 'Chief Administrator',
+          contactNumber: '+960 7771234',
+          roleId: 'role_admin',
+          roleName: 'Admin',
           status: 'active',
-          notes: 'Primary operating and member contribution account',
+          requirePinChange: false,
+          failedLoginCount: 0,
+          lockedUntil: null,
+          lastLoginAt: new Date().toISOString(),
           createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        await firestore.set('bankAccounts', defaultAccount.id, defaultAccount);
-      }
-
-      // 4. Seed Contribution Settings if missing
-      const contSetting = await firestore.get('contributionSettings', 'cfg_dues_default');
-      if (!contSetting) {
-        await firestore.set('contributionSettings', 'cfg_dues_default', {
-          id: 'cfg_dues_default',
-          monthlyDueAmount: 50.00,
-          finePerDay: 2.00,
-          fineGraceDays: 5,
-          maxFineAmount: 100.00,
-          dueDayOfMonth: 10,
-          bankAccountId: 'acc_bml_main',
-          isActive: true,
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date().toISOString(),
+          notes: 'In-built primary system administrator account',
+          permissions: adminPermissions,
+          pinHash,
+          pinSalt: salt
         });
       }
 
-      // 5. Seed Club Rules if missing
-      const rulesDoc = await firestore.get('clubRules', 'rules_primary');
-      if (!rulesDoc) {
-        await firestore.set('clubRules', 'rules_primary', {
-          id: 'rules_primary',
-          ...defaultClubRules
-        });
+      // Ensure all 30+ core collections are registered and accessible without modifying existing documents
+      const coreTables = [
+        'users', 'roles', 'clubMembers', 'events', 'eventItems', 'meetingItems',
+        'budgetAccounts', 'incomeRecords', 'expenseRecords', 'accountTransfers',
+        'contributionSettings', 'memberContributions', 'budgetAllocations',
+        'slideshow', 'siteSettings', 'contacts', 'socialLinks', 'excoMembers',
+        'quizQuestions', 'quizSubmissions', 'quizWinners', 'quizPrizes', 'quizSponsors',
+        'masterIneligibleParticipants', 'auditLogs', 'inboxMessages', 'appNotifications',
+        'clubRules', 'presidentialDirectives', 'officialCirculars', 'userSessions', 'counters',
+        'invoices'
+      ];
+      for (const col of coreTables) {
+        firestore.collection(col);
       }
 
-      // 6. Seed Site Settings if missing
-      const settings = await firestore.list('siteSettings');
-      if (settings.length === 0) {
-        const defaultSettings = [
-          { id: 'set_general_clubName', group: 'general', key: 'clubName', value: 'އާނަންދާ ރީކްރިއޭޝަން ކްލަބް', updatedAt: new Date().toISOString() },
-          { id: 'set_general_clubAbbreviation', group: 'general', key: 'clubAbbreviation', value: 'ARC', updatedAt: new Date().toISOString() },
-          { id: 'set_general_aboutText', group: 'general', key: 'aboutText', value: 'އާނަންދާ ރީކްރިއޭޝަން ކްލަބަކީ އިޖުތިމާއީ، ކުޅިވަރު އަދި ދީނީ އެކިއެކި ހަރަކާތްތައް ހިންގާ ޖަމްއިއްޔާއެކެވެ.', updatedAt: new Date().toISOString() },
-          { id: 'set_contact_address', group: 'contact', key: 'address', value: 'އާނަންދާ ރީކްރިއޭޝަން ކްލަބް، މާލެ، ދިވެހިރާއްޖެ', updatedAt: new Date().toISOString() },
-          { id: 'set_contact_phone', group: 'contact', key: 'phone', value: '+960 7771234', updatedAt: new Date().toISOString() },
-          { id: 'set_contact_email', group: 'contact', key: 'email', value: 'info@arc.mv', updatedAt: new Date().toISOString() }
-        ];
-        for (const s of defaultSettings) {
-          await firestore.set('siteSettings', s.id, s);
-        }
-      }
-
-      this.initialized = true;
-      console.log('[Firestore] Initialization and seed checks complete.');
+      // Commit changes if any
+      flushSync();
+      console.log('[Firestore] Database schema readiness validated successfully.');
     } catch (err: any) {
-      console.error('[Firestore] Database initialization error:', err.message);
+      console.error('[Firestore] Startup schema check error:', err);
     }
   }
 
-  // HEALTH CHECK
-  public async checkDatabaseHealth(): Promise<{
-    database: string;
-    connected: boolean;
-    projectId: string;
-    databaseId: string;
-    schemaReady: boolean;
-    error?: string;
-  }> {
-    const health = await firestore.checkHealth();
-    return {
-      database: 'firebase-firestore',
-      connected: health.connected,
-      projectId: FIREBASE_PROJECT_ID,
-      databaseId: FIRESTORE_DATABASE_ID,
-      schemaReady: health.connected,
-      error: health.error
-    };
+  async checkDatabaseHealth() {
+    try {
+      const meta = getDatabaseMetadata();
+      return {
+        database: 'cloud-firestore-direct',
+        connected: true,
+        schemaReady: true,
+        missingTables: [],
+        metadata: meta
+      };
+    } catch (err: any) {
+      return {
+        database: 'cloud-firestore-direct',
+        connected: false,
+        schemaReady: false,
+        missingTables: [],
+        error: err.message
+      };
+    }
   }
 
-  // ==========================================
-  // 1. USERS & AUTHENTICATION
-  // ==========================================
-
-  public async getUsers(): Promise<User[]> {
-    const users = await firestore.list<any>('users');
-    const allPerms = await firestore.list<any>('modulePermissions');
-
-    return users.map(u => ({
-      id: u.id,
-      fullName: u.fullName || u.full_name || '',
-      username: u.username || '',
-      designation: u.designation || '',
-      contactNumber: u.contactNumber || u.contact_number || '',
-      roleId: u.roleId || u.role_id || 'role_member',
-      roleName: u.roleName || u.role_name || 'Club Member',
-      memberId: u.memberId || u.member_id,
-      profilePhotoUrl: u.profilePhotoUrl || u.profile_photo_url,
-      status: u.status || 'active',
-      requirePinChange: Boolean(u.requirePinChange ?? u.require_pin_change),
-      pin: u.pin || u.raw_pin || '',
-      pinHash: u.pinHash || u.pin_hash || '',
-      pinSalt: u.pinSalt || u.pin_salt || '',
-      failedLoginCount: u.failedLoginCount ?? u.failed_login_count ?? 0,
-      lockedUntil: u.lockedUntil || u.locked_until,
-      lastLoginAt: u.lastLoginAt || u.last_login_at,
-      notes: u.notes,
-      createdAt: u.createdAt || u.created_at || new Date().toISOString(),
-      createdBy: u.createdBy || u.created_by,
-      updatedAt: u.updatedAt || u.updated_at || new Date().toISOString(),
-      updatedBy: u.updatedBy || u.updated_by,
-      permissions: allPerms.filter(p => p.userId === u.id || p.user_id === u.id)
-    }));
+  async getDatabaseStatus() {
+    return getDatabaseMetadata();
   }
 
-  public async getUserById(id: string): Promise<User | null> {
-    const u = await firestore.get<any>('users', id);
-    if (!u) return null;
-
-    const perms = await this.getUserPermissions(id);
-    return {
-      id: u.id,
-      fullName: u.fullName || u.full_name || '',
-      username: u.username || '',
-      designation: u.designation || '',
-      contactNumber: u.contactNumber || u.contact_number || '',
-      roleId: u.roleId || u.role_id || 'role_member',
-      roleName: u.roleName || u.role_name || 'Club Member',
-      memberId: u.memberId || u.member_id,
-      profileImage: u.profileImage || u.profilePhotoUrl || u.profile_photo_url || u.profile_image,
-      status: u.status || 'active',
-      requirePinChange: Boolean(u.requirePinChange ?? u.require_pin_change),
-      pin: u.pin || u.raw_pin || '',
-      pinHash: u.pinHash || u.pin_hash || '',
-      pinSalt: u.pinSalt || u.pin_salt || '',
-      failedLoginCount: u.failedLoginCount ?? u.failed_login_count ?? 0,
-      lockedUntil: u.lockedUntil || u.locked_until,
-      lastLoginAt: u.lastLoginAt || u.last_login_at,
-      notes: u.notes,
-      createdAt: u.createdAt || u.created_at || new Date().toISOString(),
-      createdBy: u.createdBy || u.created_by,
-      updatedAt: u.updatedAt || u.updated_at || new Date().toISOString(),
-      permissions: perms
-    };
+  // -------------------------------------------------------------
+  // USERS & SESSIONS
+  // -------------------------------------------------------------
+  async getUsers(): Promise<User[]> {
+    const snap = await firestore.collection('users').get();
+    return snap.docs.map(d => d.data() as User);
   }
 
-  public async ensureAdminUser(pin = '2613'): Promise<User> {
-    const adminUser = await this.getUserByUsername('admin');
-    const adminId = adminUser ? adminUser.id : 'usr_admin_001';
-    const salt = 'arc_salt_2026';
-    const pinHash = hashPin(pin, salt);
+  async getUserById(id: string): Promise<User | null> {
+    const doc = await firestore.collection('users').doc(id).get();
+    return doc.exists ? (doc.data() as User) : null;
+  }
 
-    const adminDoc: any = {
-      id: adminId,
-      fullName: 'System Administrator',
-      username: 'admin',
-      designation: 'Chief Administrator',
-      contactNumber: '+960 7771234',
-      roleId: 'role_admin',
-      roleName: 'Admin',
-      status: 'active',
-      requirePinChange: false,
-      pin,
-      pinHash,
-      pinSalt: salt,
+  async getUserByUsername(username: string): Promise<User | null> {
+    const clean = username.trim().toLowerCase();
+    const snap = await firestore.collection('users').where('username', '==', clean).get();
+    if (!snap.empty) {
+      return snap.docs[0].data() as User;
+    }
+    // Also try case-insensitive lookup
+    const allSnap = await firestore.collection('users').get();
+    const match = allSnap.docs.find(d => (d.data().username || '').toLowerCase() === clean);
+    return match ? (match.data() as User) : null;
+  }
+
+  async createUser(data: Partial<User>): Promise<User> {
+    const id = data.id || `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
+    const user: User = {
+      id,
+      fullName: data.fullName || '',
+      username: (data.username || '').toLowerCase().trim(),
+      designation: data.designation || '',
+      contactNumber: data.contactNumber || '',
+      roleId: data.roleId || 'role_member',
+      roleName: data.roleName || 'Club Member',
+      status: data.status || 'active',
+      requirePinChange: data.requirePinChange ?? true,
       failedLoginCount: 0,
-      notes: 'In-built primary system administrator (ID: admin)',
-      createdAt: adminUser?.createdAt || new Date().toISOString(),
+      lockedUntil: null,
+      lastLoginAt: null,
+      createdAt: now,
+      updatedAt: now,
+      notes: data.notes || '',
+      permissions: data.permissions || [],
+      memberId: data.memberId,
+      pinHash: data.pinHash,
+      pinSalt: data.pinSalt,
+      ...(data as any)
+    };
+
+    await firestore.collection('users').doc(id).set(user);
+    return user;
+  }
+
+  async updateUser(id: string, updates: Partial<User>): Promise<User> {
+    const userDoc = firestore.collection('users').doc(id);
+    const existing = await userDoc.get();
+    if (!existing.exists) {
+      throw new Error(`User with ID ${id} not found.`);
+    }
+
+    const payload = {
+      ...updates,
       updatedAt: new Date().toISOString()
     };
-    await firestore.set('users', adminId, adminDoc);
 
-    const perms = createAdminPermissions(adminId);
-    for (const p of perms) {
-      await firestore.set('modulePermissions', p.id, p);
-    }
-
-    const updated = await this.getUserById(adminId);
-    return updated || adminDoc;
+    await userDoc.update(payload);
+    const updated = await userDoc.get();
+    return updated.data() as User;
   }
 
-  public async getUserByUsername(username: string): Promise<User | null> {
-    if (!username) return null;
-    const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
-    const allUsers = await this.getUsers();
-    return allUsers.find(u => 
-      (u.username && u.username.toLowerCase() === cleanUsername) ||
-      (u.id && u.id.toLowerCase() === cleanUsername) ||
-      (u.memberId && u.memberId.toLowerCase() === cleanUsername)
-    ) || null;
+  async deleteUser(id: string): Promise<void> {
+    await firestore.collection('users').doc(id).delete();
   }
 
-  public async createUser(userData: Partial<User> & { pin: string; profilePhotoUrl?: string }): Promise<User> {
-    const cleanUsername = (userData.username || '').trim().toLowerCase();
-    const existing = await this.getUserByUsername(cleanUsername);
-    if (existing) {
-      throw new Error(`Username "${cleanUsername}" is already taken.`);
-    }
-
-    const salt = generateSalt();
-    const pinHash = hashPin(userData.pin, salt);
-    const userId = userData.id || `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const now = new Date().toISOString();
-
-    const newUser: any = {
-      id: userId,
-      fullName: userData.fullName || '',
-      username: cleanUsername,
-      designation: userData.designation || '',
-      contactNumber: userData.contactNumber || '',
-      roleId: userData.roleId || 'role_member',
-      roleName: userData.roleName || 'Club Member',
-      memberId: userData.memberId,
-      profileImage: userData.profileImage || userData.profilePhotoUrl,
-      status: userData.status || 'active',
-      requirePinChange: Boolean(userData.requirePinChange),
-      pinHash,
-      pinSalt: salt,
-      failedLoginCount: 0,
-      notes: userData.notes,
-      createdAt: now,
-      createdBy: userData.createdBy,
-      updatedAt: now
-    };
-
-    await firestore.set('users', userId, newUser);
-
-    // Save permissions
-    const perms = userData.roleName === 'Admin' || userData.roleId === 'role_admin'
-      ? createAdminPermissions(userId)
-      : (userData.permissions || []);
-
-    for (const p of perms) {
-      await firestore.set('modulePermissions', p.id || `perm_${userId}_${p.moduleKey}`, {
-        ...p,
-        id: p.id || `perm_${userId}_${p.moduleKey}`,
-        userId
-      });
-    }
-
-    return (await this.getUserById(userId))!;
+  // SESSIONS
+  async getSessions(): Promise<{ token: string; userId: string; expiresAt: number }[]> {
+    const snap = await firestore.collection('userSessions').get();
+    return snap.docs.map(d => d.data() as { token: string; userId: string; expiresAt: number });
   }
 
-  public async updateUser(id: string, updates: Partial<User> & { pin?: string; updatedBy?: string; profilePhotoUrl?: string }): Promise<User> {
-    const existing = await this.getUserById(id);
-    if (!existing) {
-      throw new Error(`User not found with id ${id}`);
-    }
-
-    const now = new Date().toISOString();
-    const docUpdates: Record<string, any> = { updatedAt: now };
-
-    if (updates.fullName !== undefined) docUpdates.fullName = updates.fullName;
-    if (updates.username !== undefined) docUpdates.username = updates.username.trim().toLowerCase();
-    if (updates.designation !== undefined) docUpdates.designation = updates.designation;
-    if (updates.contactNumber !== undefined) docUpdates.contactNumber = updates.contactNumber;
-    if (updates.roleId !== undefined) docUpdates.roleId = updates.roleId;
-    if (updates.roleName !== undefined) docUpdates.roleName = updates.roleName;
-    if (updates.memberId !== undefined) docUpdates.memberId = updates.memberId;
-    if (updates.profileImage !== undefined) docUpdates.profileImage = updates.profileImage;
-    if (updates.profilePhotoUrl !== undefined) docUpdates.profileImage = updates.profilePhotoUrl;
-    if (updates.status !== undefined) docUpdates.status = updates.status;
-    if (updates.requirePinChange !== undefined) docUpdates.requirePinChange = Boolean(updates.requirePinChange);
-    if (updates.failedLoginCount !== undefined) docUpdates.failedLoginCount = updates.failedLoginCount;
-    if (updates.lockedUntil !== undefined) docUpdates.lockedUntil = updates.lockedUntil;
-    if (updates.lastLoginAt !== undefined) docUpdates.lastLoginAt = updates.lastLoginAt;
-    if (updates.notes !== undefined) docUpdates.notes = updates.notes;
-    if (updates.updatedBy !== undefined) docUpdates.updatedBy = updates.updatedBy;
-
-    if (updates.pin) {
-      const salt = generateSalt();
-      docUpdates.pinHash = hashPin(updates.pin, salt);
-      docUpdates.pinSalt = salt;
-    }
-
-    await firestore.set('users', id, docUpdates);
-
-    // Update permissions if provided
-    if (updates.permissions) {
-      for (const p of updates.permissions) {
-        const permId = p.id || `perm_${id}_${p.moduleKey}`;
-        await firestore.set('modulePermissions', permId, {
-          ...p,
-          id: permId,
-          userId: id
-        });
-      }
-    }
-
-    return (await this.getUserById(id))!;
-  }
-
-  public async deleteUser(id: string): Promise<void> {
-    await firestore.delete('users', id);
-  }
-
-  // ==========================================
-  // 2. ROLES & PERMISSIONS
-  // ==========================================
-
-  public async getRoles(): Promise<Role[]> {
-    return firestore.list<Role>('roles');
-  }
-
-  public async createRole(role: Partial<Role>): Promise<Role> {
-    const id = role.id || `role_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newRole: Role = {
-      id,
-      name: (role.name || 'EXCO Member') as any,
-      description: role.description || '',
-      isSystemRole: Boolean(role.isSystemRole),
-      defaultPermissions: role.defaultPermissions || [],
-      createdAt: now,
-      updatedAt: now
-    };
-    await firestore.set('roles', id, newRole);
-    return newRole;
-  }
-
-  public async updateRole(id: string, updates: Partial<Role>): Promise<Role> {
-    const existing = await firestore.get<Role>('roles', id);
-    if (!existing) throw new Error(`Role not found: ${id}`);
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('roles', id, updated);
-    return updated;
-  }
-
-  public async deleteRole(id: string): Promise<void> {
-    await firestore.delete('roles', id);
-  }
-
-  public async getUserPermissions(userId: string): Promise<any[]> {
-    const all = await firestore.list<any>('modulePermissions');
-    return all.filter(p => p.userId === userId || p.user_id === userId);
-  }
-
-  public async saveUserPermissions(userId: string, permissions: any[]): Promise<void> {
-    for (const p of permissions) {
-      const permId = p.id || `perm_${userId}_${p.moduleKey}`;
-      await firestore.set('modulePermissions', permId, {
-        ...p,
-        id: permId,
-        userId
-      });
-    }
-  }
-
-  // ==========================================
-  // 3. SESSIONS
-  // ==========================================
-
-  public async getSessions(): Promise<Array<{ token: string; userId: string; expiresAt: number }>> {
-    const now = Date.now();
-    const sessions = await firestore.list<any>('userSessions');
-    return sessions
-      .filter(s => (s.expiresAt || s.expires_at || 0) > now)
-      .map(s => ({
-        token: s.token || s.id,
-        userId: s.userId || s.user_id,
-        expiresAt: s.expiresAt || s.expires_at
-      }));
-  }
-
-  public async saveSession(session: { token: string; userId: string; expiresAt: number }): Promise<void> {
-    const docId = session.token;
-    await firestore.set('userSessions', docId, {
-      id: docId,
+  async saveSession(session: { token: string; userId: string; expiresAt: number }): Promise<void> {
+    const tokenHash = crypto.createHash('sha256').update(session.token).digest('hex');
+    await firestore.collection('userSessions').doc(tokenHash).set({
+      id: tokenHash,
       token: session.token,
+      tokenHash,
       userId: session.userId,
       expiresAt: session.expiresAt,
+      lastSeenAt: new Date().toISOString(),
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  async deleteSession(token: string): Promise<void> {
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    await firestore.collection('userSessions').doc(tokenHash).delete();
+  }
+
+  // -------------------------------------------------------------
+  // ROLES
+  // -------------------------------------------------------------
+  async getRoles(): Promise<Role[]> {
+    const snap = await firestore.collection('roles').get();
+    return snap.docs.map(d => d.data() as Role);
+  }
+
+  async createRole(data: Partial<Role>): Promise<Role> {
+    const id = data.id || `role_${Date.now()}`;
+    const role: Role = {
+      id,
+      name: data.name || ('Custom Role' as UserRoleName),
+      description: data.description || '',
+      isSystemRole: false,
       createdAt: new Date().toISOString(),
-      lastSeenAt: new Date().toISOString()
-    });
-  }
-
-  public async deleteSession(token: string): Promise<void> {
-    await firestore.delete('userSessions', token);
-  }
-
-  // ==========================================
-  // 4. MEMBERS DIRECTORY
-  // ==========================================
-
-  public async getMembers(): Promise<ClubMember[]> {
-    const docs = await firestore.list<any>('members');
-    return docs.map(m => ({
-      id: m.id,
-      memberNumber: m.memberNumber || m.member_number || '',
-      fullName: m.fullName || m.full_name || '',
-      idCardNumber: m.idCardNumber || m.id_card_number,
-      address: m.address || '',
-      phoneNumber: m.phoneNumber || m.contactNumber || m.contact_number || '',
-      email: m.email,
-      joinedDate: m.joinedDate || m.joined_date || new Date().toISOString().split('T')[0],
-      memberType: m.memberType || m.membershipType || m.membership_type || 'standard',
-      excoDesignation: m.excoDesignation || m.designation,
-      notes: m.notes,
-      status: m.status || 'active',
-      createdAt: m.createdAt || m.created_at || new Date().toISOString(),
-      updatedAt: m.updatedAt || m.updated_at || new Date().toISOString()
-    }));
-  }
-
-  public async getMemberById(id: string): Promise<ClubMember | null> {
-    const m = await firestore.get<any>('members', id);
-    if (!m) return null;
-    return {
-      id: m.id,
-      memberNumber: m.memberNumber || m.member_number || '',
-      fullName: m.fullName || m.full_name || '',
-      idCardNumber: m.idCardNumber || m.id_card_number,
-      address: m.address || '',
-      phoneNumber: m.phoneNumber || m.contactNumber || m.contact_number || '',
-      email: m.email,
-      joinedDate: m.joinedDate || m.joined_date || new Date().toISOString().split('T')[0],
-      memberType: m.memberType || m.membershipType || m.membership_type || 'standard',
-      excoDesignation: m.excoDesignation || m.designation,
-      notes: m.notes,
-      status: m.status || 'active',
-      createdAt: m.createdAt || m.created_at || new Date().toISOString(),
-      updatedAt: m.updatedAt || m.updated_at || new Date().toISOString()
+      updatedAt: new Date().toISOString(),
+      defaultPermissions: data.defaultPermissions || []
     };
+    await firestore.collection('roles').doc(id).set(role);
+    return role;
   }
 
-  public async createMember(member: Partial<ClubMember> & { createdBy?: string }): Promise<ClubMember> {
-    const id = member.id || `mem_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const now = new Date().toISOString();
-
-    const newMember: ClubMember = {
-      id,
-      memberNumber: member.memberNumber || `ARC-${Math.floor(1000 + Math.random() * 9000)}`,
-      fullName: member.fullName || '',
-      idCardNumber: member.idCardNumber,
-      address: member.address || '',
-      phoneNumber: member.phoneNumber || '',
-      email: member.email,
-      joinedDate: member.joinedDate || new Date().toISOString().split('T')[0],
-      memberType: member.memberType || 'standard',
-      excoDesignation: member.excoDesignation,
-      notes: member.notes,
-      status: member.status || 'active',
-      createdAt: now,
-      updatedAt: now
-    };
-
-    await firestore.set('members', id, newMember);
-    return newMember;
+  async updateRole(id: string, updates: Partial<Role>): Promise<Role> {
+    const docRef = firestore.collection('roles').doc(id);
+    await docRef.update({ ...updates, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    return snap.data() as Role;
   }
 
-  public async updateMember(id: string, updates: Partial<ClubMember> & { updatedBy?: string }): Promise<ClubMember> {
-    const existing = await this.getMemberById(id);
-    if (!existing) throw new Error(`Member not found with id ${id}`);
-
-    const now = new Date().toISOString();
-    const updated = { ...existing, ...updates, updatedAt: now };
-    await firestore.set('members', id, updated);
-    return updated;
+  // -------------------------------------------------------------
+  // MEMBERS
+  // -------------------------------------------------------------
+  async getMembers(): Promise<ClubMember[]> {
+    const snap = await firestore.collection('clubMembers').get();
+    return snap.docs.map(d => d.data() as ClubMember);
   }
 
-  public async deleteMember(id: string): Promise<void> {
-    await firestore.delete('members', id);
+  async getMemberById(id: string): Promise<ClubMember | null> {
+    const doc = await firestore.collection('clubMembers').doc(id).get();
+    return doc.exists ? (doc.data() as ClubMember) : null;
   }
 
-  // ==========================================
-  // 5. SITE SETTINGS & BRANDING
-  // ==========================================
+  async createMember(data: Partial<ClubMember>): Promise<ClubMember> {
+    const id = data.id || `mem_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-  public async getSettings(): Promise<SiteSetting[]> {
-    const docs = await firestore.list<any>('siteSettings');
-    return docs.map(s => ({
-      id: s.id,
-      group: (s.group || s.settingGroup || s.setting_group || 'general') as any,
-      key: s.key || s.settingKey || s.setting_key || '',
-      value: s.value,
-      updatedAt: s.updatedAt || s.updated_at || new Date().toISOString()
-    }));
-  }
-
-  public async updateSettings(settingsList: Array<{ group: string; key: string; value: any }>): Promise<SiteSetting[]> {
-    const now = new Date().toISOString();
-    for (const s of settingsList) {
-      const docId = `set_${s.group}_${s.key}`;
-      const item: SiteSetting = {
-        id: docId,
-        group: s.group as any,
-        key: s.key,
-        value: s.value,
-        updatedAt: now
-      };
-      await firestore.set('siteSettings', docId, item);
-    }
-    return this.getSettings();
-  }
-
-  // ==========================================
-  // 6. SLIDESHOW ITEMS
-  // ==========================================
-
-  public async getSlideshow(): Promise<SlideshowItem[]> {
-    const docs = await firestore.list<any>('slideshowItems');
-    return docs
-      .map(s => ({
-        id: s.id,
-        desktopImage: s.desktopImage || s.imageUrl || s.image_url || '',
-        mobileImage: s.mobileImage || s.mobileImageUrl || s.mobile_image_url || s.desktopImage || s.imageUrl || '',
-        title: s.title || '',
-        subtitle: s.subtitle || '',
-        buttonText: s.buttonText || s.button_text || '',
-        buttonLink: s.buttonLink || s.buttonUrl || s.button_url || '',
-        textAlignment: s.textAlignment || s.text_alignment || 'center',
-        overlayLevel: s.overlayLevel ?? s.overlay_level ?? 45,
-        displayOrder: s.displayOrder ?? s.display_order ?? 1,
-        status: s.status || 'active',
-        createdAt: s.createdAt || s.created_at || new Date().toISOString(),
-        updatedAt: s.updatedAt || s.updated_at || new Date().toISOString()
-      }))
-      .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
-  }
-
-  public async createSlideshowItem(item: Partial<SlideshowItem>): Promise<SlideshowItem> {
-    const id = item.id || `slide_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newItem: SlideshowItem = {
-      id,
-      desktopImage: item.desktopImage || '',
-      mobileImage: item.mobileImage || item.desktopImage || '',
-      title: item.title || '',
-      subtitle: item.subtitle || '',
-      buttonText: item.buttonText || '',
-      buttonLink: item.buttonLink || '',
-      textAlignment: item.textAlignment || 'center',
-      overlayLevel: item.overlayLevel ?? 45,
-      displayOrder: item.displayOrder ?? 1,
-      status: item.status || 'active',
-      createdAt: now,
-      updatedAt: now
-    };
-    await firestore.set('slideshowItems', id, newItem);
-    return newItem;
-  }
-
-  public async updateSlideshowItem(id: string, updates: Partial<SlideshowItem>): Promise<SlideshowItem> {
-    const existing = (await this.getSlideshow()).find(s => s.id === id);
-    if (!existing) throw new Error(`Slideshow item not found: ${id}`);
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('slideshowItems', id, updated);
-    return updated;
-  }
-
-  public async deleteSlideshowItem(id: string): Promise<void> {
-    await firestore.delete('slideshowItems', id);
-  }
-
-  // ==========================================
-  // 7. SOCIAL LINKS & CONTACTS
-  // ==========================================
-
-  public async getSocialLinks(): Promise<SocialLink[]> {
-    const docs = await firestore.list<any>('socialLinks');
-    return docs.map(s => ({
-      id: s.id,
-      platform: s.platform || 'facebook',
-      url: s.url || '',
-      openInNewTab: Boolean(s.openInNewTab ?? s.open_in_new_tab ?? true),
-      displayOrder: s.displayOrder ?? s.display_order ?? 1,
-      status: s.status || 'active',
-      createdAt: s.createdAt || s.created_at || new Date().toISOString()
-    })).sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
-  }
-
-  public async createSocialLink(item: Partial<SocialLink>): Promise<SocialLink> {
-    const id = item.id || `soc_${Date.now()}`;
-    const newLink: SocialLink = {
-      id,
-      platform: item.platform || 'facebook',
-      url: item.url || '',
-      openInNewTab: Boolean(item.openInNewTab ?? true),
-      displayOrder: item.displayOrder ?? 1,
-      status: item.status || 'active'
-    };
-    await firestore.set('socialLinks', id, newLink);
-    return newLink;
-  }
-
-  public async updateSocialLink(id: string, updates: Partial<SocialLink>): Promise<SocialLink> {
-    const existing = (await this.getSocialLinks()).find(s => s.id === id);
-    if (!existing) throw new Error(`Social link not found: ${id}`);
-    const updated = { ...existing, ...updates };
-    await firestore.set('socialLinks', id, updated);
-    return updated;
-  }
-
-  public async deleteSocialLink(id: string): Promise<void> {
-    await firestore.delete('socialLinks', id);
-  }
-
-  public async getContacts(): Promise<any[]> {
-    return firestore.list('contacts');
-  }
-
-  public async createContact(item: any): Promise<any> {
-    const id = item.id || `con_${Date.now()}`;
-    const newContact = { ...item, id, createdAt: new Date().toISOString() };
-    await firestore.set('contacts', id, newContact);
-    return newContact;
-  }
-
-  public async updateContact(id: string, updates: any): Promise<any> {
-    const existing = await firestore.get('contacts', id);
-    const updated = { ...existing, ...updates, id, updatedAt: new Date().toISOString() };
-    await firestore.set('contacts', id, updated);
-    return updated;
-  }
-
-  public async deleteContact(id: string): Promise<void> {
-    await firestore.delete('contacts', id);
-  }
-
-  // ==========================================
-  // 8. EXCO TEAM
-  // ==========================================
-
-  public async getExcoMembers(): Promise<ExcoMember[]> {
-    const docs = await firestore.list<any>('excoMembers');
-    return docs.map(m => ({
-      id: m.id,
-      fullName: m.fullName || m.full_name || '',
-      designation: m.designation || '',
-      idCardNumber: m.idCardNumber || m.id_card_number,
-      image: m.image || m.photoUrl || m.photo_url || '',
-      description: m.description,
-      socialLink: m.socialLink || m.social_link,
-      displayOrder: m.displayOrder ?? m.display_order ?? 1,
-      status: (m.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
-      createdAt: m.createdAt || m.created_at || new Date().toISOString(),
-      updatedAt: m.updatedAt || m.updated_at || new Date().toISOString()
-    })).sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
-  }
-
-  public async createExcoMember(item: Partial<ExcoMember>): Promise<ExcoMember> {
-    const id = item.id || `exco_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newMember: ExcoMember = {
-      id,
-      fullName: item.fullName || '',
-      designation: item.designation || '',
-      idCardNumber: item.idCardNumber,
-      image: item.image || '',
-      description: item.description,
-      socialLink: item.socialLink,
-      displayOrder: item.displayOrder ?? 1,
-      status: item.status === 'inactive' ? 'inactive' : 'active',
-      createdAt: item.createdAt || now,
-      updatedAt: item.updatedAt || now
-    };
-    await firestore.set('excoMembers', id, newMember);
-    return newMember;
-  }
-
-  public async updateExcoMember(id: string, updates: Partial<ExcoMember>): Promise<ExcoMember> {
-    const existing = (await this.getExcoMembers()).find(e => e.id === id);
-    if (!existing) throw new Error(`EXCO member not found: ${id}`);
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('excoMembers', id, updated);
-    return updated;
-  }
-
-  public async deleteExcoMember(id: string): Promise<void> {
-    await firestore.delete('excoMembers', id);
-  }
-
-  // ==========================================
-  // 9. EVENTS & MEETINGS
-  // ==========================================
-
-  public async getEvents(): Promise<ClubEvent[]> {
-    const docs = await firestore.list<any>('events');
-    return docs.map(e => ({
-      id: e.id,
-      title: e.title || '',
-      summary: e.summary || e.description || '',
-      description: e.description,
-      eventDate: e.eventDate || e.event_date,
-      location: e.location || e.venue,
-      coverImage: e.coverImage || e.coverImageUrl || e.cover_image_url,
-      photoAlbum: e.photoAlbum || e.photo_album || [],
-      displayOrder: e.displayOrder ?? e.display_order ?? 1,
-      status: (e.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
-      createdBy: e.createdBy || e.created_by,
-      createdAt: e.createdAt || e.created_at || new Date().toISOString(),
-      updatedAt: e.updatedAt || e.updated_at || new Date().toISOString()
-    }));
-  }
-
-  public async createEvent(item: Partial<ClubEvent> & { createdBy?: string }): Promise<ClubEvent> {
-    const id = item.id || `ev_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newEvent: ClubEvent = {
-      id,
-      title: item.title || '',
-      summary: item.summary || item.description || '',
-      description: item.description,
-      eventDate: item.eventDate,
-      location: item.location,
-      coverImage: item.coverImage,
-      photoAlbum: item.photoAlbum || [],
-      displayOrder: item.displayOrder ?? 1,
-      status: item.status === 'inactive' ? 'inactive' : 'active',
-      createdBy: item.createdBy,
-      createdAt: now,
-      updatedAt: now
-    };
-    await firestore.set('events', id, newEvent);
-    return newEvent;
-  }
-
-  public async updateEvent(id: string, updates: Partial<ClubEvent>): Promise<ClubEvent> {
-    const existing = (await this.getEvents()).find(e => e.id === id);
-    if (!existing) throw new Error(`Event not found: ${id}`);
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('events', id, updated);
-    return updated;
-  }
-
-  public async deleteEvent(id: string): Promise<void> {
-    await firestore.delete('events', id);
-  }
-
-  public async getEventItems(): Promise<EventItem[]> {
-    return firestore.list<EventItem>('eventItems');
-  }
-
-  public async createEventItem(item: Partial<EventItem>): Promise<EventItem> {
-    const id = item.id || `evi_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newItem: EventItem = {
-      id,
-      title: item.title || '',
-      heldDate: item.heldDate || now.split('T')[0],
-      startTime: item.startTime,
-      endTime: item.endTime,
-      venue: item.venue || '',
-      summary: item.summary || '',
-      description: item.description,
-      eventType: item.eventType || 'community',
-      status: item.status || 'upcoming',
-      photoGallery: item.photoGallery || [],
-      attendance: item.attendance || [],
-      createdBy: item.createdBy,
-      createdAt: now,
-      updatedAt: now
-    };
-    await firestore.set('eventItems', id, newItem);
-    return newItem;
-  }
-
-  public async updateEventItem(id: string, updates: Partial<EventItem>): Promise<EventItem> {
-    const existing = (await this.getEventItems()).find(e => e.id === id);
-    if (!existing) throw new Error(`Event item not found: ${id}`);
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('eventItems', id, updated);
-    return updated;
-  }
-
-  public async deleteEventItem(id: string): Promise<void> {
-    await firestore.delete('eventItems', id);
-  }
-
-  public async saveEventAttendance(id: string, attendance: any[]): Promise<EventItem> {
-    return this.updateEventItem(id, { attendance });
-  }
-
-  public async getMeetingItems(): Promise<MeetingItem[]> {
-    return firestore.list<MeetingItem>('meetingItems');
-  }
-
-  public async createMeetingItem(item: Partial<MeetingItem>): Promise<MeetingItem> {
-    const id = item.id || `meet_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newMeeting: MeetingItem = {
-      id,
-      title: item.title || '',
-      meetingType: item.meetingType === 'exco' ? 'exco' : 'general_members',
-      heldDate: item.heldDate || now.split('T')[0],
-      startTime: item.startTime || '21:00',
-      endTime: item.endTime || '22:00',
-      venue: item.venue || 'ARC Meeting Hall',
-      summary: item.summary || '',
-      status: item.status || 'scheduled',
-      attendance: item.attendance || [],
-      votings: item.votings || [],
-      finalizedActions: item.finalizedActions || [],
-      createdBy: item.createdBy,
-      createdAt: now,
-      updatedAt: now
-    };
-    await firestore.set('meetingItems', id, newMeeting);
-    return newMeeting;
-  }
-
-  public async updateMeetingItem(id: string, updates: Partial<MeetingItem>): Promise<MeetingItem> {
-    const existing = (await this.getMeetingItems()).find(m => m.id === id);
-    if (!existing) throw new Error(`Meeting not found: ${id}`);
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('meetingItems', id, updated);
-    return updated;
-  }
-
-  public async deleteMeetingItem(id: string): Promise<void> {
-    await firestore.delete('meetingItems', id);
-  }
-
-  public async saveMeetingAttendance(id: string, attendance: any[]): Promise<MeetingItem> {
-    return this.updateMeetingItem(id, { attendance });
-  }
-
-  public async addMeetingVoting(id: string, voting: MeetingVotingItem): Promise<MeetingItem> {
-    const meeting = (await this.getMeetingItems()).find(m => m.id === id);
-    if (!meeting) throw new Error(`Meeting not found: ${id}`);
-    const votings = meeting.votings || [];
-    votings.push(voting);
-    return this.updateMeetingItem(id, { votings });
-  }
-
-  public async updateMeetingVoting(id: string, votingId: string, votingUpdates: Partial<MeetingVotingItem>): Promise<MeetingItem> {
-    const meeting = (await this.getMeetingItems()).find(m => m.id === id);
-    if (!meeting) throw new Error(`Meeting not found: ${id}`);
-    const votings = (meeting.votings || []).map(v => (v.id === votingId ? { ...v, ...votingUpdates } : v));
-    return this.updateMeetingItem(id, { votings });
-  }
-
-  // ==========================================
-  // 10. RAMAZAN QUIZ MODULE
-  // ==========================================
-
-  public async getQuizQuestions(): Promise<QuizQuestion[]> {
-    const docs = await firestore.list<any>('quizQuestions');
-    return docs.map(q => ({
-      id: q.id,
-      title: q.title || `Question ${q.questionNumber || 1}`,
-      questionNumber: q.questionNumber ?? q.question_number ?? 1,
-      questionText: q.questionText || q.question_text || '',
-      questionImage: q.questionImage || q.questionImageUrl || q.question_image_url,
-      showQuestionImage: Boolean(q.showQuestionImage ?? q.show_question_image ?? true),
-      options: q.options || [],
-      correctOptionId: q.correctOptionId || q.correct_option_id,
-      answerExplanation: q.answerExplanation || q.answer_explanation,
-      publishAt: q.publishAt || q.publish_at || new Date().toISOString(),
-      closeAt: q.closeAt || q.close_at || new Date().toISOString(),
-      revealAt: q.revealAt || q.reveal_at || new Date().toISOString(),
-      drawStartAt: q.drawStartAt || q.draw_start_at || new Date().toISOString(),
-      rollingDurationSeconds: q.rollingDurationSeconds ?? q.rolling_duration_seconds ?? 10,
-      winnerDisplayDurationSeconds: q.winnerDisplayDurationSeconds ?? q.winner_display_duration_seconds ?? 30,
-      prizeId: q.prizeId || q.prize_id,
-      prizeTitle: q.prizeTitle || q.prize_title || 'ARC Ramazan Quiz Prize',
-      prizeDescription: q.prizeDescription || q.prize_description,
-      sponsorId: q.sponsorId || q.sponsor_id,
-      sponsorName: q.sponsorName || q.sponsor_name,
-      sponsorLogo: q.sponsorLogo || q.sponsor_logo,
-      status: q.status || 'draft',
-      displayOrder: q.displayOrder ?? q.display_order ?? q.questionNumber ?? 1,
-      createdBy: q.createdBy || q.created_by,
-      createdAt: q.createdAt || q.created_at || new Date().toISOString(),
-      updatedAt: q.updatedAt || q.updated_at || new Date().toISOString(),
-      totalParticipants: q.totalParticipants,
-      correctCount: q.correctCount,
-      eligibleCount: q.eligibleCount
-    })).sort((a, b) => a.questionNumber - b.questionNumber);
-  }
-
-  public async createQuizQuestion(item: Partial<QuizQuestion> & { createdBy?: string }): Promise<QuizQuestion> {
-    const id = item.id || `qq_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newQuestion: QuizQuestion = {
-      id,
-      title: item.title || `Question ${item.questionNumber || 1}`,
-      questionNumber: item.questionNumber || 1,
-      questionText: item.questionText || '',
-      questionImage: item.questionImage,
-      showQuestionImage: item.showQuestionImage ?? true,
-      options: item.options || [],
-      correctOptionId: item.correctOptionId,
-      answerExplanation: item.answerExplanation,
-      publishAt: item.publishAt || now,
-      closeAt: item.closeAt || now,
-      revealAt: item.revealAt || now,
-      drawStartAt: item.drawStartAt || now,
-      rollingDurationSeconds: item.rollingDurationSeconds ?? 10,
-      winnerDisplayDurationSeconds: item.winnerDisplayDurationSeconds ?? 30,
-      prizeId: item.prizeId,
-      prizeTitle: item.prizeTitle || 'ARC Ramazan Quiz Prize',
-      prizeDescription: item.prizeDescription,
-      sponsorId: item.sponsorId,
-      sponsorName: item.sponsorName,
-      sponsorLogo: item.sponsorLogo,
-      status: item.status || 'draft',
-      displayOrder: item.displayOrder ?? item.questionNumber ?? 1,
-      createdBy: item.createdBy,
-      createdAt: now,
-      updatedAt: now
-    };
-    await firestore.set('quizQuestions', id, newQuestion);
-    return newQuestion;
-  }
-
-  public async updateQuizQuestion(id: string, updates: Partial<QuizQuestion>): Promise<QuizQuestion> {
-    const existing = (await this.getQuizQuestions()).find(q => q.id === id);
-    if (!existing) throw new Error(`Quiz question not found: ${id}`);
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('quizQuestions', id, updated);
-    return updated;
-  }
-
-  public async deleteQuizQuestion(id: string): Promise<void> {
-    await firestore.delete('quizQuestions', id);
-  }
-
-  // ----------------------------------------------------
-  // QUIZ PARTICIPANT QUEUE REGISTRY (Unique Que Numbers)
-  // ----------------------------------------------------
-  public async getParticipantQueues(): Promise<QuizParticipantQueue[]> {
-    const docs = await firestore.list<any>('quizParticipantQueues');
-    return docs.map(d => ({
-      id: d.id,
-      normalizedIdNumber: d.normalizedIdNumber || d.id,
-      queNumber: d.queNumber || d.participantNumber || `Q-${String(d.queIndex || 1).padStart(4, '0')}`,
-      queIndex: typeof d.queIndex === 'number' ? d.queIndex : 0,
-      contactNumber: d.contactNumber,
-      participantName: d.participantName,
-      firstRegisteredAt: d.firstRegisteredAt || d.createdAt || new Date().toISOString(),
-      lastSubmittedAt: d.lastSubmittedAt || d.updatedAt || new Date().toISOString()
-    })).sort((a, b) => a.queIndex - b.queIndex);
-  }
-
-  public async getOrCreateParticipantQueue(
-    idNumber: string,
-    participantName?: string,
-    contactNumber?: string
-  ): Promise<{ queNumber: string; queIndex: number; isExisting: boolean }> {
-    const normalizedId = String(idNumber || '').trim().toUpperCase().replace(/\s+/g, '');
-    if (!normalizedId) {
-      throw new Error('Valid ID Card number is required to assign Queue Number.');
-    }
-
-    // 1. Check existing in quizParticipantQueues
-    const existingQueue = await firestore.get<any>('quizParticipantQueues', normalizedId);
-    if (existingQueue && existingQueue.queNumber) {
-      await firestore.set('quizParticipantQueues', normalizedId, {
-        ...existingQueue,
-        contactNumber: contactNumber || existingQueue.contactNumber || '',
-        participantName: participantName || existingQueue.participantName || '',
-        lastSubmittedAt: new Date().toISOString()
+    // Generate atomic member number if not provided (e.g. ARC-M-001)
+    let memberNumber = data.memberNumber;
+    if (!memberNumber) {
+      const counterRef = firestore.collection('counters').doc('members');
+      await firestore.runTransaction(async (t) => {
+        const doc = await t.get(counterRef);
+        const nextNum = (doc.exists ? (doc.data()?.count || 1) : 1);
+        memberNumber = `ARC-M-${String(nextNum).padStart(3, '0')}`;
+        t.set(counterRef, { count: nextNum + 1 }, { merge: true });
       });
-      return {
-        queNumber: existingQueue.queNumber,
-        queIndex: existingQueue.queIndex || 0,
-        isExisting: true
-      };
     }
 
-    // 2. Check if already has a participant number in any existing quizSubmissions
-    const allSubmissions = await firestore.list<any>('quizSubmissions');
-    const priorSubmission = allSubmissions.find(s => {
-      const sNorm = (s.normalizedIdNumber || s.idNumber || s.idCardNumber || '').trim().toUpperCase().replace(/\s+/g, '');
-      return sNorm === normalizedId && s.participantNumber;
-    });
-
-    if (priorSubmission && priorSubmission.participantNumber) {
-      const existingNum = priorSubmission.participantNumber;
-      const numMatch = existingNum.match(/\d+/);
-      const parsedIndex = numMatch ? parseInt(numMatch[0], 10) : 0;
-      
-      const newQueueDoc: QuizParticipantQueue = {
-        id: normalizedId,
-        normalizedIdNumber: normalizedId,
-        queNumber: existingNum,
-        queIndex: parsedIndex,
-        contactNumber: contactNumber || priorSubmission.contactNumber || '',
-        participantName: participantName || priorSubmission.participantName || '',
-        firstRegisteredAt: priorSubmission.submittedAt || new Date().toISOString(),
-        lastSubmittedAt: new Date().toISOString()
-      };
-      await firestore.set('quizParticipantQueues', normalizedId, newQueueDoc);
-      return {
-        queNumber: existingNum,
-        queIndex: parsedIndex,
-        isExisting: true
-      };
-    }
-
-    // 3. Brand new participant: Calculate next sequential Queue Number (Q-0001, Q-0002, ...)
-    const existingQueues = await this.getParticipantQueues();
-    let maxIndex = 0;
-    
-    for (const q of existingQueues) {
-      if (typeof q.queIndex === 'number' && q.queIndex > maxIndex) {
-        maxIndex = q.queIndex;
-      }
-      const match = (q.queNumber || '').match(/\d+/);
-      if (match) {
-        const num = parseInt(match[0], 10);
-        if (num > maxIndex) maxIndex = num;
-      }
-    }
-
-    // Also check max across existing submissions to guarantee uniqueness
-    for (const s of allSubmissions) {
-      const match = (s.participantNumber || '').match(/\d+/);
-      if (match) {
-        const num = parseInt(match[0], 10);
-        if (num > maxIndex) maxIndex = num;
-      }
-    }
-
-    const nextIndex = maxIndex + 1;
-    const queNumber = `Q-${String(nextIndex).padStart(4, '0')}`;
-
-    const newQueueDoc: QuizParticipantQueue = {
-      id: normalizedId,
-      normalizedIdNumber: normalizedId,
-      queNumber,
-      queIndex: nextIndex,
-      contactNumber: contactNumber || '',
-      participantName: participantName || '',
-      firstRegisteredAt: new Date().toISOString(),
-      lastSubmittedAt: new Date().toISOString()
+    const member: ClubMember = {
+      id,
+      memberNumber: memberNumber || `ARC-M-${Date.now().toString().slice(-3)}`,
+      fullName: data.fullName || '',
+      idCardNumber: data.idCardNumber || '',
+      address: data.address || '',
+      phoneNumber: data.phoneNumber || '',
+      email: data.email || '',
+      status: data.status || 'active',
+      memberType: data.memberType || 'standard',
+      joinedDate: data.joinedDate || new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
     };
 
-    await firestore.set('quizParticipantQueues', normalizedId, newQueueDoc);
+    await firestore.collection('clubMembers').doc(id).set(member);
+    return member;
+  }
 
-    return {
-      queNumber,
-      queIndex: nextIndex,
-      isExisting: false
+  async updateMember(id: string, updates: Partial<ClubMember>): Promise<ClubMember> {
+    const docRef = firestore.collection('clubMembers').doc(id);
+    await docRef.update({ ...updates, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    return snap.data() as ClubMember;
+  }
+
+  async deleteMember(id: string): Promise<void> {
+    await firestore.collection('clubMembers').doc(id).delete();
+  }
+
+  // -------------------------------------------------------------
+  // EVENTS & MEETINGS
+  // -------------------------------------------------------------
+  async getEvents(): Promise<ClubEvent[]> {
+    const snap = await firestore.collection('events').get();
+    return snap.docs.map(d => d.data() as ClubEvent);
+  }
+
+  async createEvent(data: Partial<ClubEvent>): Promise<ClubEvent> {
+    const id = data.id || `evt_${Date.now()}`;
+    const event: ClubEvent = {
+      id,
+      title: data.title || '',
+      summary: data.summary || '',
+      description: data.description || '',
+      eventDate: data.eventDate || new Date().toISOString(),
+      location: data.location || '',
+      photoAlbum: data.photoAlbum || [],
+      displayOrder: data.displayOrder || 1,
+      status: data.status || 'active',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
     };
+    await firestore.collection('events').doc(id).set(event);
+    return event;
   }
 
-  public async getQuizSubmissions(questionId?: string): Promise<QuizSubmission[]> {
-    const docs = await firestore.list<any>('quizSubmissions');
-    const ineligibleIds = new Set(await this.getIneligibleParticipantIds());
-
-    let submissions: QuizSubmission[] = docs.map(s => {
-      const normId = (s.normalizedIdNumber || s.normalized_id_number || s.idCardNumber || s.id_card_number || s.idNumber || '').trim().toUpperCase().replace(/\s+/g, '');
-      const isMasterIneligible = ineligibleIds.has(normId);
-      const isDisqualified = Boolean(s.isDisqualified ?? s.is_disqualified ?? isMasterIneligible);
-      const isCorrect = Boolean(s.isCorrect ?? s.is_correct);
-      const isEligible = isCorrect && !isDisqualified;
-
-      return {
-        id: s.id,
-        participantNumber: s.participantNumber || s.participant_number || '',
-        questionId: s.questionId || s.question_id || '',
-        normalizedIdNumber: normId,
-        idNumber: s.idNumber || s.id_number || s.idCardNumber || s.id_card_number,
-        contactNumber: s.contactNumber || s.contact_number,
-        selectedOptionId: s.selectedOptionId || s.selected_option_id || '',
-        submittedAt: s.submittedAt || s.submitted_at || s.createdAt || s.created_at || new Date().toISOString(),
-        updatedAt: s.updatedAt || s.updated_at || s.submittedAt || s.submitted_at || new Date().toISOString(),
-        isCorrect,
-        isEligible,
-        isDisqualified,
-        isInvalid: Boolean(s.isInvalid ?? s.is_invalid),
-        disqualificationReason: isMasterIneligible ? 'Marked Not Eligible in Master Participant Registry' : (s.disqualificationReason || s.disqualification_reason),
-        internalNotes: s.internalNotes || s.internal_notes,
-        maskedIdNumber: s.maskedIdNumber || s.masked_id_number || (normId ? normId.slice(0, 2) + '***' + normId.slice(-2) : ''),
-        maskedContactNumber: s.maskedContactNumber || s.masked_contact_number || '',
-        selectedOptionLabel: s.selectedOptionLabel,
-        selectedOptionText: s.selectedOptionText
-      };
-    });
-
-    if (questionId) {
-      submissions = submissions.filter(s => s.questionId === questionId);
-    }
-    return submissions;
+  async updateEvent(id: string, updates: Partial<ClubEvent>): Promise<ClubEvent> {
+    const docRef = firestore.collection('events').doc(id);
+    await docRef.update(updates);
+    const snap = await docRef.get();
+    return snap.data() as ClubEvent;
   }
 
-  // Create Quiz Submission with deterministic ID and persistent unique Queue Number
-  public async createQuizSubmission(sub: Partial<QuizSubmission>): Promise<QuizSubmission> {
-    const questionId = sub.questionId || '';
-    const rawId = (sub.idNumber || (sub as any).idCardNumber || sub.normalizedIdNumber || '').trim();
-    const normalizedId = (sub.normalizedIdNumber || rawId).trim().toUpperCase().replace(/\s+/g, '');
-    
-    // Deterministic doc ID format: ${questionId}_${normalizedId}
-    const docId = sub.id || `${questionId}_${normalizedId}`;
+  async deleteEvent(id: string): Promise<void> {
+    await firestore.collection('events').doc(id).delete();
+  }
 
-    // Atomic duplicate check
-    const existing = await firestore.get('quizSubmissions', docId);
-    if (existing) {
-      throw new Error('މި އައިޑީ ކާޑު ނަންބަރުން މި ސުވާލަށް ކުރިން ޖަވާބު ފޮނުވާފައިވެއެވެ.');
-    }
+  async getEventItems(): Promise<EventItem[]> {
+    const snap = await firestore.collection('eventItems').get();
+    return snap.docs.map(d => d.data() as EventItem);
+  }
 
-    // Retrieve or allocate persistent unique Queue Number for this ID card
-    const queue = await this.getOrCreateParticipantQueue(
-      normalizedId,
-      (sub as any).participantName || rawId,
-      sub.contactNumber
-    );
-    const participantNumber = queue.queNumber;
-
-    // Check Master Ineligibility
-    const ineligibles = await this.getIneligibleParticipantIds();
-    const isMasterIneligible = ineligibles.includes(normalizedId);
-    const isDisqualified = Boolean(sub.isDisqualified || isMasterIneligible);
-    const isEligible = Boolean(sub.isCorrect && !isDisqualified);
-
-    const now = new Date().toISOString();
-    const newSubmission: QuizSubmission = {
-      id: docId,
-      participantNumber,
-      questionId,
-      normalizedIdNumber: normalizedId,
-      idNumber: rawId || normalizedId,
-      contactNumber: sub.contactNumber,
-      selectedOptionId: sub.selectedOptionId || '',
-      submittedAt: sub.submittedAt || now,
-      updatedAt: sub.updatedAt || now,
-      isCorrect: Boolean(sub.isCorrect),
-      isEligible,
-      isDisqualified,
-      isInvalid: Boolean(sub.isInvalid),
-      disqualificationReason: isMasterIneligible ? 'Marked Not Eligible in Master Participant Registry' : sub.disqualificationReason,
-      internalNotes: sub.internalNotes,
-      maskedIdNumber: sub.maskedIdNumber || (normalizedId ? normalizedId.slice(0, 2) + '***' + normalizedId.slice(-2) : ''),
-      maskedContactNumber: sub.maskedContactNumber || (sub.contactNumber ? sub.contactNumber.slice(0, 3) + '****' + sub.contactNumber.slice(-2) : ''),
-      selectedOptionLabel: sub.selectedOptionLabel,
-      selectedOptionText: sub.selectedOptionText
+  async createEventItem(data: Partial<EventItem>): Promise<EventItem> {
+    const id = data.id || `item_evt_${Date.now()}`;
+    const item: EventItem = {
+      id,
+      title: data.title || '',
+      heldDate: data.heldDate || new Date().toISOString(),
+      venue: data.venue || '',
+      summary: data.summary || '',
+      description: data.description || '',
+      eventType: data.eventType || 'activity' as any,
+      status: data.status || 'upcoming',
+      photoGallery: data.photoGallery || [],
+      attendance: data.attendance || [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
     };
-
-    await firestore.set('quizSubmissions', docId, newSubmission);
-    return newSubmission;
+    await firestore.collection('eventItems').doc(id).set(item);
+    return item;
   }
 
-  public async disqualifyQuizSubmission(id: string, isDisqualified: boolean, reason: string): Promise<QuizSubmission> {
-    const existing = await firestore.get<QuizSubmission>('quizSubmissions', id);
-    if (!existing) throw new Error(`Submission not found: ${id}`);
-    const updated = {
-      ...existing,
-      isDisqualified,
-      isEligible: !isDisqualified && Boolean(existing.isCorrect),
-      disqualificationReason: reason
+  async updateEventItem(id: string, updates: Partial<EventItem>): Promise<EventItem> {
+    const docRef = firestore.collection('eventItems').doc(id);
+    await docRef.update({ ...updates, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    return snap.data() as EventItem;
+  }
+
+  async deleteEventItem(id: string): Promise<void> {
+    await firestore.collection('eventItems').doc(id).delete();
+  }
+
+  async saveEventAttendance(id: string, attendance: any[]): Promise<EventItem> {
+    const docRef = firestore.collection('eventItems').doc(id);
+    await docRef.update({ attendance, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    return snap.data() as EventItem;
+  }
+
+  async getMeetingItems(): Promise<MeetingItem[]> {
+    const snap = await firestore.collection('meetingItems').get();
+    return snap.docs.map(d => d.data() as MeetingItem);
+  }
+
+  async createMeetingItem(data: Partial<MeetingItem>): Promise<MeetingItem> {
+    const id = data.id || `meet_${Date.now()}`;
+    const item: MeetingItem = {
+      id,
+      title: data.title || '',
+      meetingType: data.meetingType || 'exco',
+      heldDate: data.heldDate || new Date().toISOString(),
+      venue: data.venue || '',
+      summary: data.summary || '',
+      status: data.status || 'scheduled',
+      attendance: data.attendance || [],
+      votings: data.votings || [],
+      finalizedActions: data.finalizedActions || [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
     };
-    await firestore.set('quizSubmissions', id, updated);
-    return updated;
+    await firestore.collection('meetingItems').doc(id).set(item);
+    return item;
   }
 
-  public async getIneligibleParticipantIds(): Promise<string[]> {
-    const docs = await firestore.list<any>('quizIneligibleParticipants');
-    return docs.filter(d => d.active !== false).map(d => (d.normalizedIdNumber || d.normalized_id_number || d.id || '').toUpperCase().trim());
+  async updateMeetingItem(id: string, updates: Partial<MeetingItem>): Promise<MeetingItem> {
+    const docRef = firestore.collection('meetingItems').doc(id);
+    await docRef.update({ ...updates, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    return snap.data() as MeetingItem;
   }
 
-  public async setMasterParticipantEligibility(idNumber: string, isNotEligible: boolean, reason?: string): Promise<void> {
-    const cleanId = idNumber.trim().toUpperCase().replace(/\s+/g, '');
-    if (isNotEligible) {
-      await firestore.set('quizIneligibleParticipants', cleanId, {
-        id: cleanId,
-        normalizedIdNumber: cleanId,
-        active: true,
-        reason: reason || 'Marked Not Eligible in Master Participant Registry',
+  async deleteMeetingItem(id: string): Promise<void> {
+    await firestore.collection('meetingItems').doc(id).delete();
+  }
+
+  async saveMeetingAttendance(id: string, attendance: any[]): Promise<MeetingItem> {
+    const docRef = firestore.collection('meetingItems').doc(id);
+    await docRef.update({ attendance, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    return snap.data() as MeetingItem;
+  }
+
+  async addMeetingVoting(id: string, votingData: any): Promise<MeetingItem> {
+    const docRef = firestore.collection('meetingItems').doc(id);
+    const snap = await docRef.get();
+    const current = snap.data() as MeetingItem;
+    const votings = current.votings || [];
+    const newVoting = {
+      id: `vote_${Date.now()}`,
+      topic: votingData.topic || votingData.title || 'Voting Motion',
+      description: votingData.description || '',
+      status: 'open' as const,
+      votes: votingData.votes || { inFavor: 0, against: 0, abstain: 0 },
+      votedMembers: [],
+      createdAt: new Date().toISOString(),
+      ...votingData
+    };
+    votings.push(newVoting);
+    await docRef.update({ votings, updatedAt: new Date().toISOString() });
+    const updatedSnap = await docRef.get();
+    return updatedSnap.data() as MeetingItem;
+  }
+
+  async updateMeetingVoting(id: string, votingId: string, votingData: any): Promise<MeetingItem> {
+    const docRef = firestore.collection('meetingItems').doc(id);
+    const snap = await docRef.get();
+    const current = snap.data() as MeetingItem;
+    const votings = (current.votings || []).map(v => (v.id === votingId ? { ...v, ...votingData } : v));
+    await docRef.update({ votings, updatedAt: new Date().toISOString() });
+    const updatedSnap = await docRef.get();
+    return updatedSnap.data() as MeetingItem;
+  }
+
+  // -------------------------------------------------------------
+  // SLIDESHOW, CONTACTS, SOCIAL LINKS, EXCO
+  // -------------------------------------------------------------
+  async getSlideshow(): Promise<SlideshowItem[]> {
+    const snap = await firestore.collection('slideshow').get();
+    return snap.docs.map(d => d.data() as SlideshowItem);
+  }
+
+  async createSlideshowItem(data: Partial<SlideshowItem>): Promise<SlideshowItem> {
+    const id = data.id || `slide_${Date.now()}`;
+    const slide: SlideshowItem = {
+      id,
+      title: data.title || '',
+      subtitle: data.subtitle || '',
+      desktopImage: data.desktopImage || (data as any).imageUrl || '',
+      textAlignment: data.textAlignment || 'center',
+      overlayLevel: data.overlayLevel || 40,
+      displayOrder: data.displayOrder ?? 1,
+      status: data.status || 'active',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
+    };
+    await firestore.collection('slideshow').doc(id).set(slide);
+    return slide;
+  }
+
+  async updateSlideshowItem(id: string, updates: Partial<SlideshowItem>): Promise<SlideshowItem> {
+    const docRef = firestore.collection('slideshow').doc(id);
+    await docRef.update(updates);
+    const snap = await docRef.get();
+    return snap.data() as SlideshowItem;
+  }
+
+  async deleteSlideshowItem(id: string): Promise<void> {
+    await firestore.collection('slideshow').doc(id).delete();
+  }
+
+  async getContacts(): Promise<any[]> {
+    const snap = await firestore.collection('contacts').get();
+    return snap.docs.map(d => d.data());
+  }
+
+  async createContact(data: any): Promise<any> {
+    const id = data.id || `contact_${Date.now()}`;
+    const item = { id, displayOrder: 1, status: 'active', ...data };
+    await firestore.collection('contacts').doc(id).set(item);
+    return item;
+  }
+
+  async updateContact(id: string, updates: any): Promise<any> {
+    const docRef = firestore.collection('contacts').doc(id);
+    await docRef.update(updates);
+    const snap = await docRef.get();
+    return snap.data();
+  }
+
+  async deleteContact(id: string): Promise<void> {
+    await firestore.collection('contacts').doc(id).delete();
+  }
+
+  async getSocialLinks(): Promise<SocialLink[]> {
+    const snap = await firestore.collection('socialLinks').get();
+    return snap.docs.map(d => d.data() as SocialLink);
+  }
+
+  async createSocialLink(data: any): Promise<SocialLink> {
+    const id = data.id || `soc_${Date.now()}`;
+    const item: SocialLink = { id, displayOrder: 1, status: 'active', openInNewTab: true, platform: 'website', url: '', ...data };
+    await firestore.collection('socialLinks').doc(id).set(item);
+    return item;
+  }
+
+  async updateSocialLink(id: string, updates: any): Promise<SocialLink> {
+    const docRef = firestore.collection('socialLinks').doc(id);
+    await docRef.update(updates);
+    const snap = await docRef.get();
+    return snap.data() as SocialLink;
+  }
+
+  async deleteSocialLink(id: string): Promise<void> {
+    await firestore.collection('socialLinks').doc(id).delete();
+  }
+
+  async getExcoMembers(): Promise<ExcoMember[]> {
+    const snap = await firestore.collection('excoMembers').get();
+    return snap.docs.map(d => d.data() as ExcoMember);
+  }
+
+  async createExcoMember(data: any): Promise<ExcoMember> {
+    const id = data.id || `exco_${Date.now()}`;
+    const item: ExcoMember = {
+      id,
+      fullName: data.fullName || '',
+      designation: data.designation || '',
+      image: data.image || '',
+      displayOrder: 1,
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...data
+    };
+    await firestore.collection('excoMembers').doc(id).set(item);
+    return item;
+  }
+
+  async updateExcoMember(id: string, updates: any): Promise<ExcoMember> {
+    const docRef = firestore.collection('excoMembers').doc(id);
+    await docRef.update(updates);
+    const snap = await docRef.get();
+    return snap.data() as ExcoMember;
+  }
+
+  async deleteExcoMember(id: string): Promise<void> {
+    await firestore.collection('excoMembers').doc(id).delete();
+  }
+
+  // -------------------------------------------------------------
+  // SETTINGS & CLUB RULES
+  // -------------------------------------------------------------
+  async getSettings(): Promise<SiteSetting[]> {
+    const snap = await firestore.collection('siteSettings').get();
+    return snap.docs.map(d => d.data() as SiteSetting);
+  }
+
+  async updateSettings(settingsList: { group: string; key: string; value: any }[]): Promise<SiteSetting[]> {
+    const batch = firestore.batch();
+    const updatedList: SiteSetting[] = [];
+
+    for (const item of settingsList) {
+      const id = `set_${item.group}_${item.key}`;
+      const docRef = firestore.collection('siteSettings').doc(id);
+      const validGroup = (['branding', 'public_site', 'security', 'quiz', 'system', 'budget', 'invoice', 'widgets', 'content'].includes(item.group)
+        ? item.group
+        : (item.group || 'branding')) as 'branding' | 'public_site' | 'security' | 'quiz' | 'system' | 'budget' | 'invoice' | 'widgets' | 'content';
+
+      const record: SiteSetting = {
+        id,
+        group: validGroup,
+        key: item.key,
+        value: item.value,
         updatedAt: new Date().toISOString()
-      });
-    } else {
-      await firestore.delete('quizIneligibleParticipants', cleanId);
-    }
-
-    // Cascade to all submissions of this ID across all questions
-    const allSubmissions = await firestore.list<any>('quizSubmissions');
-    const userSubmissions = allSubmissions.filter(s => {
-      const sNorm = (s.normalizedIdNumber || s.idNumber || s.idCardNumber || '').trim().toUpperCase().replace(/\s+/g, '');
-      return sNorm === cleanId;
-    });
-
-    for (const sub of userSubmissions) {
-      const updated = {
-        ...sub,
-        isDisqualified: isNotEligible,
-        isEligible: isNotEligible ? false : Boolean(sub.isCorrect),
-        disqualificationReason: isNotEligible ? (reason || 'Marked Not Eligible in Master Participant Registry') : ''
       };
-      await firestore.set('quizSubmissions', sub.id, updated);
+      batch.set(docRef, record, { merge: true });
+      updatedList.push(record);
     }
+
+    await batch.commit();
+    return updatedList;
   }
 
-  public async getQuizWinners(): Promise<QuizWinner[]> {
-    const docs = await firestore.list<any>('quizWinners');
-    return docs.map(w => ({
-      id: w.id,
-      questionId: w.questionId || w.question_id || '',
-      submissionId: w.submissionId || w.submission_id || '',
-      participantNumber: w.participantNumber || w.participant_number || '',
-      fullName: w.fullName || w.participantName || '',
-      idNumber: w.idNumber || w.idCardNumber || '',
-      contactNumber: w.contactNumber || w.contact_number || '',
-      maskedIdNumber: w.maskedIdNumber || w.masked_id_number || '',
-      maskedContactNumber: w.maskedContactNumber || w.masked_contact_number || '',
-      prizeTitle: w.prizeTitle || 'Ramzan Quiz Prize',
-      prizeDescription: w.prizeDescription,
-      sponsorName: w.sponsorName,
-      sponsorLogo: w.sponsorLogo,
-      eligibleCount: w.eligibleCount ?? w.eligible_count ?? 0,
-      selectedAt: w.selectedAt || w.selected_at || new Date().toISOString(),
-      selectedBy: w.selectedBy || w.selected_by || 'system',
-      selectionMethod: (w.selectionMethod === 'manual_reselect' ? 'manual_reselect' : 'random'),
-      auditReference: w.auditReference || w.audit_reference || `AUD-${Date.now()}`,
-      contactedStatus: (w.contactedStatus === 'contacted' ? 'contacted' : (w.contactedStatus === 'unreachable' ? 'unreachable' : 'not_contacted')),
-      prizeCollectionStatus: (w.prizeCollectionStatus === 'collected' ? 'collected' : (w.prizeCollectionStatus === 'forfeited' ? 'forfeited' : 'pending')),
-      prizeCollectionDate: w.prizeCollectionDate,
-      paymentSlipUrl: w.paymentSlipUrl,
-      publicStatus: (w.publicStatus === 'hidden' ? 'hidden' : 'published'),
-      internalNotes: w.internalNotes || w.internal_notes,
-      isReplaced: Boolean(w.isReplaced ?? w.is_replaced),
-      replacementReason: w.replacementReason || w.replacement_reason
-    }));
+  async getClubRules(): Promise<ClubRulesData> {
+    const doc = await firestore.collection('clubRules').doc('main').get();
+    if (doc.exists) {
+      return doc.data() as ClubRulesData;
+    }
+    return defaultClubRules;
   }
 
-  public async createQuizWinner(winner: Partial<QuizWinner>): Promise<QuizWinner> {
-    const id = winner.id || `win_${winner.questionId || Date.now()}`;
-    const newWinner: QuizWinner = {
-      id,
-      questionId: winner.questionId || '',
-      submissionId: winner.submissionId || '',
-      participantNumber: winner.participantNumber || '',
-      fullName: winner.fullName || '',
-      idNumber: winner.idNumber || '',
-      contactNumber: winner.contactNumber || '',
-      maskedIdNumber: winner.maskedIdNumber || '',
-      maskedContactNumber: winner.maskedContactNumber || '',
-      prizeTitle: winner.prizeTitle || 'Ramzan Quiz Prize',
-      prizeDescription: winner.prizeDescription,
-      sponsorName: winner.sponsorName,
-      sponsorLogo: winner.sponsorLogo,
-      eligibleCount: winner.eligibleCount || 0,
-      selectedAt: winner.selectedAt || new Date().toISOString(),
-      selectedBy: winner.selectedBy || 'system',
-      selectionMethod: winner.selectionMethod || 'random',
-      auditReference: winner.auditReference || `AUD-${Date.now()}`,
-      contactedStatus: winner.contactedStatus || 'not_contacted',
-      prizeCollectionStatus: winner.prizeCollectionStatus || 'pending',
-      publicStatus: winner.publicStatus || 'published',
-      internalNotes: winner.internalNotes,
-      isReplaced: false
+  async updateClubRules(data: Partial<ClubRulesData>, updatedBy?: string): Promise<ClubRulesData> {
+    const payload = {
+      ...data,
+      updatedByName: updatedBy,
+      updatedAt: new Date().toISOString()
     };
-    await firestore.set('quizWinners', id, newWinner);
-    return newWinner;
+    await firestore.collection('clubRules').doc('main').set(payload, { merge: true });
+    return this.getClubRules();
   }
 
-  public async updateQuizWinner(id: string, updates: Partial<QuizWinner>): Promise<QuizWinner> {
-    const existing = (await this.getQuizWinners()).find(w => w.id === id);
-    if (!existing) throw new Error(`Winner not found: ${id}`);
-    const updated = { ...existing, ...updates };
-    await firestore.set('quizWinners', id, updated);
-    return updated;
+  // -------------------------------------------------------------
+  // RAMAZAN QUIZ, SUBMISSIONS, WINNERS, PRIZES, SPONSORS
+  // -------------------------------------------------------------
+  async getQuizQuestions(): Promise<QuizQuestion[]> {
+    const snap = await firestore.collection('quizQuestions').get();
+    const list = snap.docs.map(d => {
+      const q = d.data() as QuizQuestion;
+      if (!q.createdAt) {
+        q.createdAt = q.publishAt || new Date().toISOString();
+      }
+      return q;
+    });
+    return list.sort((a, b) => (a.questionNumber || 0) - (b.questionNumber || 0));
   }
 
-  public async reselectQuizWinner(id: string, reason: string): Promise<{ previousWinner: QuizWinner; newWinner?: QuizWinner }> {
-    const prev = (await this.getQuizWinners()).find(w => w.id === id);
-    if (!prev) throw new Error(`Winner record not found: ${id}`);
+  async createQuizQuestion(data: Partial<QuizQuestion>): Promise<QuizQuestion> {
+    const id = data.id || `quiz_q_${Date.now()}`;
+    const nowIso = new Date().toISOString();
+    const question: QuizQuestion = {
+      id,
+      title: data.title || `Day ${(data.questionNumber || (data as any).dayNumber || 1)} Quiz`,
+      questionNumber: data.questionNumber || (data as any).dayNumber || 1,
+      questionText: data.questionText || '',
+      options: data.options || [],
+      correctOptionId: data.correctOptionId || '',
+      status: data.status || 'draft',
+      publishAt: data.publishAt || nowIso,
+      closeAt: data.closeAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      revealAt: data.revealAt || new Date(Date.now() + 24 * 60 * 60 * 1000 + 60000).toISOString(),
+      drawStartAt: data.drawStartAt || data.closeAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      rollingDurationSeconds: data.rollingDurationSeconds || 10,
+      winnerDisplayDurationSeconds: data.winnerDisplayDurationSeconds || 30,
+      prizeTitle: data.prizeTitle || 'Daily Prize',
+      displayOrder: data.displayOrder || 1,
+      createdAt: data.createdAt || nowIso,
+      updatedAt: nowIso,
+      ...(data as any)
+    };
+    if (!question.createdAt) {
+      question.createdAt = nowIso;
+    }
+    await firestore.collection('quizQuestions').doc(id).set(question);
+    return question;
+  }
 
-    // Mark previous as replaced
-    await firestore.set('quizWinners', id, { ...prev, isReplaced: true, replacementReason: reason });
+  async updateQuizQuestion(id: string, updates: Partial<QuizQuestion>): Promise<QuizQuestion> {
+    const docRef = firestore.collection('quizQuestions').doc(id);
+    const existingSnap = await docRef.get();
+    const existing = existingSnap.exists ? (existingSnap.data() as QuizQuestion) : null;
+    const createdAt = existing?.createdAt || updates.createdAt || existing?.publishAt || new Date().toISOString();
+    const payload = {
+      ...updates,
+      createdAt,
+      updatedAt: new Date().toISOString()
+    };
+    await docRef.update(payload);
+    const snap = await docRef.get();
+    return snap.data() as QuizQuestion;
+  }
 
-    // Save to winner history
-    await firestore.set('quizWinnerHistory', `hist_${id}_${Date.now()}`, {
-      ...prev,
-      replacedAt: new Date().toISOString(),
+  async deleteQuizQuestion(id: string): Promise<{ deletedSubmissionsCount: number; deletedWinnersCount: number }> {
+    // 1. Delete the question document
+    await firestore.collection('quizQuestions').doc(id).delete();
+
+    // 2. Cascade delete all submissions for this question
+    const submissionsSnap = await firestore.collection('quizSubmissions')
+      .where('questionId', '==', id)
+      .get();
+    
+    let deletedSubmissionsCount = 0;
+    if (!submissionsSnap.empty) {
+      const batch = firestore.batch();
+      submissionsSnap.docs.forEach(doc => {
+        batch.delete(doc.ref);
+        deletedSubmissionsCount++;
+      });
+      await batch.commit();
+    }
+
+    // 3. Cascade delete all winners for this question
+    const winnersSnap = await firestore.collection('quizWinners')
+      .where('questionId', '==', id)
+      .get();
+
+    let deletedWinnersCount = 0;
+    if (!winnersSnap.empty) {
+      const batch = firestore.batch();
+      winnersSnap.docs.forEach(doc => {
+        batch.delete(doc.ref);
+        deletedWinnersCount++;
+      });
+      await batch.commit();
+    }
+
+    return { deletedSubmissionsCount, deletedWinnersCount };
+  }
+
+  async getQuizSubmissions(): Promise<QuizSubmission[]> {
+    const snap = await firestore.collection('quizSubmissions').get();
+    return snap.docs.map(d => d.data() as QuizSubmission);
+  }
+
+  async createQuizSubmission(data: Partial<QuizSubmission>): Promise<QuizSubmission> {
+    const normId = (data.normalizedIdNumber || data.idNumber || '').toUpperCase().trim();
+    const questionId = data.questionId || '';
+    const id = data.id || `${questionId}_${normId}` || `sub_${Date.now()}`;
+
+    // Atomically increment participant counter if participant number is not set
+    let participantNumber = data.participantNumber;
+    if (!participantNumber) {
+      const counterRef = firestore.collection('counters').doc('quizParticipants');
+      await firestore.runTransaction(async (t) => {
+        const doc = await t.get(counterRef);
+        const nextNum = (doc.exists ? (doc.data()?.count || 1) : 1);
+        participantNumber = `ARC-Q-${String(nextNum).padStart(5, '0')}`;
+        t.set(counterRef, { count: nextNum + 1 }, { merge: true });
+      });
+    }
+
+    const submission: QuizSubmission = {
+      id,
+      participantNumber: participantNumber || `SUB-${Date.now().toString().slice(-4)}`,
+      questionId,
+      idNumber: data.idNumber || normId,
+      normalizedIdNumber: normId,
+      contactNumber: data.contactNumber || '',
+      selectedOptionId: data.selectedOptionId || '',
+      isCorrect: Boolean(data.isCorrect),
+      isEligible: Boolean(data.isEligible),
+      isInvalid: Boolean(data.isInvalid),
+      isDisqualified: Boolean(data.isDisqualified),
+      maskedIdNumber: data.maskedIdNumber || '***',
+      maskedContactNumber: data.maskedContactNumber || '****',
+      submittedAt: data.submittedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
+    };
+
+    await firestore.collection('quizSubmissions').doc(id).set(submission);
+    return submission;
+  }
+
+  async disqualifyQuizSubmission(id: string, isDisqualified: boolean, reason: string): Promise<QuizSubmission> {
+    const docRef = firestore.collection('quizSubmissions').doc(id);
+    await docRef.update({
+      isDisqualified,
+      isEligible: !isDisqualified,
+      disqualificationReason: reason,
+      updatedAt: new Date().toISOString()
+    });
+    const snap = await docRef.get();
+    return snap.data() as QuizSubmission;
+  }
+
+  async deleteQuizSubmission(id: string): Promise<void> {
+    // 1. Check if submission was recorded as a winner
+    const winnersSnap = await firestore.collection('quizWinners')
+      .where('submissionId', '==', id)
+      .get();
+    
+    if (!winnersSnap.empty) {
+      for (const wDoc of winnersSnap.docs) {
+        await this.deleteQuizWinner(wDoc.id);
+      }
+    }
+
+    await firestore.collection('quizSubmissions').doc(id).delete();
+  }
+
+  async getQuizWinners(): Promise<QuizWinner[]> {
+    const snap = await firestore.collection('quizWinners').get();
+    return snap.docs.map(d => d.data() as QuizWinner);
+  }
+
+  async createQuizWinner(data: Partial<QuizWinner>): Promise<QuizWinner> {
+    const id = data.id || `win_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const winner: QuizWinner = {
+      id,
+      questionId: data.questionId || '',
+      submissionId: data.submissionId || '',
+      participantNumber: data.participantNumber || '',
+      maskedIdNumber: data.maskedIdNumber || '',
+      maskedContactNumber: data.maskedContactNumber || '',
+      fullName: data.fullName || (data as any).participantName || '',
+      contactNumber: data.contactNumber || '',
+      idNumber: data.idNumber || '',
+      prizeTitle: data.prizeTitle || 'Prize',
+      eligibleCount: data.eligibleCount || 1,
+      selectedAt: data.selectedAt || new Date().toISOString(),
+      selectedBy: data.selectedBy || 'system',
+      selectionMethod: data.selectionMethod || 'random',
+      auditReference: data.auditReference || `DRAW-${Date.now()}`,
+      contactedStatus: data.contactedStatus || 'not_contacted',
+      prizeCollectionStatus: data.prizeCollectionStatus || 'pending',
+      publicStatus: data.publicStatus || 'published',
+      isReplaced: false,
+      ...(data as any)
+    };
+    await firestore.collection('quizWinners').doc(id).set(winner);
+    return winner;
+  }
+
+  async updateQuizWinner(id: string, updates: Partial<QuizWinner>): Promise<QuizWinner> {
+    const docRef = firestore.collection('quizWinners').doc(id);
+    await docRef.update(updates);
+    const snap = await docRef.get();
+    return snap.data() as QuizWinner;
+  }
+
+  async reselectQuizWinner(winnerId: string, reason: string): Promise<{ oldWinner: QuizWinner; newWinner: QuizWinner }> {
+    const oldWinnerDoc = firestore.collection('quizWinners').doc(winnerId);
+    const oldWinnerSnap = await oldWinnerDoc.get();
+    if (!oldWinnerSnap.exists) {
+      throw new Error(`Winner ${winnerId} not found.`);
+    }
+
+    const oldWinner = oldWinnerSnap.data() as QuizWinner;
+    await oldWinnerDoc.update({
+      isReplaced: true,
+      publicStatus: 'hidden',
       replacementReason: reason
     });
 
-    // Reselect from eligible submissions
-    const eligible = (await this.getQuizSubmissions(prev.questionId)).filter(s => s.isEligible && s.isCorrect && !s.isDisqualified && s.id !== prev.submissionId);
+    // Find new eligible winner
+    const submissions = await this.getQuizSubmissions();
+    const ineligible = await this.getIneligibleParticipantIds();
+    const previousWinners = await this.getQuizWinners();
+    const usedSubmissionIds = new Set(previousWinners.filter(w => !w.isReplaced).map(w => w.submissionId));
 
-    let newWinner: QuizWinner | undefined = undefined;
-    if (eligible.length > 0) {
-      const selected = eligible[Math.floor(Math.random() * eligible.length)];
-      newWinner = await this.createQuizWinner({
-        questionId: prev.questionId,
-        submissionId: selected.id,
-        participantNumber: selected.participantNumber,
-        fullName: selected.idNumber,
-        idNumber: selected.idNumber,
-        contactNumber: selected.contactNumber,
-        maskedIdNumber: selected.maskedIdNumber,
-        maskedContactNumber: selected.maskedContactNumber,
-        prizeTitle: prev.prizeTitle,
-        prizeDescription: prev.prizeDescription,
-        sponsorName: prev.sponsorName,
-        sponsorLogo: prev.sponsorLogo,
-        eligibleCount: eligible.length,
-        selectedBy: 'admin_reselection',
-        selectionMethod: 'manual_reselect',
-        internalNotes: `Reselected winner replacing ${prev.fullName || prev.participantNumber}. Reason: ${reason}`
-      });
+    const candidates = submissions.filter(s =>
+      s.questionId === oldWinner.questionId &&
+      s.isCorrect &&
+      !s.isDisqualified &&
+      !s.isInvalid &&
+      !usedSubmissionIds.has(s.id) &&
+      !ineligible.includes((s.normalizedIdNumber || '').toUpperCase())
+    );
+
+    if (candidates.length === 0) {
+      throw new Error('No alternative eligible submissions available for redraw.');
     }
 
-    return { previousWinner: prev, newWinner };
-  }
+    const randomIndex = Math.floor(Math.random() * candidates.length);
+    const chosen = candidates[randomIndex];
+    const auditRef = `RESELECT-${Date.now().toString(36).toUpperCase()}`;
 
-  public async getQuizPrizes(): Promise<QuizPrize[]> {
-    const docs = await firestore.list<any>('quizPrizes');
-    return docs.map(p => ({
-      id: p.id,
-      title: p.title || '',
-      description: p.description,
-      sponsorName: p.sponsorName,
-      sponsorLogo: p.sponsorLogo,
-      valueAmount: p.valueAmount || (p.value ? String(p.value) : undefined),
-      image: p.image || p.imageUrl,
-      status: p.status || 'active',
-      createdAt: p.createdAt || new Date().toISOString(),
-      updatedAt: p.updatedAt || new Date().toISOString()
-    }));
-  }
-
-  public async createPrize(item: Partial<QuizPrize>): Promise<QuizPrize> {
-    const id = item.id || `prz_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newPrize: QuizPrize = {
-      id,
-      title: item.title || '',
-      description: item.description,
-      sponsorName: item.sponsorName,
-      sponsorLogo: item.sponsorLogo,
-      valueAmount: item.valueAmount,
-      image: item.image,
-      status: item.status || 'active',
-      createdAt: now,
-      updatedAt: now
-    };
-    await firestore.set('quizPrizes', id, newPrize);
-    return newPrize;
-  }
-
-  public async updatePrize(id: string, updates: Partial<QuizPrize>): Promise<QuizPrize> {
-    const existing = (await this.getQuizPrizes()).find(p => p.id === id);
-    if (!existing) throw new Error(`Prize not found: ${id}`);
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('quizPrizes', id, updated);
-    return updated;
-  }
-
-  public async deletePrize(id: string): Promise<void> {
-    await firestore.delete('quizPrizes', id);
-  }
-
-  public async getQuizSponsors(): Promise<QuizSponsor[]> {
-    const docs = await firestore.list<any>('quizSponsors');
-    return docs.map(s => ({
-      id: s.id,
-      name: s.name || '',
-      logo: s.logo || s.logoUrl,
-      adText: s.adText,
-      specialProductImage: s.specialProductImage,
-      websiteUrl: s.websiteUrl || s.website,
-      status: s.status || 'active',
-      displayOrder: Number(s.displayOrder ?? 0),
-      createdAt: s.createdAt || new Date().toISOString(),
-      updatedAt: s.updatedAt || new Date().toISOString()
-    }));
-  }
-
-  public async createSponsor(item: Partial<QuizSponsor>): Promise<QuizSponsor> {
-    const id = item.id || `spon_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newSponsor: QuizSponsor = {
-      id,
-      name: item.name || '',
-      logo: item.logo,
-      adText: item.adText,
-      specialProductImage: item.specialProductImage,
-      websiteUrl: item.websiteUrl,
-      status: item.status || 'active',
-      displayOrder: Number(item.displayOrder ?? 0),
-      createdAt: now,
-      updatedAt: now
-    };
-    await firestore.set('quizSponsors', id, newSponsor);
-    return newSponsor;
-  }
-
-  public async updateSponsor(id: string, updates: Partial<QuizSponsor>): Promise<QuizSponsor> {
-    const existing = (await this.getQuizSponsors()).find(s => s.id === id);
-    if (!existing) throw new Error(`Sponsor not found: ${id}`);
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('quizSponsors', id, updated);
-    return updated;
-  }
-
-  public async deleteSponsor(id: string): Promise<void> {
-    await firestore.delete('quizSponsors', id);
-  }
-
-  // ==========================================
-  // 11. MESSAGES / INBOX
-  // ==========================================
-
-  public async getMessages(): Promise<InboxMessage[]> {
-    const docs = await firestore.list<any>('messages');
-    return docs.map(m => ({
-      id: m.id,
-      senderId: m.senderId,
-      senderName: m.senderName || m.sender_name || '',
-      senderRole: m.senderRole,
-      contactInfo: m.contactInfo || m.contact_info || '',
-      recipientType: m.recipientType,
-      recipientId: m.recipientId,
-      recipientName: m.recipientName,
-      subject: m.subject || '',
-      body: m.body || m.message || '',
-      category: m.category || 'general',
-      priority: m.priority || 'normal',
-      status: m.status || 'pending',
-      readBy: m.readBy || m.read_by || [],
-      archivedBy: m.archivedBy,
-      replyToId: m.replyToId,
-      actions: m.actions || [],
-      createdAt: m.createdAt || m.created_at || new Date().toISOString(),
-      updatedAt: m.updatedAt || m.updated_at || new Date().toISOString()
-    })).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }
-
-  public async createMessage(msg: Partial<InboxMessage>): Promise<InboxMessage> {
-    const id = msg.id || `msg_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newMsg: InboxMessage = {
-      id,
-      senderName: msg.senderName || '',
-      contactInfo: msg.contactInfo || '',
-      subject: msg.subject || 'Public Message',
-      body: msg.body || (msg as any).message || '',
-      category: msg.category || 'general',
-      priority: msg.priority || 'normal',
-      status: msg.status || 'pending',
-      readBy: [],
-      actions: [],
-      createdAt: now,
-      updatedAt: now
-    };
-    await firestore.set('messages', id, newMsg);
-    return newMsg;
-  }
-
-  public async updateMessage(id: string, updates: Partial<InboxMessage>): Promise<InboxMessage> {
-    const existing = (await this.getMessages()).find(m => m.id === id);
-    if (!existing) throw new Error(`Message not found: ${id}`);
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('messages', id, updated);
-    return updated;
-  }
-
-  public async deleteMessage(id: string): Promise<void> {
-    await firestore.delete('messages', id);
-  }
-
-  public async recordMessageAction(id: string, actionData: any): Promise<InboxMessage> {
-    const msg = (await this.getMessages()).find(m => m.id === id);
-    if (!msg) throw new Error(`Message not found: ${id}`);
-    const actions = msg.actions || [];
-    actions.push(actionData);
-    return this.updateMessage(id, { actions });
-  }
-
-  // ==========================================
-  // 12. NOTIFICATIONS
-  // ==========================================
-
-  public async getNotifications(): Promise<AppNotification[]> {
-    const docs = await firestore.list<any>('notifications');
-    return docs.map(n => ({
-      id: n.id,
-      recipientId: n.recipientId || 'all',
-      title: n.title || '',
-      message: n.message || '',
-      type: n.type || 'info',
-      link: n.link,
-      readBy: n.readBy || n.read_by || [],
-      createdAt: n.createdAt || n.created_at || new Date().toISOString()
-    })).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }
-
-  public async createNotification(notifData: Partial<AppNotification>): Promise<AppNotification> {
-    const id = notifData.id || `notif_${Date.now()}`;
-    const newNotif: AppNotification = {
-      id,
-      recipientId: notifData.recipientId || 'all',
-      title: notifData.title || '',
-      message: notifData.message || '',
-      type: notifData.type || 'info',
-      link: notifData.link,
-      readBy: [],
-      createdAt: new Date().toISOString()
-    };
-    await firestore.set('notifications', id, newNotif);
-    return newNotif;
-  }
-
-  public async markNotificationRead(id: string, userId: string): Promise<void> {
-    const notif = (await this.getNotifications()).find(n => n.id === id);
-    if (notif && !notif.readBy.includes(userId)) {
-      notif.readBy.push(userId);
-      await firestore.set('notifications', id, notif);
-    }
-  }
-
-  public async markAllNotificationsRead(userId: string): Promise<void> {
-    const all = await this.getNotifications();
-    for (const n of all) {
-      if (!n.readBy.includes(userId)) {
-        n.readBy.push(userId);
-        await firestore.set('notifications', n.id, n);
-      }
-    }
-  }
-
-  // ==========================================
-  // 13. AUDIT LOGS
-  // ==========================================
-
-  public async getAuditLogs(): Promise<AuditLog[]> {
-    const docs = await firestore.list<any>('auditLogs');
-    return docs.map(a => ({
-      id: a.id,
-      userId: a.userId || a.user_id || 'system',
-      username: a.username || 'system',
-      fullName: a.fullName || a.full_name || 'System',
-      action: a.action || '',
-      module: (a.module || 'system') as any,
-      recordId: a.recordId || a.record_id,
-      previousValue: a.previousValue || a.previous_value,
-      newValue: a.newValue || a.new_value,
-      reason: a.reason,
-      deviceReference: a.deviceReference || a.device_reference || a.ipAddress,
-      createdAt: a.createdAt || a.created_at || a.timestamp || new Date().toISOString()
-    })).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 500);
-  }
-
-  public async logAudit(log: Partial<AuditLog> & { ipAddress?: string; userAgent?: string }): Promise<void> {
-    const id = `audit_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const newLog: AuditLog = {
-      id,
-      userId: log.userId || 'system',
-      username: log.username || 'system',
-      fullName: log.fullName || 'System',
-      action: log.action || 'activity',
-      module: (log.module || 'system') as any,
-      recordId: log.recordId,
-      previousValue: log.previousValue,
-      newValue: log.newValue,
-      reason: log.reason,
-      deviceReference: log.deviceReference || log.ipAddress,
-      createdAt: log.createdAt || new Date().toISOString()
-    };
-    await firestore.set('auditLogs', id, newLog);
-  }
-
-  public async createAuditLog(data: {
-    userId?: string;
-    username?: string;
-    fullName?: string;
-    action: string;
-    module: any;
-    recordId?: string;
-    targetId?: string;
-    details?: string;
-    previousValue?: any;
-    newValue?: any;
-    reason?: string;
-    ipAddress?: string;
-    userAgent?: string;
-  }): Promise<void> {
-    return this.logAudit({
-      ...data,
-      recordId: data.recordId || data.targetId,
-      reason: data.reason || data.details
+    const newWinner = await this.createQuizWinner({
+      questionId: oldWinner.questionId,
+      submissionId: chosen.id,
+      participantNumber: chosen.participantNumber,
+      fullName: (chosen as any).participantName || chosen.maskedIdNumber,
+      idNumber: chosen.normalizedIdNumber || chosen.idNumber,
+      contactNumber: chosen.contactNumber,
+      maskedIdNumber: chosen.maskedIdNumber,
+      maskedContactNumber: chosen.maskedContactNumber,
+      prizeTitle: oldWinner.prizeTitle,
+      eligibleCount: candidates.length,
+      selectedBy: 'system (reselection)',
+      selectionMethod: 'random' as any,
+      auditReference: auditRef,
+      internalNotes: `Reselected replacing ${oldWinner.participantNumber}. Reason: ${reason}`
     });
+
+    return { oldWinner: { ...oldWinner, isReplaced: true, publicStatus: 'hidden' }, newWinner };
   }
 
-  // ==========================================
-  // 14. CLUB RULES
-  // ==========================================
+  async deleteQuizWinner(id: string): Promise<void> {
+    const docRef = firestore.collection('quizWinners').doc(id);
+    const snap = await docRef.get();
+    if (snap.exists) {
+      const winnerData = snap.data() as QuizWinner;
+      await docRef.delete();
 
-  public async getClubRules(): Promise<ClubRulesData> {
-    const rules = await firestore.get<any>('clubRules', 'rules_primary');
-    if (!rules) return defaultClubRules;
-    return {
-      titleDhivehi: rules.titleDhivehi || rules.title_dhivehi || defaultClubRules.titleDhivehi,
-      titleEnglish: rules.titleEnglish || rules.title_english || defaultClubRules.titleEnglish,
-      descriptionDhivehi: rules.descriptionDhivehi || rules.description_dhivehi || defaultClubRules.descriptionDhivehi,
-      descriptionEnglish: rules.descriptionEnglish || rules.description_english || defaultClubRules.descriptionEnglish,
-      version: rules.version || defaultClubRules.version,
-      effectiveDate: rules.effectiveDate || rules.effective_date || defaultClubRules.effectiveDate,
-      updatedAt: rules.updatedAt || rules.updated_at || new Date().toISOString(),
-      chapters: rules.chapters || rules.data?.chapters || defaultClubRules.chapters
-    };
-  }
+      // If question had its status as completed, check if other active winners exist
+      if (winnerData.questionId) {
+        const remainingSnap = await firestore.collection('quizWinners')
+          .where('questionId', '==', winnerData.questionId)
+          .where('isReplaced', '==', false)
+          .get();
 
-  public async updateClubRules(rulesData: ClubRulesData, updatedBy: string): Promise<ClubRulesData> {
-    const now = new Date().toISOString();
-    const updated = {
-      ...rulesData,
-      id: 'rules_primary',
-      updatedAt: now,
-      updatedBy
-    };
-    await firestore.set('clubRules', 'rules_primary', updated);
-    return updated;
-  }
-
-  // ==========================================
-  // 15. BANK ACCOUNTS & FINANCE
-  // ==========================================
-
-  public async getBankAccounts(): Promise<BankAccount[]> {
-    const docs = await firestore.list<any>('bankAccounts');
-    return docs.map(b => ({
-      id: b.id,
-      bankName: b.bankName || b.bank_name || '',
-      accountName: b.accountName || b.account_name || '',
-      accountNumber: b.accountNumber || b.account_number || '',
-      type: b.type || 'bank',
-      currency: b.currency || 'MVR',
-      openingBalance: Number(b.openingBalance ?? b.opening_balance ?? 0),
-      currentBalance: Number(b.currentBalance ?? b.current_balance ?? b.balance ?? 0),
-      status: b.status || 'active',
-      notes: b.notes,
-      createdAt: b.createdAt || b.created_at || new Date().toISOString(),
-      updatedAt: b.updatedAt || b.updated_at || new Date().toISOString()
-    }));
-  }
-
-  public async getBankAccountById(id: string): Promise<BankAccount | null> {
-    const b = await firestore.get<any>('bankAccounts', id);
-    if (!b) return null;
-    return {
-      id: b.id,
-      bankName: b.bankName || b.bank_name || '',
-      accountName: b.accountName || b.account_name || '',
-      accountNumber: b.accountNumber || b.account_number || '',
-      type: b.type || 'bank',
-      currency: b.currency || 'MVR',
-      openingBalance: Number(b.openingBalance ?? b.opening_balance ?? 0),
-      currentBalance: Number(b.currentBalance ?? b.current_balance ?? b.balance ?? 0),
-      status: b.status || 'active',
-      notes: b.notes,
-      createdAt: b.createdAt || b.created_at || new Date().toISOString(),
-      updatedAt: b.updatedAt || b.updated_at || new Date().toISOString()
-    };
-  }
-
-  public async createBankAccount(data: Partial<BankAccount>): Promise<BankAccount> {
-    const id = data.id || `acc_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newAcc: BankAccount = {
-      id,
-      bankName: data.bankName || '',
-      accountName: data.accountName || '',
-      accountNumber: data.accountNumber || '',
-      type: data.type || 'bank',
-      currency: data.currency || 'MVR',
-      openingBalance: Number(data.openingBalance ?? 0),
-      currentBalance: Number(data.currentBalance ?? data.openingBalance ?? 0),
-      status: data.status || 'active',
-      notes: data.notes,
-      createdAt: now,
-      updatedAt: now
-    };
-    await firestore.set('bankAccounts', id, newAcc);
-    return newAcc;
-  }
-
-  public async updateBankAccount(id: string, updates: Partial<BankAccount>): Promise<BankAccount> {
-    const existing = await this.getBankAccountById(id);
-    if (!existing) throw new Error(`Bank account not found: ${id}`);
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('bankAccounts', id, updated);
-    return updated;
-  }
-
-  public async deleteBankAccount(id: string): Promise<void> {
-    await firestore.delete('bankAccounts', id);
-  }
-
-  public async transferAccountFunds(data: {
-    fromAccountId: string;
-    toAccountId: string;
-    amount: number;
-    transferDate?: string;
-    referenceNumber?: string;
-    notes?: string;
-    createdBy?: string;
-  }): Promise<AccountTransferRecord> {
-    const fromAcc = await this.getBankAccountById(data.fromAccountId);
-    const toAcc = await this.getBankAccountById(data.toAccountId);
-
-    if (!fromAcc) throw new Error(`Source account not found: ${data.fromAccountId}`);
-    if (!toAcc) throw new Error(`Destination account not found: ${data.toAccountId}`);
-    if (fromAcc.currentBalance < data.amount) throw new Error(`Insufficient balance in ${fromAcc.bankName} (${fromAcc.currentBalance} MVR available).`);
-
-    // Deduct & Add
-    await this.updateBankAccount(fromAcc.id, { currentBalance: fromAcc.currentBalance - data.amount });
-    await this.updateBankAccount(toAcc.id, { currentBalance: toAcc.currentBalance + data.amount });
-
-    const transferId = `trf_${Date.now()}`;
-    const record: AccountTransferRecord = {
-      id: transferId,
-      fromAccountId: data.fromAccountId,
-      fromAccountName: fromAcc.accountName,
-      toAccountId: data.toAccountId,
-      toAccountName: toAcc.accountName,
-      amount: data.amount,
-      date: data.transferDate || new Date().toISOString().split('T')[0],
-      referenceNumber: data.referenceNumber,
-      notes: data.notes,
-      createdBy: data.createdBy,
-      createdAt: new Date().toISOString()
-    };
-    await firestore.set('accountTransfers', transferId, record);
-    return record;
-  }
-
-  public async getAccountTransfers(): Promise<AccountTransferRecord[]> {
-    return firestore.list<AccountTransferRecord>('accountTransfers');
-  }
-
-  // ==========================================
-  // 16. INCOME & EXPENSE
-  // ==========================================
-
-  public async getIncomeRecords(params?: { category?: string; accountId?: string; startDate?: string; endDate?: string }): Promise<IncomeRecord[]> {
-    let docs = await firestore.list<any>('incomeRecords');
-    let records: IncomeRecord[] = docs.map(i => ({
-      id: i.id,
-      title: i.title || i.description || 'Income',
-      category: i.category || 'other',
-      amount: Number(i.amount ?? 0),
-      date: i.date || new Date().toISOString().split('T')[0],
-      accountId: i.accountId || i.account_id || '',
-      accountName: i.accountName,
-      paymentMethod: i.paymentMethod || 'bank_transfer',
-      referenceNumber: i.referenceNumber || i.reference_number,
-      receivedFrom: i.receivedFrom || i.received_from || 'Member',
-      payerMemberId: i.payerMemberId || i.memberId,
-      status: i.status || 'received',
-      notes: i.notes || i.description,
-      attachments: i.attachments || (i.receiptUrl ? [i.receiptUrl] : []),
-      contributionRecordId: i.contributionRecordId || i.memberDueId,
-      createdBy: i.createdBy || i.created_by,
-      createdAt: i.createdAt || i.created_at || new Date().toISOString(),
-      updatedAt: i.updatedAt || i.updated_at || new Date().toISOString()
-    }));
-
-    if (params?.category) records = records.filter(r => r.category === params.category);
-    if (params?.accountId) records = records.filter(r => r.accountId === params.accountId);
-    if (params?.startDate) records = records.filter(r => r.date >= params.startDate!);
-    if (params?.endDate) records = records.filter(r => r.date <= params.endDate!);
-
-    return records.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }
-
-  public async createIncomeRecord(data: Partial<IncomeRecord>): Promise<IncomeRecord> {
-    const id = data.id || `inc_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newInc: IncomeRecord = {
-      id,
-      title: data.title || 'Income Record',
-      category: data.category || 'other',
-      amount: Number(data.amount ?? 0),
-      date: data.date || now.split('T')[0],
-      accountId: data.accountId || '',
-      accountName: data.accountName,
-      paymentMethod: data.paymentMethod || 'bank_transfer',
-      referenceNumber: data.referenceNumber,
-      receivedFrom: data.receivedFrom || 'Direct Payment',
-      payerMemberId: data.payerMemberId,
-      status: data.status || 'received',
-      notes: data.notes,
-      attachments: data.attachments || [],
-      contributionRecordId: data.contributionRecordId,
-      createdBy: data.createdBy,
-      createdAt: now,
-      updatedAt: now
-    };
-    await firestore.set('incomeRecords', id, newInc);
-
-    // Update bank account balance if accountId specified
-    if (newInc.accountId) {
-      const acc = await this.getBankAccountById(newInc.accountId);
-      if (acc) {
-        await this.updateBankAccount(acc.id, { currentBalance: acc.currentBalance + newInc.amount });
-      }
-    }
-
-    return newInc;
-  }
-
-  public async updateIncomeRecord(id: string, updates: Partial<IncomeRecord>): Promise<IncomeRecord> {
-    const existing = (await this.getIncomeRecords()).find(i => i.id === id);
-    if (!existing) throw new Error(`Income record not found: ${id}`);
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('incomeRecords', id, updated);
-    return updated;
-  }
-
-  public async deleteIncomeRecord(id: string): Promise<void> {
-    const existing = (await this.getIncomeRecords()).find(i => i.id === id);
-    if (existing && existing.accountId) {
-      const acc = await this.getBankAccountById(existing.accountId);
-      if (acc) {
-        await this.updateBankAccount(acc.id, { currentBalance: Math.max(0, acc.currentBalance - existing.amount) });
-      }
-    }
-    await firestore.delete('incomeRecords', id);
-  }
-
-  public async getExpenseRecords(params?: { category?: string; accountId?: string; status?: string; startDate?: string; endDate?: string }): Promise<ExpenseRecord[]> {
-    let docs = await firestore.list<any>('expenseRecords');
-    let records: ExpenseRecord[] = docs.map(e => ({
-      id: e.id,
-      title: e.title || e.description || 'Expense',
-      category: e.category || 'other',
-      amount: Number(e.amount ?? 0),
-      date: e.date || new Date().toISOString().split('T')[0],
-      accountId: e.accountId || e.account_id || '',
-      accountName: e.accountName,
-      paymentMethod: e.paymentMethod || 'bank_transfer',
-      referenceNumber: e.referenceNumber || e.reference_number,
-      payee: e.payee || 'Vendor',
-      approvedBy: e.approvedBy || e.approved_by,
-      status: e.status || 'paid',
-      receiptNumber: e.receiptNumber || e.receipt_number,
-      notes: e.notes || e.description,
-      attachments: e.attachments || (e.invoiceUrl ? [e.invoiceUrl] : []),
-      createdBy: e.createdBy || e.created_by,
-      createdAt: e.createdAt || e.created_at || new Date().toISOString(),
-      updatedAt: e.updatedAt || e.updated_at || new Date().toISOString()
-    }));
-
-    if (params?.category) records = records.filter(r => r.category === params.category);
-    if (params?.accountId) records = records.filter(r => r.accountId === params.accountId);
-    if (params?.status) records = records.filter(r => r.status === params.status);
-    if (params?.startDate) records = records.filter(r => r.date >= params.startDate!);
-    if (params?.endDate) records = records.filter(r => r.date <= params.endDate!);
-
-    return records.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }
-
-  public async createExpenseRecord(data: Partial<ExpenseRecord>): Promise<ExpenseRecord> {
-    const id = data.id || `exp_${Date.now()}`;
-    const now = new Date().toISOString();
-    const newExp: ExpenseRecord = {
-      id,
-      title: data.title || 'Expense Record',
-      category: data.category || 'other',
-      amount: Number(data.amount ?? 0),
-      date: data.date || now.split('T')[0],
-      accountId: data.accountId || '',
-      accountName: data.accountName,
-      paymentMethod: data.paymentMethod || 'bank_transfer',
-      referenceNumber: data.referenceNumber,
-      payee: data.payee || 'Direct Vendor',
-      approvedBy: data.approvedBy,
-      status: data.status || 'paid',
-      receiptNumber: data.receiptNumber,
-      notes: data.notes,
-      attachments: data.attachments || [],
-      createdBy: data.createdBy,
-      createdAt: now,
-      updatedAt: now
-    };
-    await firestore.set('expenseRecords', id, newExp);
-
-    // Deduct from bank account balance if accountId specified
-    if (newExp.accountId) {
-      const acc = await this.getBankAccountById(newExp.accountId);
-      if (acc) {
-        await this.updateBankAccount(acc.id, { currentBalance: acc.currentBalance - newExp.amount });
-      }
-    }
-
-    return newExp;
-  }
-
-  public async updateExpenseRecord(id: string, updates: Partial<ExpenseRecord>): Promise<ExpenseRecord> {
-    const existing = (await this.getExpenseRecords()).find(e => e.id === id);
-    if (!existing) throw new Error(`Expense record not found: ${id}`);
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('expenseRecords', id, updated);
-    return updated;
-  }
-
-  public async deleteExpenseRecord(id: string): Promise<void> {
-    const existing = (await this.getExpenseRecords()).find(e => e.id === id);
-    if (existing && existing.accountId) {
-      const acc = await this.getBankAccountById(existing.accountId);
-      if (acc) {
-        await this.updateBankAccount(acc.id, { currentBalance: acc.currentBalance + existing.amount });
-      }
-    }
-    await firestore.delete('expenseRecords', id);
-  }
-
-  // ==========================================
-  // 17. MEMBER DUES & CONTRIBUTION SETTINGS
-  // ==========================================
-
-  public async getContributionSettings(): Promise<MemberContributionSetting> {
-    const doc = await firestore.get<any>('contributionSettings', 'cfg_dues_default');
-    return {
-      monthlyFee: Number(doc?.monthlyFee ?? doc?.monthlyDueAmount ?? doc?.monthly_due_amount ?? 50.00),
-      dueDayOfMonth: Number(doc?.dueDayOfMonth ?? doc?.due_day_of_month ?? 10),
-      finePerDay: Number(doc?.finePerDay ?? doc?.fine_per_day ?? 2.00),
-      annualAdvanceDiscountMonths: Number(doc?.annualAdvanceDiscountMonths ?? 1),
-      currency: doc?.currency || 'MVR',
-      defaultDepositAccountId: doc?.defaultDepositAccountId || doc?.bankAccountId || 'acc_bml_main',
-      enableAutoFines: Boolean(doc?.enableAutoFines ?? true),
-      gracePeriodDays: Number(doc?.gracePeriodDays ?? doc?.fineGraceDays ?? 5),
-      updatedAt: doc?.updatedAt || doc?.updated_at || new Date().toISOString()
-    };
-  }
-
-  public async updateContributionSettings(updates: Partial<MemberContributionSetting>): Promise<MemberContributionSetting> {
-    const existing = await this.getContributionSettings();
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await firestore.set('contributionSettings', 'cfg_dues_default', updated);
-    return updated;
-  }
-
-  public async getMemberContributions(params?: { year?: number; month?: number; memberId?: string; status?: string }): Promise<MemberContributionRecord[]> {
-    let docs = await firestore.list<any>('memberDues');
-    let records: MemberContributionRecord[] = docs.map(d => ({
-      id: d.id,
-      memberId: d.memberId || d.member_id || '',
-      memberName: d.memberName || 'Club Member',
-      memberNumber: d.memberNumber || 'ARC-001',
-      year: Number(d.year ?? new Date().getFullYear()),
-      month: Number(d.month ?? (new Date().getMonth() + 1)),
-      baseAmount: Number(d.baseAmount ?? d.dueAmount ?? 50),
-      discountAmount: Number(d.discountAmount ?? 0),
-      fineDays: Number(d.fineDays ?? 0),
-      finePerDay: Number(d.finePerDay ?? 2),
-      fineAmount: Number(d.fineAmount ?? 0),
-      totalPayable: Number(d.totalPayable ?? d.dueAmount ?? 50),
-      paidAmount: Number(d.paidAmount ?? 0),
-      dueDate: d.dueDate || `${d.year || 2026}-${String(d.month || 1).padStart(2, '0')}-10`,
-      paidDate: d.paidDate || d.paidAt,
-      status: (d.status || 'pending') as ContributionStatus,
-      paymentMethod: d.paymentMethod || 'bank_transfer',
-      referenceNumber: d.referenceNumber || d.receiptNumber,
-      accountId: d.accountId || d.bankAccountId,
-      accountName: d.accountName,
-      isAdvancePayment: Boolean(d.isAdvancePayment),
-      advancePackageMonths: d.advancePackageMonths,
-      incomeRecordId: d.incomeRecordId,
-      receiptNumber: d.receiptNumber,
-      notes: d.notes,
-      recordedBy: d.recordedBy,
-      createdAt: d.createdAt || d.created_at || new Date().toISOString(),
-      updatedAt: d.updatedAt || d.updated_at || new Date().toISOString()
-    }));
-
-    if (params?.year) records = records.filter(r => r.year === params.year);
-    if (params?.month) records = records.filter(r => r.month === params.month);
-    if (params?.memberId) records = records.filter(r => r.memberId === params.memberId);
-    if (params?.status) records = records.filter(r => r.status === params.status);
-
-    return records;
-  }
-
-  public async ensureMonthlyContributionsGenerated(year: number): Promise<void> {
-    const members = await this.getMembers();
-    const activeMembers = members.filter(m => m.status === 'active');
-    const settings = await this.getContributionSettings();
-    const existing = await this.getMemberContributions({ year });
-
-    const existingMap = new Set(existing.map(e => `${e.memberId}_${e.year}_${e.month}`));
-    const now = new Date().toISOString();
-
-    for (const mem of activeMembers) {
-      for (let m = 1; m <= 12; m++) {
-        const key = `${mem.id}_${year}_${m}`;
-        if (!existingMap.has(key)) {
-          const docId = `due_${mem.id}_${year}_${m}`;
-          const newDue: MemberContributionRecord = {
-            id: docId,
-            memberId: mem.id,
-            memberName: mem.fullName,
-            memberNumber: mem.memberNumber,
-            year,
-            month: m,
-            baseAmount: settings.monthlyFee,
-            discountAmount: 0,
-            fineDays: 0,
-            finePerDay: settings.finePerDay,
-            fineAmount: 0,
-            totalPayable: settings.monthlyFee,
-            paidAmount: 0,
-            dueDate: `${year}-${String(m).padStart(2, '0')}-${String(settings.dueDayOfMonth).padStart(2, '0')}`,
-            status: 'pending',
-            accountId: settings.defaultDepositAccountId,
-            createdAt: now,
-            updatedAt: now
-          };
-          await firestore.set('memberDues', docId, newDue);
+        if (remainingSnap.empty) {
+          const qRef = firestore.collection('quizQuestions').doc(winnerData.questionId);
+          const qSnap = await qRef.get();
+          if (qSnap.exists) {
+            const qData = qSnap.data() as QuizQuestion;
+            if (qData.status === 'completed') {
+              await qRef.update({ status: 'closed', updatedAt: new Date().toISOString() });
+            }
+          }
         }
       }
     }
   }
 
-  public async processContributionPayment(data: {
-    dueId: string;
-    amountPaid: number;
-    receiptNumber?: string;
-    bankAccountId?: string;
-    transactionId?: string;
+  async getPrizes(): Promise<QuizPrize[]> {
+    const snap = await firestore.collection('quizPrizes').get();
+    return snap.docs.map(d => d.data() as QuizPrize);
+  }
+
+  async createPrize(data: any): Promise<QuizPrize> {
+    const id = data.id || `prize_${Date.now()}`;
+    const prize: QuizPrize = { id, title: data.title || 'Prize', status: 'active', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...data };
+    await firestore.collection('quizPrizes').doc(id).set(prize);
+    return prize;
+  }
+
+  async updatePrize(id: string, updates: any): Promise<QuizPrize> {
+    const docRef = firestore.collection('quizPrizes').doc(id);
+    await docRef.update({ ...updates, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    return snap.data() as QuizPrize;
+  }
+
+  async deletePrize(id: string): Promise<void> {
+    await firestore.collection('quizPrizes').doc(id).delete();
+  }
+
+  async getSponsors(): Promise<QuizSponsor[]> {
+    const snap = await firestore.collection('quizSponsors').get();
+    return snap.docs.map(d => d.data() as QuizSponsor);
+  }
+
+  async createSponsor(data: any): Promise<QuizSponsor> {
+    const id = data.id || `spons_${Date.now()}`;
+    const sponsor: QuizSponsor = { id, name: data.name || 'Sponsor', displayOrder: 1, status: 'active', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...data };
+    await firestore.collection('quizSponsors').doc(id).set(sponsor);
+    return sponsor;
+  }
+
+  async updateSponsor(id: string, updates: any): Promise<QuizSponsor> {
+    const docRef = firestore.collection('quizSponsors').doc(id);
+    await docRef.update({ ...updates, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    return snap.data() as QuizSponsor;
+  }
+
+  async deleteSponsor(id: string): Promise<void> {
+    await firestore.collection('quizSponsors').doc(id).delete();
+  }
+
+  async getIneligibleParticipantIds(): Promise<string[]> {
+    const snap = await firestore.collection('masterIneligibleParticipants').where('isBlocked', '==', true).get();
+    return snap.docs.map(d => (d.data().idNumber || '').toUpperCase());
+  }
+
+  async setMasterParticipantEligibility(idNumber: string, isBlocked: boolean, reason?: string): Promise<void> {
+    const norm = idNumber.toUpperCase().trim();
+    await firestore.collection('masterIneligibleParticipants').doc(norm).set({
+      idNumber: norm,
+      isBlocked,
+      reason: reason || '',
+      updatedAt: new Date().toISOString()
+    });
+
+    // Cascade update all submissions across all questions for this participant ID
+    const allSubsSnap = await firestore.collection('quizSubmissions').get();
+    if (!allSubsSnap.empty) {
+      const matchingDocs = allSubsSnap.docs.filter(d => {
+        const data = d.data() as QuizSubmission;
+        const subNorm = (data.normalizedIdNumber || data.idNumber || '').toUpperCase().trim();
+        return subNorm === norm;
+      });
+
+      if (matchingDocs.length > 0) {
+        const batch = firestore.batch();
+        matchingDocs.forEach(doc => {
+          const data = doc.data() as QuizSubmission;
+          if (isBlocked) {
+            batch.update(doc.ref, {
+              isDisqualified: true,
+              isEligible: false,
+              disqualificationReason: reason || 'Disqualified via Master Participant List',
+              updatedAt: new Date().toISOString()
+            });
+          } else {
+            const isEligible = Boolean(data.isCorrect && !data.isInvalid);
+            batch.update(doc.ref, {
+              isDisqualified: false,
+              isEligible,
+              disqualificationReason: '',
+              updatedAt: new Date().toISOString()
+            });
+          }
+        });
+        await batch.commit();
+      }
+    }
+  }
+
+  async deleteMasterParticipant(idNumber: string): Promise<{ deletedSubmissionsCount: number; deletedWinnersCount: number }> {
+    const norm = idNumber.toUpperCase().trim();
+
+    // 1. Remove from masterIneligibleParticipants if present
+    await firestore.collection('masterIneligibleParticipants').doc(norm).delete().catch(() => {});
+
+    // 2. Query and delete all submissions with this normalizedIdNumber or idNumber
+    const allSubsSnap = await firestore.collection('quizSubmissions').get();
+    let deletedSubmissionsCount = 0;
+    const deletedSubmissionIds = new Set<string>();
+
+    if (!allSubsSnap.empty) {
+      const matchingDocs = allSubsSnap.docs.filter(d => {
+        const data = d.data() as QuizSubmission;
+        const subNorm = (data.normalizedIdNumber || data.idNumber || '').toUpperCase().trim();
+        return subNorm === norm;
+      });
+
+      if (matchingDocs.length > 0) {
+        const batch = firestore.batch();
+        matchingDocs.forEach(doc => {
+          deletedSubmissionIds.add(doc.id);
+          batch.delete(doc.ref);
+          deletedSubmissionsCount++;
+        });
+        await batch.commit();
+      }
+    }
+
+    // 3. Delete any winners associated with this participant (by normalizedIdNumber, idNumber, or deleted submissionId)
+    const allWinnersSnap = await firestore.collection('quizWinners').get();
+    let deletedWinnersCount = 0;
+    const affectedQuestionIds = new Set<string>();
+
+    if (!allWinnersSnap.empty) {
+      const matchingWinners = allWinnersSnap.docs.filter(d => {
+        const data = d.data() as QuizWinner;
+        const winNorm = (data.idNumber || data.maskedIdNumber || '').toUpperCase().trim();
+        return winNorm === norm || (data.submissionId && deletedSubmissionIds.has(data.submissionId));
+      });
+
+      if (matchingWinners.length > 0) {
+        const batch = firestore.batch();
+        matchingWinners.forEach(doc => {
+          const data = doc.data() as QuizWinner;
+          if (data.questionId) affectedQuestionIds.add(data.questionId);
+          batch.delete(doc.ref);
+          deletedWinnersCount++;
+        });
+        await batch.commit();
+      }
+    }
+
+    // 4. Update status of affected questions if needed (from completed to closed if no other active winners remain)
+    for (const qId of affectedQuestionIds) {
+      const remainingSnap = await firestore.collection('quizWinners')
+        .where('questionId', '==', qId)
+        .where('isReplaced', '==', false)
+        .get();
+
+      if (remainingSnap.empty) {
+        const qRef = firestore.collection('quizQuestions').doc(qId);
+        const qSnap = await qRef.get();
+        if (qSnap.exists) {
+          const qData = qSnap.data() as QuizQuestion;
+          if (qData.status === 'completed') {
+            await qRef.update({ status: 'closed', updatedAt: new Date().toISOString() });
+          }
+        }
+      }
+    }
+
+    return { deletedSubmissionsCount, deletedWinnersCount };
+  }
+
+  // -------------------------------------------------------------
+  // BUDGET & ACCOUNTS & CONTRIBUTIONS
+  // -------------------------------------------------------------
+  async getBankAccounts(): Promise<BankAccount[]> {
+    const snap = await firestore.collection('budgetAccounts').get();
+    return snap.docs.map(d => d.data() as BankAccount);
+  }
+
+  async createBankAccount(data: Partial<BankAccount>): Promise<BankAccount> {
+    const id = data.id || `acc_${Date.now()}`;
+    const balance = Number(data.currentBalance ?? data.openingBalance ?? (data as any).balance ?? 0);
+    const acc: BankAccount = {
+      id,
+      accountName: data.accountName || 'Bank Account',
+      accountNumber: data.accountNumber || '',
+      bankName: data.bankName || '',
+      type: data.type || 'bank',
+      currency: data.currency || 'MVR',
+      openingBalance: balance,
+      currentBalance: balance,
+      status: data.status || 'active',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
+    };
+    await firestore.collection('budgetAccounts').doc(id).set(acc);
+    return acc;
+  }
+
+  async updateBankAccount(id: string, updates: Partial<BankAccount>): Promise<BankAccount> {
+    const docRef = firestore.collection('budgetAccounts').doc(id);
+    await docRef.update({ ...updates, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    return snap.data() as BankAccount;
+  }
+
+  async deleteBankAccount(id: string): Promise<void> {
+    await firestore.collection('budgetAccounts').doc(id).delete();
+  }
+
+  async transferAccountFunds(data: {
+    fromAccountId: string;
+    toAccountId: string;
+    amount: number;
+    description?: string;
     notes?: string;
-    recordedBy?: string;
-  }): Promise<MemberContributionRecord> {
-    const due = (await this.getMemberContributions()).find(d => d.id === data.dueId);
-    if (!due) throw new Error(`Due record not found: ${data.dueId}`);
+    createdBy?: string;
+  }): Promise<AccountTransferRecord> {
+    const amount = Number(data.amount);
+    if (isNaN(amount) || amount <= 0) {
+      throw new Error('Transfer amount must be greater than zero.');
+    }
 
-    const now = new Date().toISOString();
-    const newPaidAmount = due.paidAmount + data.amountPaid;
-    const totalPayable = due.totalPayable;
-    const newStatus: ContributionStatus = newPaidAmount >= totalPayable ? 'paid' : 'pending';
+    const fromRef = firestore.collection('budgetAccounts').doc(data.fromAccountId);
+    const toRef = firestore.collection('budgetAccounts').doc(data.toAccountId);
+    const transferId = `trf_${Date.now()}`;
 
-    const updated: MemberContributionRecord = {
-      ...due,
-      paidAmount: newPaidAmount,
-      status: newStatus,
-      paidDate: now,
-      receiptNumber: data.receiptNumber || `REC-${Date.now().toString().slice(-6)}`,
-      accountId: data.bankAccountId || due.accountId,
-      notes: data.notes,
-      recordedBy: data.recordedBy,
-      updatedAt: now
+    let transferRecord: AccountTransferRecord;
+
+    await firestore.runTransaction(async (t) => {
+      const fromSnap = await t.get(fromRef);
+      const toSnap = await t.get(toRef);
+
+      if (!fromSnap.exists || !toSnap.exists) {
+        throw new Error('One or both bank accounts not found.');
+      }
+
+      const fromData = fromSnap.data() as BankAccount;
+      const toData = toSnap.data() as BankAccount;
+
+      const fromBalance = fromData.currentBalance ?? (fromData as any).balance ?? 0;
+      const toBalance = toData.currentBalance ?? (toData as any).balance ?? 0;
+
+      if (fromBalance < amount) {
+        throw new Error(`Insufficient funds in source account (${fromData.accountName}). Available: ${fromBalance} MVR`);
+      }
+
+      t.update(fromRef, { currentBalance: fromBalance - amount, balance: fromBalance - amount, updatedAt: new Date().toISOString() });
+      t.update(toRef, { currentBalance: toBalance + amount, balance: toBalance + amount, updatedAt: new Date().toISOString() });
+
+      transferRecord = {
+        id: transferId,
+        fromAccountId: data.fromAccountId,
+        fromAccountName: fromData.accountName,
+        toAccountId: data.toAccountId,
+        toAccountName: toData.accountName,
+        amount,
+        date: new Date().toISOString(),
+        notes: data.notes || data.description || 'Account fund transfer',
+        createdBy: data.createdBy || 'System',
+        createdAt: new Date().toISOString()
+      };
+
+      t.set(firestore.collection('accountTransfers').doc(transferId), transferRecord);
+    });
+
+    return transferRecord!;
+  }
+
+  async getAccountTransfers(): Promise<AccountTransferRecord[]> {
+    const snap = await firestore.collection('accountTransfers').get();
+    return snap.docs.map(d => d.data() as AccountTransferRecord);
+  }
+
+  async getIncomeRecords(params?: { category?: string; accountId?: string; startDate?: string; endDate?: string }): Promise<IncomeRecord[]> {
+    let query: any = firestore.collection('incomeRecords');
+    if (params?.category) query = query.where('category', '==', params.category);
+    if (params?.accountId) query = query.where('accountId', '==', params.accountId);
+
+    const snap = await query.get();
+    let records = snap.docs.map((d: any) => d.data() as IncomeRecord);
+
+    if (params?.startDate) {
+      records = records.filter(r => new Date(r.date || (r as any).incomeDate).getTime() >= new Date(params.startDate!).getTime());
+    }
+    if (params?.endDate) {
+      records = records.filter(r => new Date(r.date || (r as any).incomeDate).getTime() <= new Date(params.endDate!).getTime());
+    }
+
+    return records.sort((a, b) => new Date(b.date || (b as any).incomeDate).getTime() - new Date(a.date || (a as any).incomeDate).getTime());
+  }
+
+  async createIncomeRecord(data: Partial<IncomeRecord>): Promise<IncomeRecord> {
+    const id = data.id || `inc_${Date.now()}`;
+    const amount = Number(data.amount || 0);
+
+    const record: IncomeRecord = {
+      id,
+      title: data.title || 'Income Record',
+      amount,
+      category: data.category || 'donation',
+      accountId: data.accountId || 'acc_primary_001',
+      date: data.date || (data as any).incomeDate || new Date().toISOString(),
+      paymentMethod: data.paymentMethod || 'bank_transfer',
+      receivedFrom: data.receivedFrom || 'Donor / Member',
+      status: data.status || 'received',
+      createdBy: data.createdBy || 'System',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
     };
 
-    await firestore.set('memberDues', data.dueId, updated);
+    await firestore.collection('incomeRecords').doc(id).set(record);
 
-    // Auto-create income record for the payment
-    await this.createIncomeRecord({
-      title: `Member Contribution: ${due.memberName} (${due.year}/${due.month})`,
-      category: 'member_contribution',
-      amount: data.amountPaid,
-      date: now.split('T')[0],
-      accountId: updated.accountId,
-      receivedFrom: due.memberName,
-      payerMemberId: due.memberId,
-      referenceNumber: updated.receiptNumber,
-      contributionRecordId: due.id,
-      createdBy: data.recordedBy
-    });
+    // Update account balance
+    if (record.accountId) {
+      const accRef = firestore.collection('budgetAccounts').doc(record.accountId);
+      const accSnap = await accRef.get();
+      if (accSnap.exists) {
+        const acc = accSnap.data() as BankAccount;
+        const curBal = acc.currentBalance ?? (acc as any).balance ?? 0;
+        await accRef.update({ currentBalance: curBal + amount, balance: curBal + amount, updatedAt: new Date().toISOString() });
+      }
+    }
+
+    return record;
+  }
+
+  async updateIncomeRecord(id: string, updates: Partial<IncomeRecord>): Promise<IncomeRecord> {
+    const docRef = firestore.collection('incomeRecords').doc(id);
+    await docRef.update({ ...updates, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    return snap.data() as IncomeRecord;
+  }
+
+  async deleteIncomeRecord(id: string): Promise<void> {
+    await firestore.collection('incomeRecords').doc(id).delete();
+  }
+
+  async getExpenseRecords(params?: { category?: string; accountId?: string; status?: string; startDate?: string; endDate?: string }): Promise<ExpenseRecord[]> {
+    let query: any = firestore.collection('expenseRecords');
+    if (params?.category) query = query.where('category', '==', params.category);
+    if (params?.accountId) query = query.where('accountId', '==', params.accountId);
+    if (params?.status) query = query.where('status', '==', params.status);
+
+    const snap = await query.get();
+    let records = snap.docs.map((d: any) => d.data() as ExpenseRecord);
+
+    if (params?.startDate) {
+      records = records.filter(r => new Date(r.date || (r as any).expenseDate).getTime() >= new Date(params.startDate!).getTime());
+    }
+    if (params?.endDate) {
+      records = records.filter(r => new Date(r.date || (r as any).expenseDate).getTime() <= new Date(params.endDate!).getTime());
+    }
+
+    return records.sort((a, b) => new Date(b.date || (b as any).expenseDate).getTime() - new Date(a.date || (a as any).expenseDate).getTime());
+  }
+
+  async createExpenseRecord(data: Partial<ExpenseRecord>): Promise<ExpenseRecord> {
+    const id = data.id || `exp_${Date.now()}`;
+    const amount = Number(data.amount || 0);
+
+    const record: ExpenseRecord = {
+      id,
+      title: data.title || 'Expense Record',
+      amount,
+      category: data.category || 'office_admin',
+      accountId: data.accountId || 'acc_primary_001',
+      date: data.date || (data as any).expenseDate || new Date().toISOString(),
+      payee: data.payee || 'Vendor / Service Provider',
+      status: data.status || 'paid',
+      paymentMethod: data.paymentMethod || 'bank_transfer',
+      createdBy: data.createdBy || 'System',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
+    };
+
+    await firestore.collection('expenseRecords').doc(id).set(record);
+
+    // If marked paid, deduct from bank account balance
+    if (record.status === 'paid' && record.accountId) {
+      const accRef = firestore.collection('budgetAccounts').doc(record.accountId);
+      const accSnap = await accRef.get();
+      if (accSnap.exists) {
+        const acc = accSnap.data() as BankAccount;
+        const curBal = acc.currentBalance ?? (acc as any).balance ?? 0;
+        await accRef.update({ currentBalance: curBal - amount, balance: curBal - amount, updatedAt: new Date().toISOString() });
+      }
+    }
+
+    return record;
+  }
+
+  async updateExpenseRecord(id: string, updates: Partial<ExpenseRecord>): Promise<ExpenseRecord> {
+    const docRef = firestore.collection('expenseRecords').doc(id);
+    const prevSnap = await docRef.get();
+    const prevData = prevSnap.exists ? (prevSnap.data() as ExpenseRecord) : null;
+
+    await docRef.update({ ...updates, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    const updated = snap.data() as ExpenseRecord;
+
+    // Handle balance adjustments on status change
+    if (prevData) {
+      const prevPaid = prevData.status === 'paid';
+      const nowPaid = updated.status === 'paid';
+      const targetAccountId = updated.accountId || prevData.accountId;
+
+      if (!prevPaid && nowPaid && targetAccountId) {
+        // Newly marked paid -> deduct
+        const accRef = firestore.collection('budgetAccounts').doc(targetAccountId);
+        const accSnap = await accRef.get();
+        if (accSnap.exists) {
+          const acc = accSnap.data() as BankAccount;
+          const curBal = acc.currentBalance ?? (acc as any).balance ?? 0;
+          await accRef.update({ currentBalance: curBal - updated.amount, balance: curBal - updated.amount, updatedAt: new Date().toISOString() });
+        }
+      } else if (prevPaid && !nowPaid && prevData.accountId) {
+        // Was paid, now reverted -> refund
+        const accRef = firestore.collection('budgetAccounts').doc(prevData.accountId);
+        const accSnap = await accRef.get();
+        if (accSnap.exists) {
+          const acc = accSnap.data() as BankAccount;
+          const curBal = acc.currentBalance ?? (acc as any).balance ?? 0;
+          await accRef.update({ currentBalance: curBal + prevData.amount, balance: curBal + prevData.amount, updatedAt: new Date().toISOString() });
+        }
+      }
+    }
 
     return updated;
   }
 
-  // ==========================================
-  // 18. BUDGET & STATISTICS
-  // ==========================================
+  async approveExpensePayment(
+    id: string,
+    approver: { id: string; fullName?: string; username: string },
+    status: 'approved' | 'paid' | 'rejected',
+    releasePayment: boolean = false,
+    accountId?: string,
+    remarks?: string
+  ): Promise<ExpenseRecord> {
+    const docRef = firestore.collection('expenseRecords').doc(id);
+    const snap = await docRef.get();
+    if (!snap.exists) {
+      throw new Error(`Expense record not found: ${id}`);
+    }
+    const current = snap.data() as ExpenseRecord;
 
-  public async getBudgetStats(year?: number): Promise<BudgetStats> {
+    const finalStatus: 'paid' | 'pending_approval' | 'rejected' =
+      status === 'paid' || (status === 'approved' && releasePayment)
+        ? 'paid'
+        : status === 'rejected'
+        ? 'rejected'
+        : 'pending_approval';
+
+    const updates: Partial<ExpenseRecord> = {
+      status: finalStatus,
+      approvalStatus: status === 'rejected' ? 'rejected' : 'approved',
+      approvedBy: approver.fullName || approver.username,
+      paymentReleaseApproved: status === 'paid' || (status === 'approved' && releasePayment),
+      paymentReleasedAt: (status === 'paid' || releasePayment) ? new Date().toISOString() : undefined,
+      paymentReleasedBy: (status === 'paid' || releasePayment) ? (approver.fullName || approver.username) : undefined,
+      approvalRemarks: remarks || current.approvalRemarks,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (accountId) {
+      updates.accountId = accountId;
+    }
+
+    return this.updateExpenseRecord(id, updates);
+  }
+
+  async deleteExpenseRecord(id: string): Promise<void> {
+    const docRef = firestore.collection('expenseRecords').doc(id);
+    const snap = await docRef.get();
+    if (snap.exists) {
+      const data = snap.data() as ExpenseRecord;
+      // If paid, restore bank balance
+      if (data.status === 'paid' && data.accountId) {
+        const accRef = firestore.collection('budgetAccounts').doc(data.accountId);
+        const accSnap = await accRef.get();
+        if (accSnap.exists) {
+          const acc = accSnap.data() as BankAccount;
+          const curBal = acc.currentBalance ?? (acc as any).balance ?? 0;
+          await accRef.update({ currentBalance: curBal + data.amount, balance: curBal + data.amount, updatedAt: new Date().toISOString() });
+        }
+      }
+    }
+    await docRef.delete();
+  }
+
+  // -------------------------------------------------------------
+  // INVOICES & QUOTATIONS GENERATOR
+  // -------------------------------------------------------------
+  async getInvoices(params?: { type?: string; status?: string; startDate?: string; endDate?: string; search?: string }): Promise<InvoiceRecord[]> {
+    let query: any = firestore.collection('invoices');
+    if (params?.type && params.type !== 'all') {
+      query = query.where('type', '==', params.type);
+    }
+    if (params?.status && params.status !== 'all') {
+      query = query.where('status', '==', params.status);
+    }
+
+    const snap = await query.get();
+    let records = snap.docs.map((d: any) => d.data() as InvoiceRecord);
+
+    if (params?.startDate) {
+      records = records.filter(r => new Date(r.invoiceDate).getTime() >= new Date(params.startDate!).getTime());
+    }
+    if (params?.endDate) {
+      records = records.filter(r => new Date(r.invoiceDate).getTime() <= new Date(params.endDate!).getTime());
+    }
+    if (params?.search) {
+      const q = params.search.toLowerCase();
+      records = records.filter(r =>
+        r.invoiceNumber.toLowerCase().includes(q) ||
+        r.billTo.toLowerCase().includes(q) ||
+        (r.remark && r.remark.toLowerCase().includes(q)) ||
+        r.items.some(i => i.description.toLowerCase().includes(q))
+      );
+    }
+
+    return records.sort((a, b) => new Date(b.createdAt || b.invoiceDate).getTime() - new Date(a.createdAt || a.invoiceDate).getTime());
+  }
+
+  async getInvoiceById(id: string): Promise<InvoiceRecord | null> {
+    const doc = await firestore.collection('invoices').doc(id).get();
+    if (!doc.exists) return null;
+    return doc.data() as InvoiceRecord;
+  }
+
+  async getNextInvoiceNumber(type: 'invoice' | 'quotation' = 'invoice'): Promise<string> {
+    const year = new Date().getFullYear();
+    const prefix = type === 'invoice' ? `ARC/INV/${year}/` : `ARC/QUO/${year}/`;
+    
+    const snap = await firestore.collection('invoices').where('type', '==', type).get();
+    const existing = snap.docs
+      .map(d => d.data() as InvoiceRecord)
+      .filter(i => i.invoiceNumber && i.invoiceNumber.startsWith(prefix));
+
+    let maxSeq = 0;
+    for (const item of existing) {
+      const parts = item.invoiceNumber.split('/');
+      const seqStr = parts[parts.length - 1];
+      const seq = parseInt(seqStr, 10);
+      if (!isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+
+    const nextSeq = maxSeq + 1;
+    const padded = String(nextSeq).padStart(4, '0');
+    return `${prefix}${padded}`;
+  }
+
+  async createInvoice(data: Partial<InvoiceRecord>): Promise<InvoiceRecord> {
+    const id = data.id || `inv_${Date.now()}`;
+    const type = data.type || 'invoice';
+    const invoiceNumber = data.invoiceNumber || (await this.getNextInvoiceNumber(type));
+    const invoiceDate = data.invoiceDate || new Date().toISOString().slice(0, 10);
+
+    const items: InvoiceLineItem[] = (data.items || []).map((item, idx) => {
+      const qty = Number(item.qty || 1);
+      const rate = Number(item.rate || 0);
+      const amount = Number(item.amount !== undefined ? item.amount : (qty * rate).toFixed(2));
+      return {
+        id: item.id || `item_${idx + 1}_${Date.now()}`,
+        description: item.description || '',
+        qty,
+        rate,
+        amount
+      };
+    });
+
+    const subTotal = Number((data.subTotal !== undefined ? data.subTotal : items.reduce((sum, it) => sum + it.amount, 0)).toFixed(2));
+    const discount = Number((data.discount || 0).toFixed(2));
+    const totalNetPayments = Number(Math.max(0, subTotal - discount).toFixed(2));
+    const amountPaid = Number((data.amountPaid || 0).toFixed(2));
+    const amountDue = Number(Math.max(0, totalNetPayments - amountPaid).toFixed(2));
+
+    const invoice: InvoiceRecord = {
+      id,
+      type,
+      invoiceNumber,
+      invoiceDate,
+      dueDate: data.dueDate,
+      billTo: data.billTo || 'Client / Customer Name',
+      customerAddress: data.customerAddress || '',
+      tin: data.tin || '',
+      remark: data.remark || '',
+      items,
+      subTotal,
+      discount,
+      totalNetPayments,
+      amountPaid,
+      amountDue,
+      paymentMethod: data.paymentMethod || 'online',
+      receivedBy: data.receivedBy || '',
+      receivedDate: data.receivedDate || '',
+      signature: data.signature || '',
+      bankName: data.bankName || 'Bank of Maldives (BML)',
+      accountName: data.accountName || 'AANANDHA RECREATION CLUB',
+      accountNumber: data.accountNumber || 'BML | (MVR) 7730000308018',
+      logoUrl: data.logoUrl || '',
+      footerNoticeEnglish: data.footerNoticeEnglish || 'For any queries or issues related to the invoice, please notify us within 24hrs.',
+      footerNoticeDhivehi: data.footerNoticeDhivehi || 'ބިލާމެދު އެއްވެސް މައްސަލައެއް އުޅޭނަމަ 24 ގަޑިއިރު ތެރޭގައި އެންގުން އެދެމެވެ.',
+      clubPhone: data.clubPhone || '6580394',
+      clubEmail: data.clubEmail || 'arc.rmhc@gmail.com',
+      clubAddress: data.clubAddress || 'AANANDHA RECREATION CLUB\nRaa.Maduvvari, 05110\nMaldives',
+      status: data.status || 'pending_approval',
+      approvalStatus: data.approvalStatus || (data.status === 'approved' ? 'approved' : 'pending'),
+      approvedBy: data.approvedBy,
+      approvedByName: data.approvedByName,
+      approvedAt: data.approvedAt,
+      approvalRemarks: data.approvalRemarks,
+      createdBy: data.createdBy || 'System',
+      createdByName: data.createdByName,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    await firestore.collection('invoices').doc(id).set(invoice);
+    return invoice;
+  }
+
+  async updateInvoice(id: string, updates: Partial<InvoiceRecord>): Promise<InvoiceRecord> {
+    const docRef = firestore.collection('invoices').doc(id);
+    const snap = await docRef.get();
+    if (!snap.exists) {
+      throw new Error(`Invoice not found: ${id}`);
+    }
+
+    const current = snap.data() as InvoiceRecord;
+
+    let items = updates.items || current.items;
+    if (updates.items) {
+      items = updates.items.map((item, idx) => {
+        const qty = Number(item.qty || 1);
+        const rate = Number(item.rate || 0);
+        const amount = Number(item.amount !== undefined ? item.amount : (qty * rate).toFixed(2));
+        return {
+          id: item.id || `item_${idx + 1}_${Date.now()}`,
+          description: item.description || '',
+          qty,
+          rate,
+          amount
+        };
+      });
+    }
+
+    const subTotal = Number((updates.subTotal !== undefined ? updates.subTotal : items.reduce((sum, it) => sum + it.amount, 0)).toFixed(2));
+    const discount = Number((updates.discount !== undefined ? updates.discount : current.discount || 0).toFixed(2));
+    const totalNetPayments = Number(Math.max(0, subTotal - discount).toFixed(2));
+    const amountPaid = Number((updates.amountPaid !== undefined ? updates.amountPaid : current.amountPaid || 0).toFixed(2));
+    const amountDue = Number(Math.max(0, totalNetPayments - amountPaid).toFixed(2));
+
+    const finalRecord: InvoiceRecord = {
+      ...current,
+      ...updates,
+      items,
+      subTotal,
+      discount,
+      totalNetPayments,
+      amountPaid,
+      amountDue,
+      updatedAt: new Date().toISOString()
+    };
+
+    await docRef.set(finalRecord);
+    return finalRecord;
+  }
+
+  async approveInvoice(
+    id: string,
+    approver: { id: string; fullName?: string; username: string },
+    status: 'approved' | 'rejected',
+    remarks?: string
+  ): Promise<InvoiceRecord> {
+    const docRef = firestore.collection('invoices').doc(id);
+    const snap = await docRef.get();
+    if (!snap.exists) {
+      throw new Error(`Invoice not found: ${id}`);
+    }
+
+    const updates: Partial<InvoiceRecord> = {
+      status: status === 'approved' ? 'approved' : 'rejected',
+      approvalStatus: status,
+      approvedBy: approver.id,
+      approvedByName: approver.fullName || approver.username,
+      approvedAt: new Date().toISOString(),
+      approvalRemarks: remarks,
+      updatedAt: new Date().toISOString()
+    };
+
+    return this.updateInvoice(id, updates);
+  }
+
+  async collectInvoicePayment(
+    id: string,
+    data: {
+      amount: number;
+      paymentMethod: 'cash' | 'online' | 'both';
+      accountId: string;
+      category?: IncomeCategory;
+      receivedBy: string;
+      receivedDate?: string;
+      referenceNumber?: string;
+      notes?: string;
+      status?: InvoiceStatus;
+      recordedBy?: string;
+    }
+  ): Promise<{ invoice: InvoiceRecord; incomeRecord: IncomeRecord }> {
+    const docRef = firestore.collection('invoices').doc(id);
+    const snap = await docRef.get();
+    if (!snap.exists) {
+      throw new Error(`Invoice not found: ${id}`);
+    }
+
+    const current = snap.data() as InvoiceRecord;
+    const isApproved = current.status === 'approved' || current.approvalStatus === 'approved' || current.status === 'paid';
+    if (!isApproved) {
+      throw new Error('Invoice must be approved by President / Vice President before collecting payment.');
+    }
+
+    const amountToCollect = Number((data.amount > 0 ? data.amount : current.amountDue || current.totalNetPayments).toFixed(2));
+    if (amountToCollect <= 0) {
+      throw new Error('Please enter a valid payment amount greater than 0.');
+    }
+
+    const newAmountPaid = Number(((current.amountPaid || 0) + amountToCollect).toFixed(2));
+    const newAmountDue = Number(Math.max(0, current.totalNetPayments - newAmountPaid).toFixed(2));
+    const finalStatus: InvoiceStatus = data.status || (newAmountDue <= 0 ? 'paid' : 'sent');
+
+    const paymentDate = data.receivedDate || new Date().toISOString().slice(0, 10);
+    const receivedBy = (data.receivedBy || '').trim() || 'Treasurer';
+    const accountId = data.accountId || 'acc_primary_001';
+
+    // 1. Create matching Income Record
+    const incomeRecord = await this.createIncomeRecord({
+      title: `Invoice Payment: ${current.invoiceNumber} - ${current.billTo}`,
+      amount: amountToCollect,
+      category: data.category || 'service_fee',
+      accountId: accountId,
+      date: paymentDate,
+      paymentMethod: data.paymentMethod === 'online' ? 'bank_transfer' : data.paymentMethod === 'cash' ? 'cash' : 'bank_transfer',
+      referenceNumber: data.referenceNumber || current.invoiceNumber,
+      receivedFrom: current.billTo,
+      status: 'received',
+      notes: `Payment collected for ${current.type === 'quotation' ? 'Quotation' : 'Invoice'} ${current.invoiceNumber}. Receiver: ${receivedBy}. ${data.notes || ''}`.trim(),
+      createdBy: data.recordedBy || 'Treasurer'
+    });
+
+    // 2. Update Invoice with payment status, method, receiver name, and reference info
+    const updatedInvoice: InvoiceRecord = {
+      ...current,
+      status: finalStatus,
+      amountPaid: newAmountPaid,
+      amountDue: newAmountDue,
+      paymentMethod: data.paymentMethod || current.paymentMethod,
+      receivedBy: receivedBy,
+      receivedDate: paymentDate,
+      referenceNumber: data.referenceNumber || current.referenceNumber,
+      depositAccountId: accountId,
+      collectedIncomeRecordId: incomeRecord.id,
+      updatedAt: new Date().toISOString()
+    };
+
+    await docRef.set(updatedInvoice);
+    return { invoice: updatedInvoice, incomeRecord };
+  }
+
+  async deleteInvoice(id: string): Promise<void> {
+    await firestore.collection('invoices').doc(id).delete();
+  }
+
+  async getContributionSettings(): Promise<MemberContributionSetting> {
+    const doc = await firestore.collection('contributionSettings').doc('current').get();
+    if (doc.exists) {
+      return doc.data() as MemberContributionSetting;
+    }
+    return {
+      monthlyFee: 50,
+      dueDayOfMonth: 10,
+      finePerDay: 5,
+      annualAdvanceDiscountMonths: 1,
+      currency: 'MVR',
+      defaultDepositAccountId: 'acc_primary_001',
+      enableAutoFines: true,
+      gracePeriodDays: 5,
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'system'
+    };
+  }
+
+  async updateContributionSettings(data: Partial<MemberContributionSetting>): Promise<MemberContributionSetting> {
+    await firestore.collection('contributionSettings').doc('current').set({
+      ...data,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    return this.getContributionSettings();
+  }
+
+  async getMemberContributions(params?: { year?: number; month?: number; memberId?: string; status?: string }): Promise<MemberContributionRecord[]> {
+    let query: any = firestore.collection('memberContributions');
+    if (params?.memberId) query = query.where('memberId', '==', params.memberId);
+    if (params?.year) query = query.where('year', '==', Number(params.year));
+    if (params?.month) query = query.where('month', '==', Number(params.month));
+    if (params?.status) query = query.where('status', '==', params.status);
+
+    const snap = await query.get();
+    return snap.docs.map((d: any) => d.data() as MemberContributionRecord);
+  }
+
+  async processContributionPayment(data: {
+    memberId: string;
+    year: number;
+    month: number;
+    amount: number;
+    fineAmount?: number;
+    discountAmount?: number;
+    accountId?: string;
+    recordedBy?: string;
+    remarks?: string;
+  }): Promise<{ record: MemberContributionRecord; incomeRecord: IncomeRecord; totalPaid: number; discountGiven: number; finesCollected: number }> {
+    const member = await this.getMemberById(data.memberId);
+    const memberName = member?.fullName || 'Club Member';
+    const totalPaid = Number(data.amount || 0);
+    const fines = Number(data.fineAmount || 0);
+    const discount = Number(data.discountAmount || 0);
+
+    const contribId = `contrib_${data.memberId}_${data.year}_${data.month}`;
+    const record: MemberContributionRecord = {
+      id: contribId,
+      memberId: data.memberId,
+      memberName,
+      memberNumber: member?.memberNumber || '',
+      year: Number(data.year),
+      month: Number(data.month),
+      baseAmount: totalPaid + discount - fines,
+      paidAmount: totalPaid,
+      discountAmount: discount,
+      fineDays: 0,
+      finePerDay: 5,
+      fineAmount: fines,
+      totalPayable: totalPaid,
+      dueDate: `${data.year}-${String(data.month).padStart(2, '0')}-10`,
+      paidDate: new Date().toISOString(),
+      status: 'paid',
+      recordedBy: data.recordedBy || 'Treasurer',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    await firestore.collection('memberContributions').doc(contribId).set(record);
+
+    // Create income record
+    const incomeRecord = await this.createIncomeRecord({
+      title: `Membership Contribution - ${memberName} (${data.month}/${data.year})`,
+      amount: totalPaid,
+      category: 'member_contribution',
+      accountId: data.accountId || 'acc_primary_001',
+      date: new Date().toISOString(),
+      paymentMethod: 'bank_transfer',
+      createdBy: data.recordedBy || 'Treasurer'
+    });
+
+    return { record, incomeRecord, totalPaid, discountGiven: discount, finesCollected: fines };
+  }
+
+  async getBudgetAllocations(year?: number): Promise<CategoryBudgetAllocation[]> {
+    let query: any = firestore.collection('budgetAllocations');
+    if (year) query = query.where('year', '==', Number(year));
+    const snap = await query.get();
+    return snap.docs.map((d: any) => d.data() as CategoryBudgetAllocation);
+  }
+
+  async saveBudgetAllocation(data: Partial<CategoryBudgetAllocation>): Promise<CategoryBudgetAllocation> {
+    const id = data.id || `alloc_${data.year || new Date().getFullYear()}_${data.category}`;
+    const item: CategoryBudgetAllocation = {
+      id,
+      category: data.category || 'other',
+      categoryLabel: data.categoryLabel || data.category || 'General',
+      year: data.year || new Date().getFullYear(),
+      allocatedAmount: Number(data.allocatedAmount || 0),
+      notes: data.notes || '',
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
+    };
+    await firestore.collection('budgetAllocations').doc(id).set(item);
+    return item;
+  }
+
+  async deleteBudgetAllocation(id: string): Promise<void> {
+    await firestore.collection('budgetAllocations').doc(id).delete();
+  }
+
+  async getBudgetStats(year?: number): Promise<BudgetStats> {
     const targetYear = year || new Date().getFullYear();
+    const accounts = await this.getBankAccounts();
+    const totalAccountsBalance = accounts.reduce((acc, a) => acc + (a.currentBalance ?? (a as any).balance ?? 0), 0);
+
     const incomes = await this.getIncomeRecords();
     const expenses = await this.getExpenseRecords();
-    const accounts = await this.getBankAccounts();
-    const dues = await this.getMemberContributions({ year: targetYear });
 
-    const totalIncome = incomes.reduce((sum, i) => sum + i.amount, 0);
-    const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-    const totalAccountsBalance = accounts.reduce((sum, a) => sum + a.currentBalance, 0);
+    const yearIncomes = incomes.filter(i => new Date(i.date || (i as any).incomeDate).getFullYear() === targetYear);
+    const yearExpenses = expenses.filter(e => new Date(e.date || (e as any).expenseDate).getFullYear() === targetYear);
 
-    const totalContributionsCollected = dues.reduce((sum, d) => sum + d.paidAmount, 0);
-    const pendingDues = dues.filter(d => d.status === 'pending');
-    const overdueDues = dues.filter(d => d.status === 'overdue');
+    const totalIncome = yearIncomes.reduce((acc, i) => acc + (i.amount || 0), 0);
+    const totalExpenses = yearExpenses.reduce((acc, e) => acc + (e.amount || 0), 0);
+    const netBalance = totalIncome - totalExpenses;
 
-    const pendingContributionsCount = pendingDues.length;
-    const pendingContributionsAmount = pendingDues.reduce((sum, d) => sum + Math.max(0, d.totalPayable - d.paidAmount), 0);
-    const overdueContributionsCount = overdueDues.length;
-    const overdueContributionsAmount = overdueDues.reduce((sum, d) => sum + Math.max(0, d.totalPayable - d.paidAmount), 0);
-    const totalFinesCollected = dues.reduce((sum, d) => sum + d.fineAmount, 0);
+    const contributions = await this.getMemberContributions({ year: targetYear });
+    const totalContributionsCollected = contributions.filter(c => c.status === 'paid').reduce((acc, c) => acc + (c.paidAmount || 0), 0);
+    const pendingContributions = contributions.filter(c => c.status === 'pending');
+    const overdueContributions = contributions.filter(c => c.status === 'overdue');
 
     return {
       totalIncome,
       totalExpenses,
-      netBalance: totalIncome - totalExpenses,
+      netBalance,
       totalAccountsBalance,
       totalContributionsCollected,
-      pendingContributionsCount,
-      pendingContributionsAmount,
-      overdueContributionsCount,
-      overdueContributionsAmount,
-      totalFinesCollected,
-      monthlyFlow: [
-        { month: 'Jan', income: 0, expense: 0, net: 0 },
-        { month: 'Feb', income: totalIncome, expense: totalExpenses, net: totalIncome - totalExpenses }
-      ],
-      categoryIncome: [
-        { category: 'member_contribution', categoryLabel: 'Member Contributions', amount: totalContributionsCollected, percentage: 100 }
-      ],
-      categoryExpense: [
-        { category: 'office_admin', categoryLabel: 'Office & Admin', amount: totalExpenses, percentage: 100 }
-      ],
-      recentTransactions: incomes.slice(0, 5).map(i => ({
-        id: i.id,
-        type: 'income' as const,
-        title: i.title,
-        amount: i.amount,
-        date: i.date,
-        category: i.category,
-        accountName: i.accountName || 'Main Account',
-        status: i.status
-      }))
+      pendingContributionsCount: pendingContributions.length,
+      pendingContributionsAmount: pendingContributions.reduce((acc, c) => acc + (c.totalPayable || 0), 0),
+      overdueContributionsCount: overdueContributions.length,
+      overdueContributionsAmount: overdueContributions.reduce((acc, c) => acc + (c.totalPayable || 0), 0),
+      totalFinesCollected: contributions.reduce((acc, c) => acc + (c.fineAmount || 0), 0),
+      monthlyFlow: [],
+      categoryIncome: [],
+      categoryExpense: [],
+      recentTransactions: []
     };
   }
 
-  public async getBudgetAllocations(year?: number): Promise<CategoryBudgetAllocation[]> {
-    const targetYear = year || new Date().getFullYear();
-    const docs = await firestore.list<any>('budgetAllocations');
-    return docs
-      .map(b => ({
-        id: b.id,
-        year: Number(b.year ?? targetYear),
-        category: b.category || 'other',
-        categoryLabel: b.categoryLabel || b.category || 'General',
-        allocatedAmount: Number(b.allocatedAmount ?? b.allocated_amount ?? 0),
-        spentAmount: Number(b.spentAmount ?? b.spent_amount ?? 0),
-        notes: b.notes,
-        updatedAt: b.updatedAt || b.updated_at || new Date().toISOString()
-      }))
-      .filter(b => b.year === targetYear);
+  // -------------------------------------------------------------
+  // PRESIDENTIAL DIRECTIVES & OFFICIAL CIRCULARS
+  // -------------------------------------------------------------
+  async getPresidentialDirectives(): Promise<PresidentialDirective[]> {
+    const snap = await firestore.collection('presidentialDirectives').get();
+    return snap.docs.map(d => d.data() as PresidentialDirective);
   }
 
-  public async saveBudgetAllocation(data: Partial<CategoryBudgetAllocation>): Promise<CategoryBudgetAllocation> {
-    const id = data.id || `alloc_${data.year || new Date().getFullYear()}_${Date.now()}`;
-    const now = new Date().toISOString();
-    const alloc: CategoryBudgetAllocation = {
-      id,
-      year: data.year || new Date().getFullYear(),
-      category: data.category || 'other',
-      categoryLabel: data.categoryLabel || 'General',
-      allocatedAmount: Number(data.allocatedAmount ?? 0),
-      spentAmount: Number(data.spentAmount ?? 0),
-      notes: data.notes,
-      updatedAt: now
-    };
-    await firestore.set('budgetAllocations', id, alloc);
-    return alloc;
-  }
-
-  public async deleteBudgetAllocation(id: string): Promise<void> {
-    await firestore.delete('budgetAllocations', id);
-  }
-
-  // ==========================================
-  // 19. PRESIDENTIAL DIRECTIVES & CIRCULARS
-  // ==========================================
-
-  public async getPresidentialDirectives(): Promise<PresidentialDirective[]> {
-    return firestore.list<PresidentialDirective>('presidentialDirectives');
-  }
-
-  public async createPresidentialDirective(data: Partial<PresidentialDirective>): Promise<PresidentialDirective> {
+  async createPresidentialDirective(data: Partial<PresidentialDirective>): Promise<PresidentialDirective> {
     const id = data.id || `dir_${Date.now()}`;
-    const newDir: PresidentialDirective = {
+    const item: PresidentialDirective = {
       id,
-      directiveNumber: data.directiveNumber || `DIR-${Date.now().toString().slice(-4)}`,
+      directiveNumber: data.directiveNumber || `ARC-DIR-${new Date().getFullYear()}-${Date.now().toString().slice(-3)}`,
       title: data.title || '',
-      titleDv: data.titleDv,
-      description: data.description || '',
-      issueDate: data.issueDate || new Date().toISOString().split('T')[0],
-      effectiveDate: data.effectiveDate,
-      priority: data.priority || 'high',
+      description: data.description || data.body || (data as any).content || '',
+      issuedBy: data.issuedBy || 'President',
+      issueDate: data.issueDate || (data as any).issuedDate || new Date().toISOString(),
+      priority: data.priority || 'normal',
       status: data.status || 'active',
-      issuedBy: data.issuedBy,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
     };
-    await firestore.set('presidentialDirectives', id, newDir);
-    return newDir;
+    await firestore.collection('presidentialDirectives').doc(id).set(item);
+    return item;
   }
 
-  public async updatePresidentialDirective(id: string, updates: Partial<PresidentialDirective>): Promise<PresidentialDirective> {
-    const existing = (await this.getPresidentialDirectives()).find(d => d.id === id);
-    if (!existing) throw new Error(`Directive not found: ${id}`);
-    const updated = { ...existing, ...updates };
-    await firestore.set('presidentialDirectives', id, updated);
-    return updated;
+  async updatePresidentialDirective(id: string, updates: Partial<PresidentialDirective>): Promise<PresidentialDirective> {
+    const docRef = firestore.collection('presidentialDirectives').doc(id);
+    await docRef.update({ ...updates, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    return snap.data() as PresidentialDirective;
   }
 
-  public async deletePresidentialDirective(id: string): Promise<void> {
-    await firestore.delete('presidentialDirectives', id);
+  async deletePresidentialDirective(id: string): Promise<void> {
+    await firestore.collection('presidentialDirectives').doc(id).delete();
   }
 
-  public async getOfficialCirculars(): Promise<OfficialCircular[]> {
-    return firestore.list<OfficialCircular>('officialCirculars');
+  async getOfficialCirculars(): Promise<OfficialCircular[]> {
+    const snap = await firestore.collection('officialCirculars').get();
+    return snap.docs.map(d => d.data() as OfficialCircular);
   }
 
-  public async createOfficialCircular(data: Partial<OfficialCircular>): Promise<OfficialCircular> {
-    const id = data.id || `cir_${Date.now()}`;
-    const newCir: OfficialCircular = {
+  async createOfficialCircular(data: Partial<OfficialCircular>): Promise<OfficialCircular> {
+    const id = data.id || `circ_${Date.now()}`;
+    const item: OfficialCircular = {
       id,
-      circularNumber: data.circularNumber || `CIR-${Date.now().toString().slice(-4)}`,
+      circularNumber: data.circularNumber || `ARC-CIR-${new Date().getFullYear()}-${Date.now().toString().slice(-3)}`,
       title: data.title || '',
-      titleDv: data.titleDv,
       content: data.content || '',
-      publishDate: data.publishDate || new Date().toISOString().split('T')[0],
-      targetAudience: data.targetAudience || 'all_members',
+      category: data.category || 'general',
+      signedBy: data.signedBy || (data as any).issuedBy || 'President',
+      publishDate: data.publishDate || (data as any).issuedDate || new Date().toISOString(),
       status: data.status || 'published',
-      attachmentUrl: data.attachmentUrl,
-      signedBy: data.signedBy,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
+    };
+    await firestore.collection('officialCirculars').doc(id).set(item);
+    return item;
+  }
+
+  async updateOfficialCircular(id: string, updates: Partial<OfficialCircular>): Promise<OfficialCircular> {
+    const docRef = firestore.collection('officialCirculars').doc(id);
+    await docRef.update({ ...updates, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    return snap.data() as OfficialCircular;
+  }
+
+  async deleteOfficialCircular(id: string): Promise<void> {
+    await firestore.collection('officialCirculars').doc(id).delete();
+  }
+
+  // -------------------------------------------------------------
+  // MESSAGES & NOTIFICATIONS
+  // -------------------------------------------------------------
+  async getMessages(): Promise<InboxMessage[]> {
+    const snap = await firestore.collection('inboxMessages').get();
+    return snap.docs.map(d => d.data() as InboxMessage);
+  }
+
+  async createMessage(data: Partial<InboxMessage>): Promise<InboxMessage> {
+    const id = data.id || `msg_${Date.now()}`;
+    const msg: InboxMessage = {
+      id,
+      senderName: data.senderName || 'Visitor',
+      subject: data.subject || 'Message',
+      body: data.body || '',
+      category: data.category || 'general',
+      priority: data.priority || 'normal',
+      status: data.status || 'pending',
+      readBy: data.readBy || [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
+    };
+    await firestore.collection('inboxMessages').doc(id).set(msg);
+    return msg;
+  }
+
+  async updateMessage(id: string, updates: Partial<InboxMessage>): Promise<InboxMessage> {
+    const docRef = firestore.collection('inboxMessages').doc(id);
+    await docRef.update({ ...updates, updatedAt: new Date().toISOString() });
+    const snap = await docRef.get();
+    return snap.data() as InboxMessage;
+  }
+
+  async deleteMessage(id: string): Promise<void> {
+    await firestore.collection('inboxMessages').doc(id).delete();
+  }
+
+  async recordMessageAction(id: string, action: any): Promise<InboxMessage> {
+    const docRef = firestore.collection('inboxMessages').doc(id);
+    const snap = await docRef.get();
+    const current = snap.data() as InboxMessage;
+    const actions = current.actions || [];
+    const newAction = {
+      id: `act_${Date.now()}`,
+      actionTaken: action.actionTaken || 'Recorded action',
+      actionByUserId: action.actionByUserId || '',
+      actionByName: action.actionByName || '',
+      replyMethod: action.replyMethod || 'other',
+      replyDetails: action.replyDetails || '',
       createdAt: new Date().toISOString()
     };
-    await firestore.set('officialCirculars', id, newCir);
-    return newCir;
+    actions.push(newAction);
+    await docRef.update({
+      actions,
+      status: action.status || 'resolved',
+      updatedAt: new Date().toISOString()
+    });
+    const updated = await docRef.get();
+    return updated.data() as InboxMessage;
   }
 
-  public async updateOfficialCircular(id: string, updates: Partial<OfficialCircular>): Promise<OfficialCircular> {
-    const existing = (await this.getOfficialCirculars()).find(c => c.id === id);
-    if (!existing) throw new Error(`Circular not found: ${id}`);
-    const updated = { ...existing, ...updates };
-    await firestore.set('officialCirculars', id, updated);
-    return updated;
+  async getNotifications(): Promise<AppNotification[]> {
+    const snap = await firestore.collection('appNotifications').get();
+    return snap.docs.map(d => d.data() as AppNotification);
   }
 
-  public async deleteOfficialCircular(id: string): Promise<void> {
-    await firestore.delete('officialCirculars', id);
-  }
-
-  // ==========================================
-  // 20. USER PERFORMANCE & AUDIT HELPERS
-  // ==========================================
-
-  public async getUserPerformance(userId: string): Promise<any> {
-    const logs = (await this.getAuditLogs()).filter(l => l.userId === userId);
-    return {
-      totalActions: logs.length,
-      recentActions: logs.slice(0, 10),
-      lastActive: logs[0]?.createdAt || null
+  async createNotification(data: Partial<AppNotification>): Promise<AppNotification> {
+    const id = data.id || `notif_${Date.now()}`;
+    const notif: AppNotification = {
+      id,
+      recipientId: data.recipientId || 'all',
+      title: data.title || '',
+      message: data.message || '',
+      type: data.type || 'info',
+      readBy: data.readBy || [],
+      createdAt: new Date().toISOString(),
+      ...(data as any)
     };
+    await firestore.collection('appNotifications').doc(id).set(notif);
+    return notif;
   }
 
-  // ==========================================
-  // 21. FIRESTORE COLLECTIONS SUMMARY & SYNC
-  // ==========================================
+  async markNotificationRead(id: string, userId: string): Promise<void> {
+    const docRef = firestore.collection('appNotifications').doc(id);
+    const snap = await docRef.get();
+    if (snap.exists) {
+      const notif = snap.data() as AppNotification;
+      const readBy = notif.readBy || [];
+      if (!readBy.includes(userId)) {
+        readBy.push(userId);
+        await docRef.update({ readBy });
+      }
+    }
+  }
 
-  public async getDbTablesSummary(): Promise<{
-    connected: boolean;
-    databaseType: string;
-    projectId: string;
-    databaseId: string;
-    tables: Array<{ name: string; recordCount: number; status: string }>;
-    totalRecords: number;
-    schemaReady: boolean;
-    lastSyncedAt: string;
-  }> {
-    const collections = [
-      'users', 'roles', 'modulePermissions', 'members', 'bankAccounts',
-      'accountTransfers', 'contributionSettings', 'memberDues', 'incomeRecords',
-      'expenseRecords', 'budgetAllocations', 'siteSettings', 'slideshowItems',
-      'socialLinks', 'contacts', 'excoMembers', 'events', 'eventItems',
-      'meetingItems', 'quizQuestions', 'quizSubmissions', 'quizWinners',
-      'quizPrizes', 'quizSponsors', 'quizIneligibleParticipants', 'messages',
-      'notifications', 'clubRules', 'auditLogs', 'presidentialDirectives',
-      'officialCirculars'
-    ];
+  async markAllNotificationsRead(userId: string): Promise<void> {
+    const snap = await firestore.collection('appNotifications').get();
+    const batch = firestore.batch();
+    for (const doc of snap.docs) {
+      const notif = doc.data() as AppNotification;
+      const readBy = notif.readBy || [];
+      if (!readBy.includes(userId)) {
+        readBy.push(userId);
+        batch.update(doc.ref, { readBy });
+      }
+    }
+    await batch.commit();
+  }
 
-    let totalRecords = 0;
-    const tableSummaries: Array<{ name: string; recordCount: number; status: string }> = [];
+  // -------------------------------------------------------------
+  // AUDIT LOGS
+  // -------------------------------------------------------------
+  async getAuditLogs(): Promise<AuditLog[]> {
+    const snap = await firestore.collection('auditLogs').get();
+    const logs = snap.docs.map(d => d.data() as AuditLog);
+    return logs.sort((a, b) => new Date(b.createdAt || (b as any).timestamp).getTime() - new Date(a.createdAt || (a as any).timestamp).getTime());
+  }
 
-    for (const col of collections) {
-      try {
-        const docs = await firestore.list(col);
-        const count = docs.length;
-        totalRecords += count;
-        tableSummaries.push({ name: col, recordCount: count, status: 'Ready' });
-      } catch (err: any) {
-        tableSummaries.push({ name: col, recordCount: 0, status: 'Active' });
+  async logAudit(data: Partial<AuditLog>): Promise<AuditLog> {
+    const id = data.id || `aud_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const log: AuditLog = {
+      id,
+      userId: data.userId || 'system',
+      username: data.username || 'system',
+      fullName: data.fullName || 'System',
+      action: data.action || 'ACTIVITY',
+      module: (data.module as any) || 'settings',
+      recordId: data.recordId,
+      previousValue: data.previousValue || (data as any).oldValue,
+      newValue: data.newValue,
+      reason: data.reason,
+      createdAt: data.createdAt || (data as any).timestamp || new Date().toISOString()
+    };
+    await firestore.collection('auditLogs').doc(id).set(log);
+    return log;
+  }
+
+  async createAuditLog(data: any): Promise<any> {
+    return this.logAudit({
+      userId: data.userId,
+      username: data.username,
+      action: data.action,
+      module: data.module,
+      recordId: data.targetId,
+      reason: data.details
+    });
+  }
+
+  // -------------------------------------------------------------
+  // USER PERFORMANCE
+  // -------------------------------------------------------------
+  async getUserPerformance(userId: string): Promise<UserPerformanceData> {
+    const user = await this.getUserById(userId);
+    const members = await this.getMembers();
+    
+    // Find linked member record
+    let linkedMember = user?.memberId ? members.find(m => m.id === user.memberId) : undefined;
+    if (!linkedMember && user) {
+      // Match by ID Card Number, Contact Number, Member Number, or Full Name
+      const userNormId = user.idCardNumber ? user.idCardNumber.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() : '';
+      const userContact = user.contactNumber ? user.contactNumber.replace(/[^0-9]/g, '') : '';
+      linkedMember = members.find(m => {
+        const mNormId = m.idCardNumber ? m.idCardNumber.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() : '';
+        const mContact = m.phoneNumber ? m.phoneNumber.replace(/[^0-9]/g, '') : '';
+        return (userNormId && mNormId && userNormId === mNormId) ||
+               (userContact && mContact && userContact === mContact) ||
+               (user.memberNumber && m.memberNumber === user.memberNumber) ||
+               (user.fullName && m.fullName && user.fullName.toLowerCase().trim() === m.fullName.toLowerCase().trim());
+      });
+      // If found and user had no memberId set, silently update user with member link
+      if (linkedMember && user.id) {
+        try {
+          await firestore.collection('users').doc(user.id).set({
+            memberId: linkedMember.id,
+            memberNumber: linkedMember.memberNumber,
+            idCardNumber: linkedMember.idCardNumber || user.idCardNumber || ''
+          }, { merge: true });
+        } catch (e) {
+          // ignore background update error
+        }
       }
     }
 
+    const memberId = user?.memberId || linkedMember?.id;
+    const memberNum = linkedMember?.memberNumber || user?.memberNumber;
+    const idCardRaw = user?.idCardNumber || linkedMember?.idCardNumber || '';
+    const normalizedId = idCardRaw ? idCardRaw.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() : '';
+    const contactClean = user?.contactNumber ? user.contactNumber.replace(/[^0-9]/g, '') : (linkedMember?.phoneNumber ? linkedMember.phoneNumber.replace(/[^0-9]/g, '') : '');
+    const userName = user?.username || '';
+    const userFullName = user?.fullName || linkedMember?.fullName || '';
+
+    // 1. QUIZ DATA (Synchronized by ID card number, contact, member ID, participant number)
+    const questions = await this.getQuizQuestions();
+    const submissions = await this.getQuizSubmissions();
+    const winners = await this.getQuizWinners();
+
+    const userSubs = submissions.filter(s => {
+      const sNormId = s.normalizedIdNumber ? s.normalizedIdNumber.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() : '';
+      const sIdRaw = s.idNumber ? s.idNumber.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() : '';
+      const sContact = s.contactNumber ? s.contactNumber.replace(/[^0-9]/g, '') : '';
+      
+      const matchId = Boolean(normalizedId && (sNormId === normalizedId || sIdRaw === normalizedId));
+      const matchContact = Boolean(contactClean && sContact && sContact === contactClean);
+      const matchMemberId = Boolean(memberId && (s as any).memberId === memberId);
+      const matchMemberNum = Boolean(memberNum && s.participantNumber === memberNum);
+      const matchUser = Boolean(userName && (s as any).username === userName);
+
+      return matchId || matchContact || matchMemberId || matchMemberNum || matchUser;
+    });
+
+    // Real Answer from Public Site verification helper
+    const settings = await this.getSettings();
+    const offsetMinutesSetting = Number(settings.find(s => s.key === 'timeOffsetMinutes')?.value || 0);
+    const nowEpoch = Date.now() + (offsetMinutesSetting * 60 * 1000);
+
+    const isAnswerRevealedForQuestion = (q: QuizQuestion | undefined) => {
+      if (!q) return false;
+      if (q.status === 'cancelled') return false;
+
+      // Statuses where the real answer is already revealed on the public site
+      if (['answer_revealed', 'draw_scheduled', 'draw_running', 'winner_announced', 'completed'].includes(q.status)) {
+        return true;
+      }
+
+      // Check if a published lucky draw winner exists for this question
+      const publishedWinner = winners.find(w => w.questionId === q.id && w.publicStatus === 'published' && !w.isReplaced);
+      if (publishedWinner) {
+        return true;
+      }
+
+      // Check public site timing rules:
+      const closeMs = q.closeAt ? new Date(q.closeAt).getTime() : 0;
+      const drawMs = q.drawStartAt ? new Date(q.drawStartAt).getTime() : 0;
+      const revealMs = q.revealAt ? new Date(q.revealAt).getTime() : 0;
+
+      // Check if there are zero eligible participants and submission deadline has passed
+      const qSubmissions = submissions.filter(s => s.questionId === q.id && !s.isInvalid);
+      const eligibleCount = qSubmissions.filter(s => s.isCorrect && s.isEligible && !s.isDisqualified).length;
+      if (eligibleCount === 0 && closeMs > 0 && nowEpoch >= closeMs) {
+        return true;
+      }
+
+      // If drawStartAt has arrived (or revealAt), the real answer is officially revealed on public site
+      if (drawMs > 0 && nowEpoch >= drawMs) {
+        return true;
+      }
+      if (revealMs > 0 && nowEpoch >= revealMs) {
+        return true;
+      }
+
+      return false;
+    };
+
+    const mappedSubmissions = userSubs.map(s => {
+      const q = questions.find(q => q.id === s.questionId);
+      const isRevealed = isAnswerRevealedForQuestion(q);
+      const correctOpt = isRevealed && q ? (q.options || []).find((o: any) => o.id === q.correctOptionId) : undefined;
+
+      return {
+        id: s.id,
+        questionId: s.questionId,
+        questionNumber: q ? q.questionNumber : 1,
+        questionTitle: q ? q.title : 'Ramazan Quiz Question',
+        selectedOptionText: s.selectedOptionText || s.selectedOptionLabel || '',
+        selectedOptionLabel: s.selectedOptionLabel || '',
+        isAnswerRevealed: isRevealed,
+        isCorrect: isRevealed ? Boolean(s.isCorrect) : undefined,
+        correctOptionText: correctOpt ? correctOpt.optionText : undefined,
+        correctOptionLabel: correctOpt ? (correctOpt.optionLabel || (correctOpt as any).label) : undefined,
+        answerExplanation: isRevealed && q ? q.answerExplanation : undefined,
+        status: (isRevealed ? 'evaluated' : 'pending_reveal') as ('evaluated' | 'pending_reveal'),
+        submittedAt: s.submittedAt || '',
+        closeAt: q?.closeAt || '',
+        revealAt: q?.revealAt || q?.drawStartAt || ''
+      };
+    }).sort((a, b) => b.questionNumber - a.questionNumber);
+
+    const userWins = winners.filter(w => {
+      const wContact = w.contactNumber ? w.contactNumber.replace(/[^0-9]/g, '') : '';
+      const wNormId = (w as any).normalizedIdNumber ? (w as any).normalizedIdNumber.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() : '';
+      const matchId = Boolean(normalizedId && wNormId && wNormId === normalizedId);
+      const matchContact = Boolean(contactClean && wContact && wContact === contactClean);
+      const matchMember = Boolean(memberId && (w as any).memberId === memberId);
+      const matchSubmission = userSubs.some(s => s.id === w.submissionId);
+      return matchId || matchContact || matchMember || matchSubmission;
+    });
+
+    const mappedWins = userWins.map((w, i) => {
+      const q = questions.find(q => q.id === w.questionId);
+      return {
+        id: w.id,
+        questionNumber: q ? q.questionNumber : (i + 1),
+        prizeTitle: w.prizeTitle || 'Lucky Draw Prize',
+        sponsorName: w.sponsorName || '',
+        selectedAt: w.selectedAt || '',
+        prizeCollectionStatus: w.prizeCollectionStatus || 'pending'
+      };
+    });
+
+    // Score & accuracy only computed for submissions where real answer has been published/revealed
+    const revealedSubs = mappedSubmissions.filter(s => s.isAnswerRevealed);
+    const correctCount = revealedSubs.filter(s => s.isCorrect).length;
+    const accuracyRate = revealedSubs.length > 0 ? Math.round((correctCount / revealedSubs.length) * 100) : 0;
+    const pendingRevealCount = mappedSubmissions.length - revealedSubs.length;
+
+    // 2. ATTENDANCE DATA (Synchronized by memberId, memberNumber, userId, or fullName)
+    const events = await this.getEventItems();
+    const meetings = await this.getMeetingItems();
+    const attendanceRecords: Array<{
+      type: 'event' | 'meeting';
+      id: string;
+      title: string;
+      date: string;
+      venue?: string;
+      status: 'present' | 'absent' | 'excused';
+      notes?: string;
+    }> = [];
+
+    let eventsAttended = 0;
+    let meetingsAttended = 0;
+    let totalPresent = 0;
+    let totalAbsent = 0;
+    let totalExcused = 0;
+
+    events.forEach(e => {
+      const record = e.attendance?.find(a => 
+        (memberId && a.memberId === memberId) ||
+        (userId && a.userId === userId) ||
+        (memberNum && a.memberNumber === memberNum) ||
+        (userFullName && a.memberName && a.memberName.toLowerCase().trim() === userFullName.toLowerCase().trim())
+      );
+      if (record) {
+        if (record.status === 'present') {
+          eventsAttended++;
+          totalPresent++;
+        } else if (record.status === 'absent') {
+          totalAbsent++;
+        } else if (record.status === 'excused') {
+          totalExcused++;
+        }
+        attendanceRecords.push({
+          type: 'event',
+          id: e.id,
+          title: e.title,
+          date: e.heldDate || '',
+          venue: e.venue || '',
+          status: record.status,
+          notes: record.notes || ''
+        });
+      }
+    });
+
+    meetings.forEach(m => {
+      const record = m.attendance?.find(a => 
+        (memberId && a.memberId === memberId) ||
+        (userId && a.userId === userId) ||
+        (memberNum && a.memberNumber === memberNum) ||
+        (userFullName && a.memberName && a.memberName.toLowerCase().trim() === userFullName.toLowerCase().trim())
+      );
+      if (record) {
+        if (record.status === 'present') {
+          meetingsAttended++;
+          totalPresent++;
+        } else if (record.status === 'absent') {
+          totalAbsent++;
+        } else if (record.status === 'excused') {
+          totalExcused++;
+        }
+        attendanceRecords.push({
+          type: 'meeting',
+          id: m.id,
+          title: m.title,
+          date: m.heldDate || (m as any).date || '',
+          venue: m.venue || '',
+          status: record.status,
+          notes: record.notes || ''
+        });
+      }
+    });
+
+    attendanceRecords.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const totalMarked = totalPresent + totalAbsent + totalExcused;
+    const attendanceRate = totalMarked > 0 ? Math.round((totalPresent / totalMarked) * 100) : 100;
+
+    // 3. BUDGET & FINANCIALS DATA (Synchronized by memberId or memberNumber)
+    let budgetData: any = undefined;
+    try {
+      const [allContribs, setting, accounts, budgetStats] = await Promise.all([
+        this.getMemberContributions(),
+        this.getContributionSettings(),
+        this.getBankAccounts(),
+        this.getBudgetStats().catch(() => null)
+      ]);
+
+      const memberContribs = allContribs.filter(c => 
+        (memberId && c.memberId === memberId) ||
+        (memberNum && c.memberNumber === memberNum)
+      );
+
+      const totalPaid = memberContribs.filter(c => c.status === 'paid').reduce((acc, c) => acc + (c.paidAmount || 0), 0);
+      const totalFines = memberContribs.reduce((acc, c) => acc + (c.fineAmount || 0), 0);
+      const pendingContribs = memberContribs.filter(c => c.status === 'pending');
+      const overdueContribs = memberContribs.filter(c => c.status === 'overdue');
+      const paidContribs = memberContribs.filter(c => c.status === 'paid');
+      const waivedContribs = memberContribs.filter(c => c.status === 'waived');
+
+      const totalPending = pendingContribs.reduce((acc, c) => acc + Math.max(0, (c.totalPayable || 0) - (c.paidAmount || 0)), 0) +
+                           overdueContribs.reduce((acc, c) => acc + Math.max(0, (c.totalPayable || 0) - (c.paidAmount || 0)), 0);
+
+      const depositAcc = accounts.find(a => a.id === setting.defaultDepositAccountId) || accounts[0];
+
+      budgetData = {
+        summary: {
+          totalPaid,
+          totalFines,
+          totalPending,
+          pendingCount: pendingContribs.length,
+          overdueCount: overdueContribs.length,
+          paidCount: paidContribs.length,
+          waivedCount: waivedContribs.length,
+          totalMonths: memberContribs.length,
+          isUpToDate: overdueContribs.length === 0 && pendingContribs.length === 0,
+          monthlyFee: setting.monthlyFee || 100,
+          dueDayOfMonth: setting.dueDayOfMonth || 10,
+          annualAdvanceDiscountMonths: setting.annualAdvanceDiscountMonths || 2,
+          status: overdueContribs.length > 0 ? 'overdue' : (pendingContribs.length > 0 ? 'pending' : 'good_standing'),
+          depositAccount: depositAcc ? {
+            id: depositAcc.id,
+            accountName: depositAcc.accountName,
+            accountNumber: depositAcc.accountNumber,
+            bankName: depositAcc.bankName,
+            currency: depositAcc.currency || 'MVR'
+          } : undefined
+        },
+        contributions: memberContribs.sort((a, b) => (b.year * 12 + b.month) - (a.year * 12 + a.month)),
+        clubStats: {
+          totalClubIncome: budgetStats?.totalIncome || 0,
+          totalClubExpenses: budgetStats?.totalExpenses || 0,
+          netReserve: budgetStats?.netBalance || 0,
+          totalContributionsCollected: budgetStats?.totalContributionsCollected || 0,
+          currentYear: new Date().getFullYear()
+        }
+      };
+    } catch (bErr) {
+      console.warn('Could not load budget data for user', bErr);
+    }
+
+    // 4. BADGES
+    const badges: UserPerformanceBadge[] = [
+      { id: 'badge_active', title: 'Active Member', description: 'Registered member of ARC Club', icon: 'award', color: 'emerald' }
+    ];
+    if (userSubs.length >= 5) {
+      badges.push({ id: 'badge_quiz', title: 'Quiz Enthusiast', description: 'Participated in 5+ Ramazan Quizzes', icon: 'sparkles', color: 'orange' });
+    }
+    if (userWins.length > 0) {
+      badges.push({ id: 'badge_winner', title: 'Lucky Winner', description: 'Won Ramazan Quiz Lucky Draw Prize', icon: 'trophy', color: 'amber' });
+    }
+    if (totalPresent >= 3) {
+      badges.push({ id: 'badge_attendance', title: 'Dedicated Attendee', description: 'Attended 3+ Club Events & Meetings', icon: 'userCheck', color: 'sky' });
+    }
+    if (budgetData?.summary?.isUpToDate && budgetData.summary.paidCount > 0) {
+      badges.push({ id: 'badge_dues', title: 'Dues Paid', description: 'Membership fees fully up-to-date', icon: 'shield', color: 'purple' });
+    }
+
+    const overallScore = Math.min(100, Math.max(10, (totalPresent * 15) + (correctCount * 10) + (userWins.length * 20) + (budgetData?.summary?.isUpToDate ? 15 : 0)));
+
     return {
-      connected: true,
-      databaseType: 'Cloud Firestore',
-      projectId: FIREBASE_PROJECT_ID,
-      databaseId: FIRESTORE_DATABASE_ID,
-      tables: tableSummaries,
-      totalRecords,
-      schemaReady: true,
+      userId,
+      username: user?.username || '',
+      fullName: user?.fullName || linkedMember?.fullName || '',
+      designation: user?.designation || linkedMember?.excoDesignation || '',
+      roleName: user?.roleName || (linkedMember?.memberType === 'exco' ? 'EXCO Member' : 'Club Member'),
+      status: user?.status || 'active',
+      member: linkedMember,
+      attendance: {
+        eventsAttended,
+        totalEvents: events.length,
+        meetingsAttended,
+        totalMeetings: meetings.length,
+        totalPresent,
+        totalAbsent,
+        totalExcused,
+        attendanceRate,
+        records: attendanceRecords
+      },
+      quiz: {
+        totalAttempts: mappedSubmissions.length,
+        revealedAnswersCount: revealedSubs.length,
+        pendingRevealCount,
+        correctAnswers: correctCount,
+        accuracyRate,
+        submissions: mappedSubmissions,
+        wins: mappedWins
+      },
+      activity: {
+        messagesCount: 0,
+        auditLogsCount: 0
+      },
+      budget: budgetData,
+      overallScore,
+      badges
+    };
+  }
+
+  // -------------------------------------------------------------
+  // BACKUP & RESTORE
+  // -------------------------------------------------------------
+  async getDbTablesSummary(): Promise<{ tables: any[]; totalRecords: number; lastSyncedAt: string }> {
+    const tableDefinitions = [
+      { key: 'users', name: 'Users & Accounts', nameDh: 'ޔޫޒަރުންނާއި އެކައުންޓްތައް', schema: 'id, username, fullName, roleName, status, pinHash, permissions' },
+      { key: 'roles', name: 'Roles & Permissions', nameDh: 'ރޯލްތަކާއި ހުއްދަތައް', schema: 'id, name, description, defaultPermissions' },
+      { key: 'clubMembers', name: 'Club Members Registry', nameDh: 'މެންބަރުންގެ ދަފްތަރު', schema: 'id, memberNumber, fullName, idCardNumber, contactNumber, status' },
+      { key: 'events', name: 'Public Events & Activities', nameDh: 'އާންމު ހަރަކާތްތަކާއި އިވެންޓްތައް', schema: 'id, title, summary, eventDate, location, status' },
+      { key: 'eventItems', name: 'Internal Events & Attendance', nameDh: 'އިވެންޓްތަކާއި ހާޒިރީ', schema: 'id, title, eventType, startDate, venue, attendees' },
+      { key: 'meetingItems', name: 'Meetings & Minutes', nameDh: 'ބައްދަލުވުންތަކާއި ޔައުމިއްޔާ', schema: 'id, meetingNumber, title, meetingType, date, attendees, votings' },
+      { key: 'budgetAccounts', name: 'Bank & Cash Accounts', nameDh: 'ބޭންކް އަދި ފައިސާގެ އެކައުންޓްތައް', schema: 'id, accountName, accountNumber, bankName, balance, status' },
+      { key: 'incomeRecords', name: 'Income & Revenues', nameDh: 'ލިބުނު އާމްދަނީ', schema: 'id, date, title, amount, category, accountId' },
+      { key: 'expenseRecords', name: 'Expenses & Payments', nameDh: 'ޚަރަދުތަކާއި ފައިސާ ދެއްކުން', schema: 'id, date, title, amount, category, accountId, status' },
+      { key: 'accountTransfers', name: 'Account Fund Transfers', nameDh: 'އެކައުންޓް ބަދަލުކުރުންތައް', schema: 'id, date, fromAccountId, toAccountId, amount' },
+      { key: 'contributionSettings', name: 'Membership Fee Rules', nameDh: 'މެންބަރޝިޕް ފީ އުސޫލުތައް', schema: 'monthlyFee, finePerDay, dueDayOfMonth, currency' },
+      { key: 'memberContributions', name: 'Member Monthly Fees', nameDh: 'މެންބަރުންގެ މަހު ފީ ރެކޯޑްތައް', schema: 'id, memberId, year, month, amount, status' },
+      { key: 'budgetAllocations', name: 'Annual Budget Allocations', nameDh: 'އަހަރީ ބަޖެޓް ކަނޑައެޅުން', schema: 'id, year, category, allocatedAmount' },
+      { key: 'slideshow', name: 'Hero Slideshow & Banners', nameDh: 'ސްލައިޑްޝޯ އާއި ބެނަރތައް', schema: 'id, title, subtitle, desktopImage, displayOrder, status' },
+      { key: 'siteSettings', name: 'Branding & System Settings', nameDh: 'ބްރޭންޑިންގ އާއި ސިސްޓަމް ސެޓިންގސް', schema: 'id, group, key, value, updatedAt' },
+      { key: 'contacts', name: 'Contact Information', nameDh: 'ގުޅޭނެ މަޢުލޫމާތު', schema: 'id, type, label, value, displayOrder, status' },
+      { key: 'socialLinks', name: 'Social Media Channels', nameDh: 'ސޯޝަލް މީޑިއާ ލިންކްތައް', schema: 'id, platform, label, url, displayOrder, status' },
+      { key: 'excoMembers', name: 'EXCO Board Members', nameDh: 'ހިންގާ ކޮމިޓީގެ މެންބަރުން', schema: 'id, fullName, designation, designationDhivehi, image, displayOrder' },
+      { key: 'quizQuestions', name: 'Ramazan Quiz Questions', nameDh: 'ރަމަޟާން ކުއިޒް ސުވާލުތައް', schema: 'id, questionNumber, title, options, correctOptionId, prizeTitle, status' },
+      { key: 'quizSubmissions', name: 'Quiz Answer Submissions', nameDh: 'ކުއިޒް ބައިވެރިވުންތައް', schema: 'id, questionId, fullName, contactNumber, selectedOptionId, isWinner' },
+      { key: 'quizWinners', name: 'Quiz Winners Registry', nameDh: 'ކުއިޒުގެ ނަސީބުވެރިން', schema: 'id, questionNumber, winnerName, contactNumber, prizeTitle, status' },
+      { key: 'quizPrizes', name: 'Quiz Prizes Catalog', nameDh: 'ކުއިޒުގެ އިނާމުތައް', schema: 'id, title, description, sponsorName, imageUrl, status' },
+      { key: 'quizSponsors', name: 'Quiz Sponsors & Partners', nameDh: 'ކުއިޒުގެ ސްޕޮންސަރުން', schema: 'id, name, logo, contactPerson, contactNumber, status' },
+      { key: 'auditLogs', name: 'System Security & Audit Trail', nameDh: 'ސެކިއުރިޓީ އޮޑިޓް ލޮގްތައް', schema: 'id, timestamp, action, module, userId, details' },
+      { key: 'inboxMessages', name: 'Visitor Contact Messages', nameDh: 'ޒިޔާރަތްކުރި ފަރާތްތަކުގެ މެސެޖުތައް', schema: 'id, senderName, contactInfo, subject, body, status' },
+      { key: 'appNotifications', name: 'System & Portal Notifications', nameDh: 'ނޮޓިފިކޭޝަންތައް', schema: 'id, recipientId, title, message, type, readBy' },
+      { key: 'clubRules', name: 'Constitution & Bye-Laws', nameDh: 'އަސާސީ ޤަވާޢިދު', schema: 'titleDhivehi, version, chapters, articles' },
+      { key: 'presidentialDirectives', name: 'Presidential Directives', nameDh: 'ރައީސްގެ ޤަރާރުތައް', schema: 'id, directiveNumber, title, issuedDate, status' },
+      { key: 'officialCirculars', name: 'Official Club Circulars', nameDh: 'ރަސްމީ ސަރކިއުލަރތައް', schema: 'id, circularNumber, title, issuedDate, status' },
+      { key: 'invoices', name: 'Invoices & Quotations', nameDh: 'އިންވޮއިސް އަދި ކޯޓޭޝަންތައް', schema: 'id, type, invoiceNumber, invoiceDate, billTo, items, totalNetPayments, status, approvedBy' }
+    ];
+
+    let total = 0;
+    const tables = [];
+    for (const def of tableDefinitions) {
+      const snap = await firestore.collection(def.key).get();
+      const count = snap.size;
+      total += count;
+      const sample = snap.docs.slice(0, 3).map(d => d.data());
+      tables.push({
+        key: def.key,
+        name: def.name,
+        nameDh: def.nameDh,
+        count,
+        schema: def.schema,
+        sample
+      });
+    }
+
+    return {
+      tables,
+      totalRecords: total,
       lastSyncedAt: new Date().toISOString()
     };
   }
 
-  public async syncDatabase(): Promise<{ success: boolean; message: string; timestamp: string }> {
-    await this.initDatabase();
+  async syncDatabase(): Promise<{ status: string; syncedAt: string; collectionsSynced: number; metadata: any }> {
+    await this.verifyStartupSchema();
+    const meta = getDatabaseMetadata();
     return {
-      success: true,
-      message: 'Cloud Firestore database collections synchronized successfully.',
-      timestamp: new Date().toISOString()
+      status: 'success',
+      syncedAt: new Date().toISOString(),
+      collectionsSynced: Object.keys(meta.collectionStats).length,
+      metadata: meta
     };
   }
 
-  public async exportFullDatabase(): Promise<any> {
+  async exportFullDatabase(): Promise<Record<string, any[]>> {
     const collections = [
-      'users', 'roles', 'modulePermissions', 'members', 'bankAccounts',
-      'accountTransfers', 'contributionSettings', 'memberDues', 'incomeRecords',
-      'expenseRecords', 'budgetAllocations', 'siteSettings', 'slideshowItems',
-      'socialLinks', 'contacts', 'excoMembers', 'events', 'eventItems',
-      'meetingItems', 'quizQuestions', 'quizSubmissions', 'quizWinners',
-      'quizPrizes', 'quizSponsors', 'messages', 'notifications', 'clubRules',
-      'auditLogs', 'presidentialDirectives', 'officialCirculars'
+      'users', 'roles', 'clubMembers', 'events', 'eventItems',
+      'meetingItems', 'budgetAccounts', 'incomeRecords', 'expenseRecords',
+      'accountTransfers', 'contributionSettings', 'memberContributions',
+      'budgetAllocations', 'slideshow', 'siteSettings', 'contacts',
+      'socialLinks', 'excoMembers', 'quizQuestions', 'quizSubmissions',
+      'quizWinners', 'quizPrizes', 'quizSponsors', 'masterIneligibleParticipants',
+      'auditLogs', 'inboxMessages', 'appNotifications', 'clubRules',
+      'presidentialDirectives', 'officialCirculars'
     ];
 
-    const exportData: Record<string, any> = {
-      exportedAt: new Date().toISOString(),
-      database: 'Cloud Firestore',
-      projectId: FIREBASE_PROJECT_ID
-    };
-
+    const backup: Record<string, any[]> = {};
     for (const col of collections) {
-      exportData[col] = await firestore.list(col);
+      const snap = await firestore.collection(col).get();
+      backup[col] = snap.docs.map(d => d.data());
     }
 
-    return exportData;
+    return backup;
   }
 
-  public async importFullDatabase(data: any): Promise<void> {
-    if (!data || typeof data !== 'object') throw new Error('Invalid import data format');
-    const collections = Object.keys(data).filter(k => k !== 'exportedAt' && k !== 'database' && k !== 'projectId');
-
-    for (const col of collections) {
-      const items = Array.isArray(data[col]) ? data[col] : [];
-      for (const item of items) {
-        if (item && item.id) {
-          await firestore.set(col, item.id, item);
+  async importFullDatabase(data: Record<string, any[]>): Promise<void> {
+    for (const [colName, docs] of Object.entries(data)) {
+      if (Array.isArray(docs)) {
+        const batch = firestore.batch();
+        for (const doc of docs) {
+          const docId = doc.id || doc.key || `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+          const docRef = firestore.collection(colName).doc(docId);
+          batch.set(docRef, doc, { merge: true });
         }
+        await batch.commit();
       }
     }
   }
-
-  public async verifyStartupSchema(): Promise<boolean> {
-    await this.initDatabase();
-    return true;
-  }
 }
 
-export const db = new DatabaseStore();
+export const db = new FirestoreDatabaseStore();

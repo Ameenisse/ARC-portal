@@ -4,6 +4,7 @@ import { api, getStoredToken, setStoredToken, removeStoredToken } from '../servi
 
 interface AuthContextType {
   user: User | null;
+  isAuthenticated: boolean;
   loading: boolean;
   login: (username: string, pin: string) => Promise<User>;
   logout: () => Promise<void>;
@@ -88,7 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, hasPermission, refreshUser }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, loading, login, logout, hasPermission, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

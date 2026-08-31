@@ -27,8 +27,9 @@ export const PinInput: React.FC<PinInputProps> = ({
   const [showPin, setShowPin] = useState(false);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const numericOnly = e.target.value.replace(/\D/g, '').slice(0, maxLength);
-    onChange(numericOnly);
+    // Restrict strictly to digits
+    const cleaned = e.target.value.replace(/\D/g, '').slice(0, maxLength);
+    onChange(cleaned);
   };
 
   return (
@@ -47,7 +48,6 @@ export const PinInput: React.FC<PinInputProps> = ({
           type={showPin ? 'text' : 'password'}
           inputMode="numeric"
           pattern="[0-9]*"
-          autoComplete="current-password"
           value={value}
           onChange={handleInputChange}
           placeholder={placeholder}
