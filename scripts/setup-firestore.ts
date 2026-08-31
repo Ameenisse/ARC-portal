@@ -3,15 +3,25 @@ import { hashPin, generateSalt } from '../src/server/db';
 import { ALL_MODULES, defaultClubRules, defaultSiteSettingsList, defaultRoles } from '../src/server/seedData';
 
 export async function setupFirestore() {
-  console.log('🚀 Starting Cloud Firestore Initialization...');
+  console.log('🚀 Checking Cloud Firestore System Installation status...');
 
   try {
+    const installRef = firestore.collection('system').doc('installation');
+    const installDoc = await installRef.get();
+
+    if (installDoc.exists && installDoc.data()?.initialized === true) {
+      console.log('🔒 System is already initialized. Skipping all seeding and preserving live data.');
+      return;
+    }
+
+    console.log('⚙️ Performing one-time initial system installation bootstrap...');
+
     // 1. Check if Admin user exists
     const usersRef = firestore.collection('users');
     const adminSnap = await usersRef.where('username', '==', 'admin').get();
 
     if (adminSnap.empty) {
-      console.log('👤 Seeding default Administrator (admin / 2613)...');
+      console.log('👤 Seeding initial Administrator account (admin / 2613)...');
       const salt = generateSalt();
       const pinHash = hashPin('2613', salt);
       const adminId = 'usr_admin_001';
@@ -52,8 +62,6 @@ export async function setupFirestore() {
         pinSalt: salt
       });
       console.log('✅ Admin user created.');
-    } else {
-      console.log('ℹ️ Admin user already exists. Preserving existing credentials and PIN.');
     }
 
     // 2. Roles
@@ -136,7 +144,14 @@ export async function setupFirestore() {
       await countersRef.doc('quizParticipants').set({ count: 1 });
     }
 
-    console.log('🎉 Cloud Firestore setup completed successfully!');
+    // 8. Mark system as initialized permanently
+    await installRef.set({
+      initialized: true,
+      timestamp: new Date().toISOString(),
+      databaseId: 'ai-studio-arc-1ed79364-547a-408d-9326-df4162ee21d6'
+    });
+
+    console.log('🎉 Cloud Firestore one-time installation bootstrap completed successfully!');
   } catch (err: any) {
     console.error('❌ Firestore setup error:', err);
     throw err;

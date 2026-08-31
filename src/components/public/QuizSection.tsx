@@ -507,9 +507,10 @@ export const QuizSection: React.FC = () => {
                   {(question?.options || []).map((opt: any, idx: number) => {
                     const optLabel = getThaanaOptionLabel(opt.optionLabel, idx);
                     const isSelected = selectedOptionId === opt.id;
+                    const optKey = opt.id || `quiz_opt_${optLabel}_${idx}`;
                     return (
                       <button
-                        key={opt.id}
+                        key={optKey}
                         id={`quiz_opt_${optLabel}`}
                         type="button"
                         onClick={() => setSelectedOptionId(opt.id)}
@@ -678,9 +679,10 @@ export const QuizSection: React.FC = () => {
                   const optLabel = getThaanaOptionLabel(opt.optionLabel, idx);
                   const isCorrect = question.correctOptionId && opt.id === question.correctOptionId;
                   const hasAnswerRevealed = Boolean(question.correctOptionId);
+                  const choiceKey = opt.id || `quiz_choice_${optLabel}_${idx}`;
                   return (
                     <div
-                      key={opt.id}
+                      key={choiceKey}
                       className={`p-4 rounded-2xl border text-sm font-medium flex items-center gap-3 transition-all duration-500 ${
                         isCorrect
                           ? 'bg-gradient-to-r from-orange-950 via-amber-950/90 to-orange-950 border-2 border-orange-400 text-white ring-4 ring-orange-500/40 shadow-2xl shadow-orange-500/30 animate-pulse scale-[1.02]'
@@ -903,8 +905,8 @@ export const QuizSection: React.FC = () => {
               {/* All Official Quiz Sponsors Grid */}
               {sponsors && sponsors.length > 0 && (
                 <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
-                  {sponsors.map((s: any) => (
-                    <div key={s.id || s.name} className="flex items-center gap-2 bg-slate-950/80 border border-slate-800/90 hover:border-slate-700 px-3.5 py-2 rounded-xl transition-all shadow-md">
+                  {sponsors.map((s: any, sIdx: number) => (
+                    <div key={s.id || s._id || `quiz_sponsor_${s.name || 'item'}_${sIdx}`} className="flex items-center gap-2 bg-slate-950/80 border border-slate-800/90 hover:border-slate-700 px-3.5 py-2 rounded-xl transition-all shadow-md">
                       {s.logo ? (
                         <img src={s.logo} alt={s.name} className="h-5 max-w-[80px] object-contain" />
                       ) : (
@@ -1007,8 +1009,8 @@ export const QuizSection: React.FC = () => {
                     <tbody className="divide-y divide-slate-800/60 font-sans">
                       {allWinnersResults
                         .filter(r => r.winner)
-                        .map((item) => (
-                          <tr key={item.id} className="hover:bg-slate-800/40 transition-colors">
+                        .map((item, itemIdx) => (
+                          <tr key={item.id || item.winner?.id || `winner_q${item.questionNumber}_${itemIdx}`} className="hover:bg-slate-800/40 transition-colors">
                             <td className="p-3 text-center font-bold text-amber-300">
                               ސުވާލު {item.questionNumber}
                             </td>

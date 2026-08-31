@@ -56,8 +56,8 @@ export const QuizResultsPage: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-6">
-            {results.map((item) => (
-              <div key={item.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
+            {results.map((item, idx) => (
+              <div key={item.id || `quiz_result_${item.questionNumber || idx}_${idx}`} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
                   <div>
                     <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">Question {item.questionNumber}</span>

@@ -8,7 +8,6 @@ export async function checkFirestore() {
   try {
     const collections = [
       'users',
-      'userSessions',
       'roles',
       'clubMembers',
       'events',
@@ -37,7 +36,8 @@ export async function checkFirestore() {
       'appNotifications',
       'clubRules',
       'presidentialDirectives',
-      'officialCirculars'
+      'officialCirculars',
+      'invoices'
     ];
 
     const results: Record<string, number> = {};

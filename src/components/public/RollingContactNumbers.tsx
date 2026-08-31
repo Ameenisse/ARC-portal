@@ -404,7 +404,7 @@ export const RollingContactNumbers: React.FC<RollingContactNumbersProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto pr-1">
             {eligibleContacts.map((c, i) => (
               <div
-                key={c.participantNumber + i}
+                key={`inline_eligible_${c.participantNumber || 'p'}_${i}`}
                 className={`p-2 rounded-xl border text-xs font-mono flex items-center justify-between gap-2 ${
                   isRolling && currentItem.participantNumber === c.participantNumber
                     ? 'bg-orange-500/20 border-orange-500/60 text-amber-300 font-bold scale-[1.02] shadow-sm'
@@ -514,7 +514,7 @@ export const RollingContactNumbers: React.FC<RollingContactNumbersProps> = ({
                     if (isNotEligible) {
                       return (
                         <div
-                          key={item.participantNumber + idx}
+                          key={`modal_contact_ineligible_${item.participantNumber || 'p'}_${idx}`}
                           className="p-3 bg-gradient-to-r from-red-950/90 via-red-900/60 to-red-950/90 border-2 border-red-500/80 rounded-2xl flex items-center justify-between gap-3 shadow-lg shadow-red-950/50 ring-1 ring-red-500/40 relative overflow-hidden"
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
@@ -552,7 +552,7 @@ export const RollingContactNumbers: React.FC<RollingContactNumbersProps> = ({
 
                     return (
                       <div
-                        key={item.participantNumber + idx}
+                        key={`modal_contact_eligible_${item.participantNumber || 'p'}_${idx}`}
                         className="p-3 bg-slate-950/80 border border-slate-800/80 rounded-2xl flex items-center justify-between gap-3 hover:border-slate-700 transition-colors"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">

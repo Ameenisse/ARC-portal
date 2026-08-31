@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { firestore, getDatabaseMetadata, flushSync, persistStoreAtomic } from './firebase';
+import { firestore, getDatabaseMetadata } from './firebase';
 import {
   User,
   Role,
@@ -92,7 +92,16 @@ export class FirestoreDatabaseStore {
   // -------------------------------------------------------------
   async verifyStartupSchema() {
     try {
-      console.log('[Firestore] Validating database collections and schema readiness...');
+      console.log('[Firestore] Checking system installation status...');
+      const installRef = firestore.collection('system').doc('installation');
+      const installDoc = await installRef.get();
+
+      if (installDoc.exists && installDoc.data()?.initialized === true) {
+        console.log('[Firestore] System is permanently initialized. Preserving all live records.');
+        return;
+      }
+
+      console.log('[Firestore] Performing initial one-time startup check...');
       const usersRef = firestore.collection('users');
       const adminSnap = await usersRef.where('username', '==', 'admin').get();
 
@@ -140,24 +149,13 @@ export class FirestoreDatabaseStore {
         });
       }
 
-      // Ensure all 30+ core collections are registered and accessible without modifying existing documents
-      const coreTables = [
-        'users', 'roles', 'clubMembers', 'events', 'eventItems', 'meetingItems',
-        'budgetAccounts', 'incomeRecords', 'expenseRecords', 'accountTransfers',
-        'contributionSettings', 'memberContributions', 'budgetAllocations',
-        'slideshow', 'siteSettings', 'contacts', 'socialLinks', 'excoMembers',
-        'quizQuestions', 'quizSubmissions', 'quizWinners', 'quizPrizes', 'quizSponsors',
-        'masterIneligibleParticipants', 'auditLogs', 'inboxMessages', 'appNotifications',
-        'clubRules', 'presidentialDirectives', 'officialCirculars', 'userSessions', 'counters',
-        'invoices'
-      ];
-      for (const col of coreTables) {
-        firestore.collection(col);
-      }
+      await installRef.set({
+        initialized: true,
+        timestamp: new Date().toISOString(),
+        databaseId: 'ai-studio-arc-1ed79364-547a-408d-9326-df4162ee21d6'
+      });
 
-      // Commit changes if any
-      flushSync();
-      console.log('[Firestore] Database schema readiness validated successfully.');
+      console.log('[Firestore] One-time startup verification complete.');
     } catch (err: any) {
       console.error('[Firestore] Startup schema check error:', err);
     }
