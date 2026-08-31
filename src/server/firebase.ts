@@ -2,14 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import { realtimeBroadcaster } from './realtime';
 import {
-  ALL_MODULES,
-  defaultClubRules,
-  defaultSiteSettingsList,
   defaultRoles,
+  defaultSiteSettingsList,
   defaultSlideshow,
   defaultContacts,
   defaultSocialLinks,
-  defaultExcoMembers
+  defaultExcoMembers,
+  defaultClubRules
 } from './seedData';
 
 export interface FirebaseAppConfig {
@@ -23,9 +22,6 @@ export interface FirebaseAppConfig {
   measurementId?: string;
 }
 
-// -------------------------------------------------------------
-// PRODUCTION FIREBASE CONFIGURATION (SINGLE SOURCE OF TRUTH)
-// -------------------------------------------------------------
 const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
 let fileConfig: Partial<FirebaseAppConfig> = {};
 
@@ -65,154 +61,20 @@ export const firebaseConfig: FirebaseAppConfig = {
   messagingSenderId: fileConfig.messagingSenderId || process.env.FIREBASE_MESSAGING_SENDER_ID || '432276947345'
 };
 
-const FIRESTORE_BASE_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents`;
+const BASE_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents`;
 
 // -------------------------------------------------------------
-// IN-MEMORY HIGH-EFFICIENCY CACHE & QUOTA PROTECTION LAYER
+// FIRESTORE FIELD VALUE CONVERTERS
 // -------------------------------------------------------------
-interface CollectionCacheEntry {
-  docs: Map<string, any>;
-  lastFetched: number;
-}
-
-const collectionCache = new Map<string, CollectionCacheEntry>();
-const CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL for background queries
-
-function getCollectionCache(col: string): CollectionCacheEntry {
-  let entry = collectionCache.get(col);
-  if (!entry) {
-    entry = { docs: new Map(), lastFetched: 0 };
-    collectionCache.set(col, entry);
-  }
-  return entry;
-}
-
-// Preload baseline cache with system seed data to ensure instant resilience
-function initBaseCache() {
-  const rolesEntry = getCollectionCache('roles');
-  for (const r of defaultRoles) {
-    rolesEntry.docs.set(r.id, r);
-  }
-
-  const settingsEntry = getCollectionCache('siteSettings');
-  for (const s of defaultSiteSettingsList) {
-    settingsEntry.docs.set(s.id, s);
-  }
-
-  const slideEntry = getCollectionCache('slideshow');
-  for (const sl of defaultSlideshow) {
-    slideEntry.docs.set(sl.id, sl);
-  }
-
-  const contactEntry = getCollectionCache('contacts');
-  for (const c of defaultContacts) {
-    contactEntry.docs.set(c.id, c);
-  }
-
-  const socEntry = getCollectionCache('socialLinks');
-  for (const s of defaultSocialLinks) {
-    socEntry.docs.set(s.id, s);
-  }
-
-  const excoEntry = getCollectionCache('excoMembers');
-  for (const e of defaultExcoMembers) {
-    excoEntry.docs.set(e.id, e);
-  }
-
-  const rulesEntry = getCollectionCache('clubRules');
-  rulesEntry.docs.set('main', defaultClubRules);
-  rulesEntry.docs.set('current', defaultClubRules);
-
-  const accEntry = getCollectionCache('budgetAccounts');
-  accEntry.docs.set('acc_primary_001', {
-    id: 'acc_primary_001',
-    accountName: 'ARC Main BML Account',
-    accountNumber: '7730000123456',
-    bankName: 'Bank of Maldives (BML)',
-    currency: 'MVR',
-    balance: 15450,
-    isDefault: true,
-    status: 'active',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  });
-
-  const contribEntry = getCollectionCache('contributionSettings');
-  contribEntry.docs.set('current', {
-    id: 'current',
-    monthlyFee: 50,
-    currency: 'MVR',
-    finePerDay: 5,
-    gracePeriodDays: 5,
-    fineGraceDays: 5,
-    dueDayOfMonth: 10,
-    enableFines: true,
-    enableDiscounts: true,
-    annualDiscountMonths: 1,
-    advancePaymentMonths: 12,
-    updatedAt: new Date().toISOString(),
-    updatedBy: 'system'
-  });
-
-  const sysEntry = getCollectionCache('system');
-  sysEntry.docs.set('installation', {
-    initialized: true,
-    timestamp: new Date().toISOString(),
-    databaseId: FIRESTORE_DATABASE_ID
-  });
-
-  // Admin user default in cache
-  const usersEntry = getCollectionCache('users');
-  const adminId = 'usr_admin_001';
-  usersEntry.docs.set(adminId, {
-    id: adminId,
-    fullName: 'System Administrator',
-    username: 'admin',
-    designation: 'Chief Administrator',
-    contactNumber: '+960 7771234',
-    roleId: 'role_admin',
-    roleName: 'Admin',
-    status: 'active',
-    requirePinChange: false,
-    failedLoginCount: 0,
-    lockedUntil: null,
-    lastLoginAt: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    notes: 'In-built primary system administrator account',
-    permissions: ALL_MODULES.map(m => ({
-      id: `perm_${adminId}_${m}`,
-      roleId: 'role_admin',
-      userId: adminId,
-      moduleKey: m,
-      canView: true,
-      canCreate: true,
-      canEdit: true,
-      canDelete: true,
-      canPublish: true,
-      canApprove: true,
-      canExport: true,
-      canManageSettings: true
-    })),
-    // Salt & hash for standard PIN 2613
-    pinHash: '51201ee25cb89eeab85fe1015f62b184d670f056695d4b8ff6383a3a7a856533f55c1cc7aa4c94f0f05635768579c52abc4a389b5ed5c497ba10cad86e73dd56',
-    pinSalt: 'a9f243de08d29b28b7e289e023194a20'
-  });
-}
-
-initBaseCache();
-
-// -------------------------------------------------------------
-// FIRESTORE VALUE CONVERTERS
-// -------------------------------------------------------------
-function toFirestoreValue(val: any): any {
+export function toFirestoreValue(val: any): any {
   if (val === null || val === undefined) return { nullValue: null };
   if (typeof val === 'boolean') return { booleanValue: val };
   if (typeof val === 'number') {
-    if (Number.isInteger(val)) return { integerValue: val.toString() };
+    if (Number.isInteger(val)) return { integerValue: String(val) };
     return { doubleValue: val };
   }
   if (typeof val === 'string') return { stringValue: val };
+  if (val instanceof Date) return { timestampValue: val.toISOString() };
   if (Array.isArray(val)) {
     return { arrayValue: { values: val.map(toFirestoreValue) } };
   }
@@ -228,7 +90,30 @@ function toFirestoreValue(val: any): any {
   return { stringValue: String(val) };
 }
 
-function toFirestoreFields(obj: Record<string, any>): Record<string, any> {
+export function fromFirestoreValue(fieldVal: any): any {
+  if (!fieldVal || typeof fieldVal !== 'object') return null;
+  if ('nullValue' in fieldVal) return null;
+  if ('booleanValue' in fieldVal) return Boolean(fieldVal.booleanValue);
+  if ('integerValue' in fieldVal) return parseInt(fieldVal.integerValue, 10);
+  if ('doubleValue' in fieldVal) return parseFloat(fieldVal.doubleValue);
+  if ('stringValue' in fieldVal) return fieldVal.stringValue;
+  if ('timestampValue' in fieldVal) return fieldVal.timestampValue;
+  if ('arrayValue' in fieldVal) {
+    const arr = fieldVal.arrayValue?.values || [];
+    return arr.map(fromFirestoreValue);
+  }
+  if ('mapValue' in fieldVal) {
+    const fields = fieldVal.mapValue?.fields || {};
+    const obj: Record<string, any> = {};
+    for (const [k, v] of Object.entries(fields)) {
+      obj[k] = fromFirestoreValue(v);
+    }
+    return obj;
+  }
+  return null;
+}
+
+export function toFirestoreFields(obj: Record<string, any>): Record<string, any> {
   const fields: Record<string, any> = {};
   for (const [k, v] of Object.entries(obj)) {
     if (v !== undefined) {
@@ -238,491 +123,432 @@ function toFirestoreFields(obj: Record<string, any>): Record<string, any> {
   return fields;
 }
 
-function fromFirestoreValue(field: any): any {
-  if (!field) return null;
-  if ('stringValue' in field) return field.stringValue;
-  if ('integerValue' in field) return parseInt(field.integerValue, 10);
-  if ('doubleValue' in field) return field.doubleValue;
-  if ('booleanValue' in field) return field.booleanValue;
-  if ('nullValue' in field) return null;
-  if ('timestampValue' in field) return field.timestampValue;
-  if ('arrayValue' in field) return (field.arrayValue.values || []).map(fromFirestoreValue);
-  if ('mapValue' in field) {
-    const res: Record<string, any> = {};
-    for (const [k, v] of Object.entries(field.mapValue.fields || {})) {
-      res[k] = fromFirestoreValue(v);
+export function fromFirestoreDoc(doc: any): Record<string, any> {
+  if (!doc) return {};
+  const data: Record<string, any> = {};
+  if (doc.fields) {
+    for (const [k, v] of Object.entries(doc.fields)) {
+      data[k] = fromFirestoreValue(v);
     }
-    return res;
   }
-  return null;
-}
-
-function fromFirestoreDoc(doc: any): any {
-  if (!doc || !doc.fields) return null;
-  const res: Record<string, any> = {};
-  for (const [k, v] of Object.entries(doc.fields)) {
-    res[k] = fromFirestoreValue(v);
+  if (!data.id && doc.name) {
+    const parts = doc.name.split('/');
+    data.id = parts[parts.length - 1];
   }
-  const parts = doc.name ? doc.name.split('/') : [];
-  const docId = parts[parts.length - 1];
-  res.id = res.id || docId;
-  return res;
+  return data;
 }
 
 // -------------------------------------------------------------
-// DIRECT HTTP REST CLIENT FOR CLOUD FIRESTORE
+// IN-MEMORY SNAPSHOT CACHE (Prevents 429 Quota crash on free tier)
 // -------------------------------------------------------------
-async function firestoreFetch(url: string, options?: RequestInit): Promise<any> {
-  const finalUrl = url.includes('?') ? `${url}&key=${FIREBASE_API_KEY}` : `${url}?key=${FIREBASE_API_KEY}`;
-  
-  try {
-    const response = await fetch(finalUrl, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        ...(options?.headers || {})
-      }
-    });
+const memoryCollections: Map<string, Map<string, any>> = new Map();
+const collectionLoadedFlags: Map<string, number> = new Map();
 
-    if (response.status === 404) {
-      return null;
-    }
-
-    if (response.status === 429) {
-      // Quota exceeded: log once and return 429 marker
-      console.warn(`[Firestore Quota] 429 Free Tier Read Limit reached. Serving from in-memory cache.`);
-      const err = new Error('RESOURCE_EXHAUSTED');
-      (err as any).statusCode = 429;
-      throw err;
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`[Cloud Firestore Error ${response.status}] ${errorText}`);
-    }
-
-    const text = await response.text();
-    return text ? JSON.parse(text) : null;
-  } catch (err: any) {
-    throw err;
+function getMemoryCollection(colName: string): Map<string, any> {
+  if (!memoryCollections.has(colName)) {
+    memoryCollections.set(colName, new Map());
   }
+  return memoryCollections.get(colName)!;
 }
 
+// Prepopulate initial seed documents into memory so app functions immediately
+function initSeedCache() {
+  const roles = getMemoryCollection('roles');
+  for (const r of defaultRoles) roles.set(r.id, { ...r });
+
+  const settings = getMemoryCollection('siteSettings');
+  for (const s of defaultSiteSettingsList) settings.set(s.id, { ...s });
+
+  const slide = getMemoryCollection('slideshow');
+  for (const sl of defaultSlideshow) slide.set(sl.id, { ...sl });
+
+  const contacts = getMemoryCollection('contacts');
+  for (const c of defaultContacts) contacts.set(c.id, { ...c });
+
+  const social = getMemoryCollection('socialLinks');
+  for (const sc of defaultSocialLinks) social.set(sc.id, { ...sc });
+
+  const exco = getMemoryCollection('excoMembers');
+  for (const e of defaultExcoMembers) exco.set(e.id, { ...e });
+
+  const rules = getMemoryCollection('clubRules');
+  rules.set('main', { ...defaultClubRules });
+
+  const budgetAcc = getMemoryCollection('budgetAccounts');
+  budgetAcc.set('acc_primary_001', {
+    id: 'acc_primary_001',
+    accountName: 'ARC Main BML Account',
+    accountNumber: '7730000123456',
+    bankName: 'Bank of Maldives (BML)',
+    currency: 'MVR',
+    balance: 15450,
+    isDefault: true,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const contrib = getMemoryCollection('contributionSettings');
+  contrib.set('current', {
+    id: 'current',
+    monthlyFee: 50,
+    currency: 'MVR',
+    finePerDay: 5,
+    gracePeriodDays: 5,
+    fineGraceDays: 5,
+    dueDayOfMonth: 10,
+    enableFines: true,
+    enableDiscounts: true,
+    annualDiscountMonths: 1,
+    advancePaymentMonths: 12,
+    updatedAt: new Date().toISOString(),
+    updatedBy: 'system'
+  });
+}
+
+initSeedCache();
+
 // -------------------------------------------------------------
-// WRAPPERS & QUERY ENGINE
+// FIRESTORE COMPATIBLE CLASSES
 // -------------------------------------------------------------
-export class WrappedDocSnapshot {
+export class DocumentSnapshot<T = any> {
+  public readonly ref: DocumentReference;
+
   constructor(
     public readonly id: string,
+    private readonly _data: T | null,
     public readonly exists: boolean,
-    private readonly _data: any | null,
-    public readonly collectionName: string
-  ) {}
-
-  data(): any | null {
-    return this._data;
+    parentCollection?: CollectionReference
+  ) {
+    const parent = parentCollection || new CollectionReference('unknown');
+    this.ref = new DocumentReference(parent, id);
   }
 
-  get ref(): WrappedDocRef {
-    return new WrappedDocRef(this.collectionName, this.id);
+  data(): T | undefined {
+    return this._data ? { ...this._data } : undefined;
   }
 }
 
-export class WrappedQuerySnapshot {
-  constructor(public readonly docs: WrappedDocSnapshot[]) {}
-
-  get size(): number {
-    return this.docs.length;
-  }
+export class QuerySnapshot<T = any> {
+  constructor(public readonly docs: DocumentSnapshot<T>[]) {}
 
   get empty(): boolean {
     return this.docs.length === 0;
   }
 
-  forEach(callback: (doc: WrappedDocSnapshot) => void) {
+  get size(): number {
+    return this.docs.length;
+  }
+
+  forEach(callback: (doc: DocumentSnapshot<T>) => void) {
     this.docs.forEach(callback);
   }
 }
 
-export class WrappedDocRef {
+export class DocumentReference {
   constructor(
-    public readonly collectionName: string,
+    public readonly parent: CollectionReference,
     public readonly id: string
   ) {}
 
-  async get(): Promise<WrappedDocSnapshot> {
-    const cache = getCollectionCache(this.collectionName);
-    const cachedDoc = cache.docs.get(this.id);
-    const isCacheFresh = cachedDoc && (Date.now() - cache.lastFetched < CACHE_TTL_MS);
+  get path(): string {
+    return `${this.parent.id}/${this.id}`;
+  }
 
-    if (isCacheFresh) {
-      return new WrappedDocSnapshot(this.id, true, cachedDoc, this.collectionName);
-    }
+  async get(): Promise<DocumentSnapshot> {
+    const colName = this.parent.id;
+    const colMap = getMemoryCollection(colName);
 
     try {
-      const url = `${FIRESTORE_BASE_URL}/${this.collectionName}/${this.id}`;
-      const doc = await firestoreFetch(url);
-      if (!doc || !doc.fields) {
-        return new WrappedDocSnapshot(this.id, false, null, this.collectionName);
+      const url = `${BASE_URL}/${colName}/${encodeURIComponent(this.id)}?key=${FIREBASE_API_KEY}`;
+      const res = await fetch(url);
+      if (res.status === 200) {
+        const json = await res.json();
+        const data = fromFirestoreDoc(json);
+        colMap.set(this.id, data);
+        return new DocumentSnapshot(this.id, data, true, this.parent);
+      } else if (res.status === 404) {
+        colMap.delete(this.id);
+        return new DocumentSnapshot(this.id, null, false, this.parent);
       }
-      const data = fromFirestoreDoc(doc);
-      cache.docs.set(this.id, data);
-      return new WrappedDocSnapshot(this.id, true, data, this.collectionName);
-    } catch (err: any) {
-      // If 429 or network failure, serve from cache if available
-      if (cachedDoc) {
-        return new WrappedDocSnapshot(this.id, true, cachedDoc, this.collectionName);
-      }
-      return new WrappedDocSnapshot(this.id, false, null, this.collectionName);
+    } catch (err) {
+      console.warn(`[Firestore REST] Error fetching doc ${this.path}, checking cache fallback:`, err);
     }
+
+    // Cache fallback
+    if (colMap.has(this.id)) {
+      return new DocumentSnapshot(this.id, colMap.get(this.id), true, this.parent);
+    }
+    return new DocumentSnapshot(this.id, null, false, this.parent);
   }
 
   async set(data: any, options?: { merge?: boolean }): Promise<void> {
-    const cache = getCollectionCache(this.collectionName);
-    let payloadToSave = { ...data, id: data.id || this.id };
-    if (options?.merge) {
-      const existing = cache.docs.get(this.id);
-      if (existing) {
-        payloadToSave = { ...existing, ...payloadToSave };
-      }
-    }
+    const colName = this.parent.id;
+    const colMap = getMemoryCollection(colName);
+    const existing = colMap.get(this.id) || {};
+    const finalData = options?.merge ? { ...existing, ...data } : { ...data };
+    if (!finalData.id) finalData.id = this.id;
 
-    // Always update local cache immediately
-    cache.docs.set(this.id, payloadToSave);
+    // Update memory first so local reads are immediately consistent
+    colMap.set(this.id, finalData);
 
     try {
-      const url = `${FIRESTORE_BASE_URL}/${this.collectionName}/${this.id}`;
-      const fields = toFirestoreFields(payloadToSave);
-
-      await firestoreFetch(url, {
+      const url = `${BASE_URL}/${colName}/${encodeURIComponent(this.id)}?key=${FIREBASE_API_KEY}`;
+      const fields = toFirestoreFields(finalData);
+      const res = await fetch(url, {
         method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields })
       });
-    } catch (err: any) {
-      console.warn(`[Firestore Sync] Remote save for ${this.collectionName}/${this.id} preserved in memory:`, err.message || err);
+
+      if (!res.ok && res.status !== 429) {
+        const text = await res.text();
+        console.error(`[Firestore REST] set failed on ${this.path}:`, text);
+      }
+    } catch (err) {
+      console.error(`[Firestore REST] Network error on set ${this.path}:`, err);
     }
 
-    // Broadcast update over Realtime SSE
-    try {
-      realtimeBroadcaster.broadcastTableChange(
-        this.collectionName,
-        'create',
-        this.id,
-        payloadToSave,
-        { id: payloadToSave.updatedBy || 'system' }
-      );
-    } catch (e) {
-      // SSE non-blocking
-    }
+    realtimeBroadcaster.broadcast(colName, 'update', this.id, finalData);
   }
 
-  async update(data: any): Promise<void> {
-    const cache = getCollectionCache(this.collectionName);
-    const existing = cache.docs.get(this.id);
-    const merged = { ...(existing || {}), ...data, id: this.id };
+  async update(data: Record<string, any>): Promise<void> {
+    const colName = this.parent.id;
+    const colMap = getMemoryCollection(colName);
+    const existing = colMap.get(this.id) || {};
+    const merged = { ...existing, ...data };
+    if (!merged.id) merged.id = this.id;
 
-    // Update in-memory cache immediately
-    cache.docs.set(this.id, merged);
+    colMap.set(this.id, merged);
 
     try {
-      const url = `${FIRESTORE_BASE_URL}/${this.collectionName}/${this.id}`;
-      const fields = toFirestoreFields(merged);
-
-      await firestoreFetch(url, {
+      const fieldKeys = Object.keys(data);
+      const updateMask = fieldKeys.map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
+      const url = `${BASE_URL}/${colName}/${encodeURIComponent(this.id)}?key=${FIREBASE_API_KEY}&${updateMask}`;
+      const fields = toFirestoreFields(data);
+      const res = await fetch(url, {
         method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields })
       });
-    } catch (err: any) {
-      console.warn(`[Firestore Sync] Remote update for ${this.collectionName}/${this.id} preserved in memory:`, err.message || err);
+
+      if (!res.ok && res.status !== 429) {
+        const text = await res.text();
+        console.error(`[Firestore REST] update failed on ${this.path}:`, text);
+      }
+    } catch (err) {
+      console.error(`[Firestore REST] Network error on update ${this.path}:`, err);
     }
 
-    // Broadcast update over Realtime SSE
-    try {
-      realtimeBroadcaster.broadcastTableChange(
-        this.collectionName,
-        'update',
-        this.id,
-        merged,
-        { id: merged.updatedBy || 'system' }
-      );
-    } catch (e) {
-      // SSE non-blocking
-    }
+    realtimeBroadcaster.broadcast(colName, 'update', this.id, merged);
   }
 
   async delete(): Promise<void> {
-    const cache = getCollectionCache(this.collectionName);
-    cache.docs.delete(this.id);
+    const colName = this.parent.id;
+    const colMap = getMemoryCollection(colName);
+    colMap.delete(this.id);
 
     try {
-      const url = `${FIRESTORE_BASE_URL}/${this.collectionName}/${this.id}`;
-      await firestoreFetch(url, {
-        method: 'DELETE'
-      });
-    } catch (err: any) {
-      console.warn(`[Firestore Sync] Remote delete for ${this.collectionName}/${this.id} removed from memory:`, err.message || err);
+      const url = `${BASE_URL}/${colName}/${encodeURIComponent(this.id)}?key=${FIREBASE_API_KEY}`;
+      const res = await fetch(url, { method: 'DELETE' });
+      if (!res.ok && res.status !== 404 && res.status !== 429) {
+        const text = await res.text();
+        console.error(`[Firestore REST] delete failed on ${this.path}:`, text);
+      }
+    } catch (err) {
+      console.error(`[Firestore REST] Network error on delete ${this.path}:`, err);
     }
 
-    // Broadcast delete over Realtime SSE
-    try {
-      realtimeBroadcaster.broadcastTableChange(
-        this.collectionName,
-        'delete',
-        this.id,
-        null,
-        { id: 'system' }
-      );
-    } catch (e) {
-      // SSE non-blocking
-    }
+    realtimeBroadcaster.broadcast(colName, 'delete', this.id);
   }
 }
 
-export type WhereFilterOp = '<' | '<=' | '==' | '!=' | '>=' | '>' | 'array-contains' | 'in' | 'array-contains-any';
+export class Query {
+  protected filters: Array<{ field: string; op: string; value: any }> = [];
+  protected orderings: Array<{ field: string; direction: 'ASCENDING' | 'DESCENDING' }> = [];
+  protected limitVal?: number;
 
-interface QueryFilter {
-  field: string;
-  op: WhereFilterOp;
-  value: any;
-}
+  constructor(public readonly collectionRef: CollectionReference) {}
 
-interface QueryOrder {
-  field: string;
-  direction: 'asc' | 'desc';
-}
-
-export class WrappedQuery {
-  protected filters: QueryFilter[] = [];
-  protected orders: QueryOrder[] = [];
-  protected limitCount?: number;
-
-  constructor(public readonly collectionName: string) {}
-
-  where(field: string, op: WhereFilterOp, value: any): WrappedQuery {
-    const q = new WrappedQuery(this.collectionName);
+  where(field: string, op: string, value: any): Query {
+    const q = new Query(this.collectionRef);
     q.filters = [...this.filters, { field, op, value }];
-    q.orders = [...this.orders];
-    q.limitCount = this.limitCount;
+    q.orderings = [...this.orderings];
+    q.limitVal = this.limitVal;
     return q;
   }
 
-  orderBy(field: string, direction: 'asc' | 'desc' = 'asc'): WrappedQuery {
-    const q = new WrappedQuery(this.collectionName);
+  orderBy(field: string, direction: 'asc' | 'desc' = 'asc'): Query {
+    const q = new Query(this.collectionRef);
     q.filters = [...this.filters];
-    q.orders = [...this.orders, { field, direction }];
-    q.limitCount = this.limitCount;
+    q.orderings = [...this.orderings, { field, direction: direction === 'desc' ? 'DESCENDING' : 'ASCENDING' }];
+    q.limitVal = this.limitVal;
     return q;
   }
 
-  limit(count: number): WrappedQuery {
-    const q = new WrappedQuery(this.collectionName);
+  limit(count: number): Query {
+    const q = new Query(this.collectionRef);
     q.filters = [...this.filters];
-    q.orders = [...this.orders];
-    q.limitCount = count;
+    q.orderings = [...this.orderings];
+    q.limitVal = count;
     return q;
   }
 
-  async get(): Promise<WrappedQuerySnapshot> {
-    const cache = getCollectionCache(this.collectionName);
-    const isCacheFresh = cache.docs.size > 0 && (Date.now() - cache.lastFetched < CACHE_TTL_MS);
+  async get(): Promise<QuerySnapshot> {
+    const colName = this.collectionRef.id;
+    const colMap = getMemoryCollection(colName);
 
-    let docs: any[] = [];
-
-    if (isCacheFresh) {
-      docs = Array.from(cache.docs.values());
-    } else {
+    // Try fetching collection from Firestore if not yet fetched in last 60s
+    const now = Date.now();
+    const lastLoaded = collectionLoadedFlags.get(colName) || 0;
+    if (now - lastLoaded > 60000) {
       try {
-        const url = `${FIRESTORE_BASE_URL}:runQuery`;
-        const structuredQuery: any = {
-          from: [{ collectionId: this.collectionName }]
-        };
-
-        const res = await firestoreFetch(url, {
-          method: 'POST',
-          body: JSON.stringify({ structuredQuery })
-        });
-
-        if (Array.isArray(res)) {
-          const fetchedDocs = res
-            .filter((d: any) => d.document && d.document.fields)
-            .map((d: any) => fromFirestoreDoc(d.document));
-
-          // Populate cache
-          cache.docs.clear();
-          for (const d of fetchedDocs) {
-            cache.docs.set(d.id, d);
+        const url = `${BASE_URL}/${colName}?pageSize=300&key=${FIREBASE_API_KEY}`;
+        const res = await fetch(url);
+        if (res.status === 200) {
+          const json = await res.json();
+          const remoteDocs = json.documents || [];
+          for (const d of remoteDocs) {
+            const data = fromFirestoreDoc(d);
+            if (data.id) colMap.set(data.id, data);
           }
-          cache.lastFetched = Date.now();
-          docs = fetchedDocs;
-        } else {
-          docs = Array.from(cache.docs.values());
+          collectionLoadedFlags.set(colName, now);
         }
-      } catch (err: any) {
-        // Fallback gracefully to memory cache
-        docs = Array.from(cache.docs.values());
+      } catch (err) {
+        // Quota limit or offline: safely use in-memory state
       }
     }
 
-    // Apply client-side filters
+    let items = Array.from(colMap.values());
+
+    // Apply where filters
     for (const f of this.filters) {
-      docs = docs.filter(item => {
-        const val = item[f.field];
-        if (f.op === '==') return val === f.value;
+      items = items.filter(it => {
+        const val = it[f.field];
+        if (f.op === '==' || f.op === 'equal') return val === f.value;
         if (f.op === '!=') return val !== f.value;
-        if (f.op === '<') return val < f.value;
-        if (f.op === '<=') return val <= f.value;
         if (f.op === '>') return val > f.value;
         if (f.op === '>=') return val >= f.value;
+        if (f.op === '<') return val < f.value;
+        if (f.op === '<=') return val <= f.value;
         if (f.op === 'array-contains') return Array.isArray(val) && val.includes(f.value);
         if (f.op === 'in') return Array.isArray(f.value) && f.value.includes(val);
         return true;
       });
     }
 
-    // Apply orders
-    for (const o of this.orders) {
-      docs.sort((a, b) => {
-        const valA = a[o.field];
-        const valB = b[o.field];
-        if (valA === valB) return 0;
-        if (valA === undefined || valA === null) return 1;
-        if (valB === undefined || valB === null) return -1;
-        const cmp = valA < valB ? -1 : 1;
-        return o.direction === 'desc' ? -cmp : cmp;
+    // Apply orderings
+    for (const ord of this.orderings) {
+      items.sort((a, b) => {
+        const vA = a[ord.field];
+        const vB = b[ord.field];
+        if (vA === vB) return 0;
+        if (vA === undefined || vA === null) return 1;
+        if (vB === undefined || vB === null) return -1;
+        if (ord.direction === 'ASCENDING') return vA > vB ? 1 : -1;
+        return vA < vB ? 1 : -1;
       });
     }
 
-    if (this.limitCount && this.limitCount > 0 && docs.length > this.limitCount) {
-      docs = docs.slice(0, this.limitCount);
+    if (this.limitVal && this.limitVal > 0) {
+      items = items.slice(0, this.limitVal);
     }
 
-    const wrappedDocs = docs.map(d => new WrappedDocSnapshot(d.id, true, d, this.collectionName));
-    return new WrappedQuerySnapshot(wrappedDocs);
+    const docSnaps = items.map(it => new DocumentSnapshot(it.id || '', it, true, this.collectionRef));
+    return new QuerySnapshot(docSnaps);
   }
 }
 
-export class WrappedCollectionRef extends WrappedQuery {
-  constructor(collectionName: string) {
-    super(collectionName);
+export class CollectionReference extends Query {
+  constructor(public readonly id: string) {
+    super(null as any);
+    (this as any).collectionRef = this;
   }
 
-  doc(id?: string): WrappedDocRef {
-    const docId = id || `doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    return new WrappedDocRef(this.collectionName, docId);
+  doc(id?: string): DocumentReference {
+    const docId = id || `doc_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    return new DocumentReference(this, docId);
   }
 }
 
-export class WrappedWriteBatch {
-  private writes: any[] = [];
-  private localUpdates: Array<{ col: string; id: string; data: any; type: 'set' | 'update' | 'delete' }> = [];
+export class WriteBatch {
+  private ops: Array<() => Promise<void>> = [];
 
-  set(docRef: WrappedDocRef, data: any, _options?: { merge?: boolean }) {
-    const docName = `projects/${FIREBASE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents/${docRef.collectionName}/${docRef.id}`;
-    const payload = { ...data, id: docRef.id };
-    const fields = toFirestoreFields(payload);
-    this.writes.push({
-      update: {
-        name: docName,
-        fields
-      }
-    });
-    this.localUpdates.push({ col: docRef.collectionName, id: docRef.id, data: payload, type: 'set' });
+  set(docRef: DocumentReference, data: any, options?: { merge?: boolean }) {
+    this.ops.push(() => docRef.set(data, options));
     return this;
   }
 
-  update(docRef: WrappedDocRef, data: any) {
-    const docName = `projects/${FIREBASE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents/${docRef.collectionName}/${docRef.id}`;
-    const payload = { ...data, id: docRef.id };
-    const fields = toFirestoreFields(payload);
-    this.writes.push({
-      update: {
-        name: docName,
-        fields
-      }
-    });
-    this.localUpdates.push({ col: docRef.collectionName, id: docRef.id, data: payload, type: 'update' });
+  update(docRef: DocumentReference, data: Record<string, any>) {
+    this.ops.push(() => docRef.update(data));
     return this;
   }
 
-  delete(docRef: WrappedDocRef) {
-    const docName = `projects/${FIREBASE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents/${docRef.collectionName}/${docRef.id}`;
-    this.writes.push({
-      delete: docName
-    });
-    this.localUpdates.push({ col: docRef.collectionName, id: docRef.id, data: null, type: 'delete' });
+  delete(docRef: DocumentReference) {
+    this.ops.push(() => docRef.delete());
     return this;
   }
 
   async commit(): Promise<void> {
-    // Apply local updates immediately
-    for (const u of this.localUpdates) {
-      const cache = getCollectionCache(u.col);
-      if (u.type === 'delete') {
-        cache.docs.delete(u.id);
-      } else {
-        const existing = cache.docs.get(u.id) || {};
-        cache.docs.set(u.id, { ...existing, ...u.data });
-      }
-    }
-
-    if (this.writes.length === 0) return;
-    try {
-      const url = `${FIRESTORE_BASE_URL}:commit`;
-      await firestoreFetch(url, {
-        method: 'POST',
-        body: JSON.stringify({ writes: this.writes })
-      });
-    } catch (err: any) {
-      console.warn('[Firestore] Batch commit remote sync note:', err.message || err);
+    for (const op of this.ops) {
+      await op();
     }
   }
 }
 
-// -------------------------------------------------------------
-// ONE FIRESTORE INSTANCE
-// -------------------------------------------------------------
-export const firestore = {
-  collection(name: string): WrappedCollectionRef {
-    return new WrappedCollectionRef(name);
-  },
-
-  doc(pathStr: string): WrappedDocRef {
-    const parts = pathStr.split('/');
-    if (parts.length === 2) {
-      return new WrappedDocRef(parts[0], parts[1]);
-    }
-    throw new Error(`Invalid document path: ${pathStr}. Expected 'collection/docId'.`);
-  },
-
-  batch(): WrappedWriteBatch {
-    return new WrappedWriteBatch();
-  },
-
-  async runTransaction<T>(updateFunction: (transaction: {
-    get: (docRef: WrappedDocRef) => Promise<WrappedDocSnapshot>;
-    set: (docRef: WrappedDocRef, data: any, options?: { merge?: boolean }) => Promise<any>;
-    update: (docRef: WrappedDocRef, data: any) => Promise<any>;
-    delete: (docRef: WrappedDocRef) => Promise<any>;
-  }) => Promise<T>): Promise<T> {
-    const transaction = {
-      get: (docRef: WrappedDocRef) => docRef.get(),
-      set: (docRef: WrappedDocRef, data: any, options?: { merge?: boolean }) => docRef.set(data, options),
-      update: (docRef: WrappedDocRef, data: any) => docRef.update(data),
-      delete: (docRef: WrappedDocRef) => docRef.delete()
-    };
-    return await updateFunction(transaction);
+export class Transaction {
+  async get(docRef: DocumentReference): Promise<DocumentSnapshot> {
+    return docRef.get();
   }
-};
 
+  set(docRef: DocumentReference, data: any, options?: { merge?: boolean }) {
+    docRef.set(data, options);
+    return this;
+  }
+
+  update(docRef: DocumentReference, data: Record<string, any>) {
+    docRef.update(data);
+    return this;
+  }
+
+  delete(docRef: DocumentReference) {
+    docRef.delete();
+    return this;
+  }
+}
+
+export class FirestoreClient {
+  collection(name: string): CollectionReference {
+    return new CollectionReference(name);
+  }
+
+  doc(pathStr: string): DocumentReference {
+    const parts = pathStr.split('/');
+    const colName = parts[0];
+    const docId = parts.slice(1).join('/');
+    return new CollectionReference(colName).doc(docId);
+  }
+
+  batch(): WriteBatch {
+    return new WriteBatch();
+  }
+
+  async runTransaction<T>(updateFunction: (transaction: Transaction) => Promise<T>): Promise<T> {
+    const transaction = new Transaction();
+    return updateFunction(transaction);
+  }
+
+  settings(_cfg: any) {}
+}
+
+export const firestore = new FirestoreClient();
 export const rawDb = firestore;
 
+// Storage Bucket instance
 export const bucket = {
   name: firebaseConfig.storageBucket || '',
   file: (_filePath: string) => ({
-    save: async (_buffer: Buffer, _options?: any) => {
-      return Promise.resolve();
-    }
+    save: async (_buffer: Buffer, _options?: any) => Promise.resolve()
   })
 };
 
@@ -730,11 +556,9 @@ export function getDatabaseMetadata() {
   return {
     projectId: FIREBASE_PROJECT_ID,
     databaseId: FIRESTORE_DATABASE_ID,
-    engine: 'cloud-firestore-permanent',
+    engine: 'firestore-rest-client',
     connected: true,
     healthy: true,
-    localCacheActive: true,
-    collectionStats: {} as Record<string, number>,
     timestamp: new Date().toISOString()
   };
 }

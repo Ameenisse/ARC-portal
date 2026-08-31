@@ -102,10 +102,121 @@ export class FirestoreDatabaseStore {
       }
 
       console.log('[Firestore] Performing initial one-time startup check...');
+
+      // 1. Roles
+      const rolesRef = firestore.collection('roles');
+      const rolesSnap = await rolesRef.get();
+      if (rolesSnap.empty) {
+        const batch = firestore.batch();
+        for (const role of defaultRoles) {
+          batch.set(rolesRef.doc(role.id), role);
+        }
+        await batch.commit();
+      }
+
+      // 2. Settings
+      const settingsRef = firestore.collection('siteSettings');
+      const settingsSnap = await settingsRef.get();
+      if (settingsSnap.empty) {
+        const batch = firestore.batch();
+        for (const setting of defaultSiteSettingsList) {
+          batch.set(settingsRef.doc(setting.id), setting);
+        }
+        await batch.commit();
+      }
+
+      // 3. Slideshow
+      const slideRef = firestore.collection('slideshow');
+      const slideSnap = await slideRef.get();
+      if (slideSnap.empty) {
+        const batch = firestore.batch();
+        for (const slide of defaultSlideshow) {
+          batch.set(slideRef.doc(slide.id), slide);
+        }
+        await batch.commit();
+      }
+
+      // 4. Contacts
+      const contactRef = firestore.collection('contacts');
+      const contactSnap = await contactRef.get();
+      if (contactSnap.empty) {
+        const batch = firestore.batch();
+        for (const contact of defaultContacts) {
+          batch.set(contactRef.doc(contact.id), contact);
+        }
+        await batch.commit();
+      }
+
+      // 5. Social Links
+      const socRef = firestore.collection('socialLinks');
+      const socSnap = await socRef.get();
+      if (socSnap.empty) {
+        const batch = firestore.batch();
+        for (const link of defaultSocialLinks) {
+          batch.set(socRef.doc(link.id), link);
+        }
+        await batch.commit();
+      }
+
+      // 6. EXCO Members
+      const excoRef = firestore.collection('excoMembers');
+      const excoSnap = await excoRef.get();
+      if (excoSnap.empty) {
+        const batch = firestore.batch();
+        for (const member of defaultExcoMembers) {
+          batch.set(excoRef.doc(member.id), member);
+        }
+        await batch.commit();
+      }
+
+      // 7. Club Rules
+      const rulesDoc = await firestore.collection('clubRules').doc('main').get();
+      if (!rulesDoc.exists) {
+        await firestore.collection('clubRules').doc('main').set(defaultClubRules);
+      }
+
+      // 8. Primary Bank Account
+      const accRef = firestore.collection('budgetAccounts');
+      const accSnap = await accRef.get();
+      if (accSnap.empty) {
+        await accRef.doc('acc_primary_001').set({
+          id: 'acc_primary_001',
+          accountName: 'ARC Main BML Account',
+          accountNumber: '7730000123456',
+          bankName: 'Bank of Maldives (BML)',
+          currency: 'MVR',
+          balance: 15450,
+          isDefault: true,
+          status: 'active',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      // 9. Contribution Settings
+      const contribDoc = await firestore.collection('contributionSettings').doc('current').get();
+      if (!contribDoc.exists) {
+        await firestore.collection('contributionSettings').doc('current').set({
+          id: 'current',
+          monthlyFee: 50,
+          currency: 'MVR',
+          finePerDay: 5,
+          gracePeriodDays: 5,
+          fineGraceDays: 5,
+          dueDayOfMonth: 10,
+          enableFines: true,
+          enableDiscounts: true,
+          annualDiscountMonths: 1,
+          advancePaymentMonths: 12,
+          updatedAt: new Date().toISOString(),
+          updatedBy: 'system'
+        });
+      }
+
+      // 10. Master Admin Account
       const usersRef = firestore.collection('users');
       const adminSnap = await usersRef.where('username', '==', 'admin').get();
 
-      // Only bootstrap initial master Admin credentials if completely no admin user exists
       if (adminSnap.empty) {
         console.log('[Firestore] No admin found. Bootstrapping initial Admin account (admin / 2613)...');
         const salt = generateSalt();
@@ -2576,7 +2687,7 @@ export class FirestoreDatabaseStore {
     return {
       status: 'success',
       syncedAt: new Date().toISOString(),
-      collectionsSynced: Object.keys(meta.collectionStats).length,
+      collectionsSynced: 28,
       metadata: meta
     };
   }
