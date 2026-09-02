@@ -1031,10 +1031,12 @@ export const RamazanQuizMgmtPage: React.FC = () => {
   };
 
   const handleReselectWinner = (w: any) => {
-    setNotEligibleTargetIdentifier(`Winner Entry #${w.participantNumber} (Day ${w.questionNumber || 'Quiz'})`);
+    setNotEligibleTargetIdentifier(`Winner Entry #${w.participantNumber || w.id} (Day ${w.questionNumber || 'Quiz'})`);
     setNotEligibleCallback(() => async (reason: string) => {
-      const res = await api.reselectWinner(w.questionId, reason);
-      showToast('success', `Replacement winner selected: ${res.winner.participantNumber}`);
+      const winnerIdentifier = w.id || w.questionId;
+      const res = await api.reselectWinner(winnerIdentifier, reason);
+      const newNumber = res?.winner?.participantNumber || res?.newWinner?.participantNumber || 'New Winner';
+      showToast('success', `Replacement winner selected: ${newNumber}`);
       fetchWinners();
     });
     setNotEligibleModalOpen(true);
