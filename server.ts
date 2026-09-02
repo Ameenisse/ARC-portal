@@ -101,67 +101,37 @@ async function runQuizBackgroundProcess() {
       if (revealMs > 0 && nowMs >= revealMs) {
         const existingWinner = winners.find(w => w.questionId === q.id && w.publicStatus === 'published' && !w.isReplaced);
         if (!existingWinner) {
-          const eligibleSubmissions = submissions.filter(s =>
-            s.questionId === q.id &&
-            s.isCorrect &&
-            s.isEligible &&
-            !s.isDisqualified &&
-            !s.isInvalid &&
-            !ineligibleSet.has((s.normalizedIdNumber || '').toUpperCase())
-          );
-
-          if (eligibleSubmissions.length > 0) {
-            const randomIndex = Math.floor(Math.random() * eligibleSubmissions.length);
-            const selectedSub = eligibleSubmissions[randomIndex];
-            const auditRef = `SYS-AUTO-DRAW-${Date.now()}`;
-
-            const newWinner = await db.createQuizWinner({
-              questionId: q.id,
-              submissionId: selectedSub.id,
-              participantNumber: selectedSub.participantNumber,
-              participantName: selectedSub.maskedIdNumber,
-              idNumber: selectedSub.normalizedIdNumber || selectedSub.idNumber,
-              contactNumber: selectedSub.contactNumber,
-              maskedIdNumber: selectedSub.maskedIdNumber,
-              maskedContactNumber: selectedSub.maskedContactNumber,
-              prizeTitle: q.prizeTitle || 'Quiz Prize',
-              prizeId: q.prizeId || '',
-              sponsorId: q.sponsorId || '',
-              eligibleCount: eligibleSubmissions.length,
-              selectedAt: new Date().toISOString(),
-              selectedBy: 'system',
-              selectionMethod: 'random',
-              auditReference: auditRef,
-              contactedStatus: 'not_contacted',
-              prizeCollectionStatus: 'pending',
-              publicStatus: 'published',
-              internalNotes: 'Auto-drawn by background activity system at Winner Announcement Time.'
-            }).catch(e => console.error('Error saving auto winner:', e));
-
-            await db.logAudit({
-              userId: 'system',
-              username: 'system',
-              fullName: 'Background System Activity',
-              action: 'AUTO_SELECT_QUIZ_WINNER',
-              module: 'ramazan_quiz',
-              recordId: newWinner ? newWinner.id : q.id,
-              newValue: { winner: selectedSub.participantNumber, auditReference: auditRef, eligibleCount: eligibleSubmissions.length },
-              reason: 'Automatic background draw at Winner Announcement Time'
-            });
+          try {
+            const drawResult = await db.drawQuizWinner(q.id, 'system');
+            if (drawResult?.winner) {
+              await db.logAudit({
+                userId: 'system',
+                username: 'system',
+                fullName: 'Background System Activity',
+                action: 'AUTO_SELECT_QUIZ_WINNER',
+                module: 'quiz',
+                recordId: drawResult.winner.id,
+                reason: 'Automatic background draw at Winner Announcement Time'
+              });
+              realtimeBroadcaster.broadcast('quiz_winners', 'create', drawResult.winner);
+              realtimeBroadcaster.broadcast('quiz_questions', 'update', { id: q.id, status: 'completed' });
+            }
+          } catch (autoDrawErr: any) {
+            // No eligible submissions or already drawn - ignore
           }
         }
       }
     }
-  } catch (err) {
-    console.error('Error in runQuizBackgroundProcess:', err);
+  } catch (err: any) {
+    // Gracefully handle database or permission errors without noisy stack traces
+    if (!err?.message?.includes('PERMISSION_DENIED')) {
+      console.error('Notice in runQuizBackgroundProcess:', err?.message || err);
+    }
   }
 }
 
 // Start background activity runner every 60 seconds (quota-friendly)
 setInterval(runQuizBackgroundProcess, 60000);
-
-// Rate-limiting login attempts map
-const failedLogins = new Map<string, { count: number; lockedUntil: number }>();
 
 // Helper to sanitize User object for client response
 function sanitizeUser(u: any): User {
@@ -181,10 +151,13 @@ async function authenticateSession(req: Request, res: Response, next: NextFuncti
     let session = sessions.get(token);
 
     if (!session) {
-      const dbSessions = await db.getSessions();
-      const match = dbSessions.find(s => s.token === token);
-      if (match && match.expiresAt > Date.now()) {
-        session = match;
+      const dbSession = await db.getSessionByToken(token);
+      if (dbSession && !dbSession.revokedAt && dbSession.expiresAt > Date.now()) {
+        session = {
+          token,
+          userId: dbSession.userId,
+          expiresAt: dbSession.expiresAt
+        };
         sessions.set(token, session);
       }
     }
@@ -197,24 +170,14 @@ async function authenticateSession(req: Request, res: Response, next: NextFuncti
       return res.status(401).json({ error: 'Session expired or invalid. Please log in again.' });
     }
 
-    // Extend session in-memory
-    const now = Date.now();
-    session.expiresAt = now + 30 * 60 * 1000;
-    
-    // Throttle Firestore write for session renewal to at most once per 10 minutes
-    if (!session.lastSavedAt || (now - session.lastSavedAt > 10 * 60 * 1000)) {
-      session.lastSavedAt = now;
-      db.saveSession({
-        token: session.token,
-        userId: session.userId,
-        expiresAt: session.expiresAt
-      }).catch(e => console.warn('Non-blocking session persist:', e.message));
-    }
+    // Touch session non-blocking
+    db.touchSession(token);
 
+    const now = Date.now();
     // Check user cache with 60s TTL
     let user = session.cachedUser;
     if (!user || !session.cachedUserAt || (now - session.cachedUserAt > 60 * 1000)) {
-      user = await db.getUserById(session.userId) || undefined;
+      user = (await db.getUserById(session.userId)) || undefined;
       if (user) {
         session.cachedUser = user;
         session.cachedUserAt = now;
@@ -225,6 +188,12 @@ async function authenticateSession(req: Request, res: Response, next: NextFuncti
       sessions.delete(token);
       await db.deleteSession(token).catch(() => {});
       return res.status(403).json({ error: 'Account is deactivated or locked.' });
+    }
+
+    if (user.lockedUntil && Number(user.lockedUntil) > Date.now()) {
+      sessions.delete(token);
+      await db.deleteSession(token).catch(() => {});
+      return res.status(403).json({ error: 'Account is temporarily locked.' });
     }
 
     (req as any).user = user;
@@ -410,74 +379,26 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     }
 
     const cleanUsername = String(username).trim().toLowerCase();
-    const lockInfo = failedLogins.get(cleanUsername);
-
-    if (lockInfo && lockInfo.lockedUntil > Date.now()) {
-      const remainingSecs = Math.ceil((lockInfo.lockedUntil - Date.now()) / 1000);
-      return res.status(429).json({ error: `Account temporarily locked due to failed login attempts. Try again in ${remainingSecs}s.` });
-    }
-
-    let user = await db.getUserByUsername(cleanUsername);
-
-    // If logging in as admin with default/configured master pin 2613, ensure admin exists and is active
-    if (cleanUsername === 'admin' && String(pin).trim() === '2613') {
-      failedLogins.delete('admin');
-      if (!user) {
-        user = await db.createUser({
-          id: 'usr_admin_001',
-          fullName: 'System Administrator',
-          username: 'admin',
-          designation: 'Chief Administrator',
-          contactNumber: '+960 7771234',
-          roleId: 'role_admin',
-          roleName: 'Admin',
-          status: 'active',
-          requirePinChange: false,
-          permissions: ALL_MODULES.map(m => ({
-            id: `perm_usr_admin_001_${m}`,
-            roleId: 'role_admin',
-            userId: 'usr_admin_001',
-            moduleKey: m,
-            canView: true,
-            canCreate: true,
-            canEdit: true,
-            canDelete: true,
-            canPublish: true,
-            canApprove: true,
-            canExport: true,
-            canManageSettings: true
-          }))
-        });
-      } else if (user.status !== 'active') {
-        user = await db.updateUser(user.id, { status: 'active', lockedUntil: null, failedLoginCount: 0 });
-      }
-    }
+    const user = await db.getUserByUsername(cleanUsername);
 
     if (!user || user.status === 'inactive') {
       return res.status(400).json({ error: 'Incorrect username or PIN.' });
     }
 
-    if (user.status === 'locked' || (user.lockedUntil && new Date(user.lockedUntil).getTime() > Date.now())) {
-      if (cleanUsername !== 'admin') {
-        return res.status(403).json({ error: 'This user account is currently locked by an administrator.' });
-      }
+    if (user.status === 'locked') {
+      return res.status(403).json({ error: 'This user account is currently locked by an administrator.' });
     }
 
-    let isValid = verifyPin(String(pin), user.pinSalt || '', user.pinHash || '');
-    if (!isValid && cleanUsername === 'admin' && String(pin).trim() === '2613') {
-      isValid = true;
-      const salt = generateSalt();
-      const pinHash = hashPin('2613', salt);
-      user.pinSalt = salt;
-      user.pinHash = pinHash;
-      db.updateUser(user.id, { pinSalt: salt, pinHash }).catch(() => {});
+    if (user.lockedUntil && Number(user.lockedUntil) > Date.now()) {
+      const remainingSecs = Math.ceil((Number(user.lockedUntil) - Date.now()) / 1000);
+      return res.status(429).json({ error: `Account temporarily locked due to failed login attempts. Try again in ${remainingSecs}s.` });
     }
+
+    const isValid = verifyPin(String(pin), user.pinSalt || '', user.pinHash || '');
 
     if (!isValid) {
-      const currentFailed = (lockInfo?.count || 0) + 1;
-      if (currentFailed >= 5) {
-        const lockDuration = 15 * 60 * 1000;
-        failedLogins.set(cleanUsername, { count: currentFailed, lockedUntil: Date.now() + lockDuration });
+      const { count, lockedUntil } = await db.recordFailedLogin(user.id);
+      if (lockedUntil) {
         await db.logAudit({
           userId: user.id,
           username: user.username,
@@ -488,7 +409,6 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         });
         return res.status(429).json({ error: 'Too many failed login attempts. Account temporarily locked for 15 minutes.' });
       } else {
-        failedLogins.set(cleanUsername, { count: currentFailed, lockedUntil: 0 });
         await db.logAudit({
           userId: user.id,
           username: user.username,
@@ -501,13 +421,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       }
     }
 
-    failedLogins.delete(cleanUsername);
-
-    await db.updateUser(user.id, {
-      failedLoginCount: 0,
-      lockedUntil: null,
-      lastLoginAt: new Date().toISOString()
-    });
+    await db.clearFailedLogin(user.id);
 
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = Date.now() + 8 * 60 * 60 * 1000;

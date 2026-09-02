@@ -15,12 +15,20 @@ import { Sparkles, ArrowRight } from 'lucide-react';
 export const HomePage: React.FC = () => {
   const [data, setData] = useState<PublicSiteData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchSiteData = (silent = false) => {
     if (!silent) setLoading(true);
+    setError(null);
     api.getPublicSiteData()
-      .then(res => setData(res))
-      .catch(err => console.error('Failed to load public site data:', err))
+      .then(res => {
+        setData(res);
+        setError(null);
+      })
+      .catch(err => {
+        console.error('Failed to load public site data:', err);
+        setError(err.message || 'Database temporarily unavailable.');
+      })
       .finally(() => {
         if (!silent) setLoading(false);
       });
@@ -38,7 +46,7 @@ export const HomePage: React.FC = () => {
     }
   );
 
-  if (loading || !data) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
         <div className="flex flex-col items-center gap-3">
@@ -48,6 +56,30 @@ export const HomePage: React.FC = () => {
       </div>
     );
   }
+
+  if (error && !data) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white p-4">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-4 shadow-xl">
+          <div className="w-12 h-12 bg-amber-500/10 text-amber-400 rounded-xl flex items-center justify-center mx-auto border border-amber-500/20">
+            <Sparkles className="w-6 h-6" />
+          </div>
+          <h2 className="text-xl font-bold text-white">Database temporarily unavailable.</h2>
+          <p className="text-sm text-slate-400 font-thaana leading-relaxed">
+            ޑޭޓާބޭސްއާ ގުޅުމުގައި މައްސަލައެއް ދިމާވެއްޖެ. ކުޑައިރުކޮޅަކަށްފަހު އަލުން މަސައްކަތްކޮށްލައްވާ.
+          </p>
+          <button
+            onClick={() => fetchSiteData(false)}
+            className="w-full py-2.5 px-4 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-medium transition-colors shadow-lg shadow-orange-600/20"
+          >
+            އަލުން މަސައްކަތްކުރައްވާ (Retry)
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) return null;
 
   const { branding, sectionVisibility, slideshow, visionMission, contacts, socialLinks, excoMembers, events = [] } = data;
   const hasEvents = events.length > 0;

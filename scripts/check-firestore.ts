@@ -1,9 +1,9 @@
-import { firestore, firebaseConfig } from '../src/server/firebase';
+import { firestore, PROJECT_ID, DATABASE_ID } from '../src/server/firebase';
 
 export async function checkFirestore() {
   console.log('🔍 Checking Cloud Firestore Connectivity & Collections...');
-  console.log(`📌 Project ID: ${firebaseConfig.projectId || '(auto)'}`);
-  console.log(`📌 Database ID: ${firebaseConfig.firestoreDatabaseId || '(default)'}`);
+  console.log(`📌 Project ID: ${PROJECT_ID}`);
+  console.log(`📌 Database ID: ${DATABASE_ID}`);
 
   try {
     const collections = [
