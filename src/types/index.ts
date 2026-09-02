@@ -468,6 +468,8 @@ export interface QuizWinner {
   internalNotes?: string;
   replacementReason?: string;
   isReplaced?: boolean;
+  replacedAt?: string;
+  replacedBy?: string;
   // Helper properties for UI
   isContacted?: boolean;
   isPrizeCollected?: boolean;

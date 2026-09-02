@@ -262,7 +262,9 @@ app.get('/api/health/database', async (req: Request, res: Response) => {
   const health = await db.checkDatabaseHealth();
   if (health.schemaReady && health.connected) {
     return res.status(200).json({
-      backend: 'express-firebase-admin',
+      backend: 'firebase-admin',
+      projectId: 'gen-lang-client-0224683648',
+      databaseId: 'ai-studio-arc-1ed79364-547a-408d-9326-df4162ee21d6',
       database: 'cloud-firestore',
       storage: 'firebase-storage',
       connected: true,
@@ -270,8 +272,11 @@ app.get('/api/health/database', async (req: Request, res: Response) => {
     });
   } else {
     return res.status(503).json({
-      backend: 'express-firebase-admin',
+      backend: 'firebase-admin',
+      projectId: 'gen-lang-client-0224683648',
+      databaseId: 'ai-studio-arc-1ed79364-547a-408d-9326-df4162ee21d6',
       database: 'cloud-firestore',
+      storage: 'firebase-storage',
       connected: health.connected,
       ready: false,
       error: health.error || 'Cloud Firestore database connection is not ready.'
@@ -1341,7 +1346,7 @@ app.post('/api/portal/upload', authenticateSession, async (req: Request, res: Re
 
         await file.save(buffer, {
           metadata: { contentType: fileType || 'application/octet-stream' },
-          public: true
+          resumable: false
         });
 
         const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filePath}`;
@@ -3277,6 +3282,14 @@ app.delete('/api/portal/executive/circulars/:id', authenticateSession, async (re
 
 // Serve frontend assets or Vite middleware in dev
 async function startServer() {
+  try {
+    console.log('[Startup] Verifying Firestore database schema...');
+    await db.verifyStartupSchema();
+    console.log('[Startup] Firestore verification successful.');
+  } catch (err) {
+    console.error('[Startup] Critical error during Firestore schema verification:', err);
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -3293,10 +3306,6 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`ARC Portal server running on port ${PORT}`);
-    // Verify startup schema in background without blocking server startup
-    db.verifyStartupSchema().catch(err => {
-      console.error('[Startup] Schema verification error:', err);
-    });
   });
 }
 

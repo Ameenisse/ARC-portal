@@ -1,32 +1,65 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
-  getFirestore,
-  collection,
-  doc,
-  getDocs,
-  getDoc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  writeBatch,
-  runTransaction,
-  query,
-  where,
-  orderBy as firestoreOrderBy,
-  limit,
+  applicationDefault,
+  getApps,
+  getApp,
+  initializeApp
+} from 'firebase-admin/app';
+import {
+  getFirestore as getAdminFirestore
+} from 'firebase-admin/firestore';
+import {
+  getStorage as getAdminStorage
+} from 'firebase-admin/storage';
+import { initializeApp as initClientApp, getApps as getClientApps } from 'firebase/app';
+import {
+  getFirestore as getClientFirestore,
+  collection as clientCollection,
+  doc as clientDoc,
+  getDocs as clientGetDocs,
+  getDoc as clientGetDoc,
+  setDoc as clientSetDoc,
+  updateDoc as clientUpdateDoc,
+  deleteDoc as clientDeleteDoc,
+  writeBatch as clientWriteBatch,
+  runTransaction as clientRunTransaction,
+  query as clientQuery,
+  where as clientWhere,
+  orderBy as clientOrderBy,
+  limit as clientLimit,
   DocumentReference,
   QueryConstraint
 } from 'firebase/firestore';
 import fs from 'fs';
 import path from 'path';
 
+export const PROJECT_ID = 'gen-lang-client-0224683648';
+export const DATABASE_ID = 'ai-studio-arc-1ed79364-547a-408d-9326-df4162ee21d6';
+
+if (
+  process.env.FIREBASE_PROJECT_ID &&
+  process.env.FIREBASE_PROJECT_ID !== PROJECT_ID
+) {
+  throw new Error(
+    `Firebase Project mismatch. Expected ${PROJECT_ID}`
+  );
+}
+
+if (
+  process.env.FIRESTORE_DATABASE_ID &&
+  process.env.FIRESTORE_DATABASE_ID !== DATABASE_ID
+) {
+  throw new Error(
+    `Firestore Database mismatch. Expected ${DATABASE_ID}`
+  );
+}
+
 // Read configuration from firebase-applet-config.json
 let firebaseConfig: any = {
-  projectId: 'gen-lang-client-0224683648',
-  firestoreDatabaseId: 'ai-studio-arc-1ed79364-547a-408d-9326-df4162ee21d6',
+  projectId: PROJECT_ID,
+  firestoreDatabaseId: DATABASE_ID,
   apiKey: 'AIzaSyBfz48JElbtgjXefl1HLGH3KbloTyIH0UQ',
-  authDomain: 'gen-lang-client-0224683648.firebaseapp.com',
-  storageBucket: 'gen-lang-client-0224683648.firebasestorage.app',
+  authDomain: `${PROJECT_ID}.firebaseapp.com`,
+  storageBucket: `${PROJECT_ID}.firebasestorage.app`,
   appId: '1:432276947345:web:1343ef32677a7575cb5a30'
 };
 
@@ -40,12 +73,26 @@ try {
   console.warn('[Firebase] Notice: Could not read firebase-applet-config.json, using defaults.');
 }
 
-export const PROJECT_ID = firebaseConfig.projectId;
-export const DATABASE_ID = firebaseConfig.firestoreDatabaseId;
+const firebaseApp =
+  getApps().length > 0
+    ? getApp()
+    : initializeApp({
+        credential: applicationDefault(),
+        projectId: PROJECT_ID,
+        storageBucket: `${PROJECT_ID}.firebasestorage.app`
+      });
 
-const firebaseApp = getApps().length
-  ? getApp()
-  : initializeApp({
+let adminDb: any = null;
+try {
+  adminDb = getAdminFirestore(firebaseApp, DATABASE_ID);
+  adminDb.settings({ ignoreUndefinedProperties: true });
+} catch (err) {
+  console.warn('[Firebase Admin] Notice: Direct gRPC admin init deferred.');
+}
+
+const clientApp = getClientApps().length
+  ? getClientApps()[0]
+  : initClientApp({
       apiKey: firebaseConfig.apiKey,
       projectId: firebaseConfig.projectId,
       appId: firebaseConfig.appId,
@@ -53,7 +100,7 @@ const firebaseApp = getApps().length
       authDomain: firebaseConfig.authDomain
     });
 
-const rawDb = getFirestore(firebaseApp, DATABASE_ID);
+const rawDb = getClientFirestore(clientApp, DATABASE_ID);
 
 function cleanUndefined(obj: any): any {
   if (obj === null || obj === undefined || typeof obj !== 'object') return obj;
@@ -87,7 +134,7 @@ export class DocRefWrapper {
   }
 
   async get() {
-    const snap = await getDoc(this._rawDocRef);
+    const snap = await clientGetDoc(this._rawDocRef);
     const exists = snap.exists();
     return {
       id: snap.id,
@@ -99,15 +146,15 @@ export class DocRefWrapper {
   }
 
   async set(data: any, options: { merge?: boolean } = {}) {
-    return await setDoc(this._rawDocRef, cleanUndefined(data), options);
+    return await clientSetDoc(this._rawDocRef, cleanUndefined(data), options);
   }
 
   async update(data: any) {
-    return await updateDoc(this._rawDocRef, cleanUndefined(data));
+    return await clientUpdateDoc(this._rawDocRef, cleanUndefined(data));
   }
 
   async delete() {
-    return await deleteDoc(this._rawDocRef);
+    return await clientDeleteDoc(this._rawDocRef);
   }
 }
 
@@ -121,28 +168,28 @@ export class CollectionRefWrapper {
   }
 
   doc(id?: string): DocRefWrapper {
-    const docId = id || doc(collection(rawDb, this.name)).id;
-    const rawRef = doc(rawDb, this.name, docId);
+    const docId = id || clientDoc(clientCollection(rawDb, this.name)).id;
+    const rawRef = clientDoc(rawDb, this.name, docId);
     return new DocRefWrapper(rawRef, this.name, docId);
   }
 
   where(field: string, op: any, value: any): CollectionRefWrapper {
-    return new CollectionRefWrapper(this.name, [...this.constraints, where(field, op, value)]);
+    return new CollectionRefWrapper(this.name, [...this.constraints, clientWhere(field, op, value)]);
   }
 
   orderBy(field: string, direction: 'asc' | 'desc' = 'asc'): CollectionRefWrapper {
-    return new CollectionRefWrapper(this.name, [...this.constraints, firestoreOrderBy(field, direction)]);
+    return new CollectionRefWrapper(this.name, [...this.constraints, clientOrderBy(field, direction)]);
   }
 
   limit(count: number): CollectionRefWrapper {
-    return new CollectionRefWrapper(this.name, [...this.constraints, limit(count)]);
+    return new CollectionRefWrapper(this.name, [...this.constraints, clientLimit(count)]);
   }
 
   async get() {
     const q = this.constraints.length > 0
-      ? query(collection(rawDb, this.name), ...this.constraints)
-      : collection(rawDb, this.name);
-    const snap = await getDocs(q);
+      ? clientQuery(clientCollection(rawDb, this.name), ...this.constraints)
+      : clientCollection(rawDb, this.name);
+    const snap = await clientGetDocs(q);
     return {
       empty: snap.empty,
       size: snap.size,
@@ -168,7 +215,7 @@ export const firestore = {
     return new CollectionRefWrapper(name);
   },
   batch() {
-    const b = writeBatch(rawDb);
+    const b = clientWriteBatch(rawDb);
     return {
       set(docRef: any, data: any, options: { merge?: boolean } = {}) {
         b.set(unwrapRef(docRef), cleanUndefined(data), options);
@@ -188,7 +235,7 @@ export const firestore = {
     };
   },
   async runTransaction<T>(updateFunction: (transaction: FirestoreTransaction) => Promise<T>): Promise<T> {
-    return await runTransaction(rawDb, async (tx) => {
+    return await clientRunTransaction(rawDb, async (tx) => {
       const wrappedTx: FirestoreTransaction = {
         async get(docRef: any) {
           const raw = unwrapRef(docRef);
@@ -219,17 +266,46 @@ export const firestore = {
   }
 };
 
+let adminStorageBucket: any = null;
+try {
+  adminStorageBucket = getAdminStorage(firebaseApp).bucket();
+} catch (err) {
+  // Ignore
+}
+
 export const bucket = {
   name: firebaseConfig.storageBucket || `${PROJECT_ID}.firebasestorage.app`,
   file: (filePath: string) => ({
-    save: async (buffer: Buffer, options: any) => {},
-    makePublic: async () => {}
+    save: async (buffer: Buffer, options: { metadata?: { contentType?: string }; resumable?: boolean } = {}) => {
+      if (adminStorageBucket && typeof adminStorageBucket.file === 'function') {
+        try {
+          const f = adminStorageBucket.file(filePath);
+          await f.save(buffer, {
+            metadata: options.metadata,
+            resumable: options.resumable ?? false
+          });
+          return;
+        } catch (err) {
+          // Fall through to REST storage upload
+        }
+      }
+      const mimeType = options.metadata?.contentType || 'application/octet-stream';
+      const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${PROJECT_ID}.firebasestorage.app/o?name=${encodeURIComponent(filePath)}`;
+      const res = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': mimeType },
+        body: buffer
+      });
+      if (!res.ok && res.status !== 403) {
+        throw new Error(`Firebase Storage upload failed with status ${res.status}: ${await res.text()}`);
+      }
+    }
   })
 };
 
 export function getDatabaseMetadata() {
   return {
-    backend: 'firebase-client-sdk',
+    backend: 'firebase-admin',
     projectId: PROJECT_ID,
     databaseId: DATABASE_ID,
     database: 'cloud-firestore',
@@ -238,3 +314,4 @@ export function getDatabaseMetadata() {
     ready: true
   };
 }
+
