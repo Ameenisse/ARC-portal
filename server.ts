@@ -1,12 +1,18 @@
 process.env.TZ = 'Indian/Maldives';
 import express, { Request, Response, NextFunction } from 'express';
+import compression from 'compression';
 import path from 'path';
+import fs from 'fs';
+import { execSync } from 'child_process';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { db, verifyPin, hashPin, generateSalt } from './src/server/db';
+import { Coordinates, CalculationMethod, PrayerTimes, Madhab } from 'adhan';
 import { ALL_MODULES } from './src/server/seedData';
 import { bucket } from './src/server/firebase';
 import { realtimeBroadcaster } from './src/server/realtime';
+import { rentalDb } from './src/server/rentalDb';
+import { registerRentalRoutes } from './src/server/rentalRoutes';
 import {
   User,
   PublicSiteData,
@@ -22,6 +28,7 @@ import {
 const app = express();
 const PORT = 3000;
 
+app.use(compression());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -32,6 +39,14 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   res.setHeader('Expires', '0');
   res.setHeader('Surrogate-Control', 'no-store');
   next();
+});
+
+app.get('/favicon.ico', (req: Request, res: Response) => {
+  res.sendFile(path.join(process.cwd(), 'public', 'favicon.ico'));
+});
+
+app.get('/api/public/app-icon', (req: Request, res: Response) => {
+  res.sendFile(path.join(process.cwd(), 'public', 'arc-app-icon.png'));
 });
 
 // Active In-Memory Sessions cache with Cloud Firestore persistence
@@ -133,21 +148,72 @@ async function runQuizBackgroundProcess() {
 // Start background activity runner every 60 seconds (quota-friendly)
 setInterval(runQuizBackgroundProcess, 60000);
 
+// Global Admin Checker Helper
+function isUserAdmin(user: any): boolean {
+  if (!user) return false;
+  const roleName = (user.roleName || '').toLowerCase();
+  const roleId = (user.roleId || '').toLowerCase();
+  const username = (user.username || '').toLowerCase();
+  const role = (user.role || '').toLowerCase();
+  return (
+    roleName === 'admin' ||
+    roleName.includes('admin') ||
+    roleId === 'role_admin' ||
+    roleId === 'admin' ||
+    roleId.includes('admin') ||
+    username === 'admin' ||
+    role === 'admin' ||
+    role === 'super_admin' ||
+    user.isAdmin === true
+  );
+}
+
 // Helper to sanitize User object for client response
 function sanitizeUser(u: any): User {
   const { pinHash, pinSalt, ...safeUser } = u;
+  if (isUserAdmin(safeUser)) {
+    // Admin must have all modules and actions authorized
+    safeUser.permissions = ALL_MODULES.map(m => ({
+      id: `perm_admin_${m}`,
+      userId: safeUser.id,
+      moduleKey: m,
+      canView: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+      canPublish: true,
+      canApprove: true,
+      canExport: true,
+      canManageSettings: true
+    }));
+  }
   return safeUser as User;
 }
 
 // Authentication Middleware
 async function authenticateSession(req: Request, res: Response, next: NextFunction) {
   try {
+    let token = '';
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7).trim();
+    } else if (req.headers['x-auth-token']) {
+      token = String(req.headers['x-auth-token']).trim();
+    } else if (req.headers.cookie) {
+      const match = req.headers.cookie.match(/(?:arc_auth_token|sessionToken|token)=([^;]+)/);
+      if (match) {
+        token = decodeURIComponent(match[1]).trim();
+      }
+    }
+
+    if (!token && typeof req.query.token === 'string') {
+      token = req.query.token.trim();
+    }
+
+    if (!token) {
       return res.status(401).json({ error: 'Unauthorized. Please log in.' });
     }
 
-    const token = authHeader.substring(7);
     let session = sessions.get(token);
 
     if (!session) {
@@ -211,10 +277,8 @@ function requirePermission(moduleKey: ModuleKey, actionKey: keyof Omit<ModulePer
     const user: User = (req as any).user;
     if (!user) return res.status(401).json({ error: 'Unauthorized.' });
 
-    const roleName = (user.roleName || '').toLowerCase();
-    const roleId = (user.roleId || '').toLowerCase();
-    const isAdmin = roleName === 'admin' || roleId === 'role_admin' || roleId === 'admin';
-    if (isAdmin) return next();
+    // Admin user has universal authorization across all modules and all actions
+    if (isUserAdmin(user)) return next();
 
     if (moduleKey === 'audit_logs') {
       return res.status(403).json({ error: 'System Audit Logs are restricted to Admin users only.' });
@@ -233,7 +297,9 @@ function requirePermission(moduleKey: ModuleKey, actionKey: keyof Omit<ModulePer
       quiz: ['quiz', 'ramazan_quiz'],
       ramazan_quiz: ['ramazan_quiz', 'quiz', 'quiz_participants', 'quiz_winners'],
       users: ['users', 'roles_permissions', 'roles'],
-      roles_permissions: ['roles_permissions', 'roles', 'users']
+      roles_permissions: ['roles_permissions', 'roles', 'users'],
+      health_awareness: ['health_awareness', 'content'],
+      rental_service: ['rental_service']
     };
 
     const keysToCheck = aliases[moduleKey] || [moduleKey];
@@ -249,6 +315,11 @@ function requirePermission(moduleKey: ModuleKey, actionKey: keyof Omit<ModulePer
     next();
   };
 }
+
+// ==========================================
+// RENTAL SERVICE MODULE ROUTES
+// ==========================================
+registerRentalRoutes(app, authenticateSession, requirePermission);
 
 // ==========================================
 // 0. HEALTH CHECK & DIAGNOSTICS ENDPOINTS
@@ -443,6 +514,13 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       module: 'auth'
     });
 
+    res.cookie('arc_auth_token', token, {
+      path: '/',
+      httpOnly: false,
+      sameSite: 'lax',
+      maxAge: 8 * 60 * 60 * 1000
+    });
+
     return res.json({
       token,
       user: sanitizeUser(user)
@@ -563,6 +641,8 @@ app.post('/api/auth/logout', authenticateSession, async (req: Request, res: Resp
       module: 'auth'
     });
 
+    res.clearCookie('arc_auth_token', { path: '/' });
+
     return res.json({ message: 'Logged out successfully.' });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -573,7 +653,7 @@ app.post('/api/auth/logout', authenticateSession, async (req: Request, res: Resp
 // 2. PUBLIC SITE ENDPOINTS
 // ==========================================
 
-app.get('/api/public/site', async (req: Request, res: Response) => {
+const handlePublicSiteData = async (req: Request, res: Response) => {
   try {
     const settings = await db.getSettings();
     const slideshow = await db.getSlideshow();
@@ -581,6 +661,7 @@ app.get('/api/public/site', async (req: Request, res: Response) => {
     const socialLinks = await db.getSocialLinks();
     const excoMembers = await db.getExcoMembers();
     const events = await db.getEvents();
+    const healthAwareness = await db.getHealthAwareness();
 
     const getSetting = (group: string, key: string, defaultVal: any) => {
       const found = settings.find(s => (s.group === group || (!s.group && group === 'branding')) && s.key === key);
@@ -589,11 +670,13 @@ app.get('/api/public/site', async (req: Request, res: Response) => {
 
     const publicData: PublicSiteData = {
       branding: {
-        clubName: getSetting('branding', 'clubName', 'ARC Club'),
+        clubName: getSetting('branding', 'clubName', 'ARC - community portal'),
         clubAbbreviation: getSetting('branding', 'clubAbbreviation', 'ARC'),
-        logo: getSetting('branding', 'logo', ''),
-        useLogo: Boolean(getSetting('branding', 'useLogo', false)),
-        welcomeHeading: getSetting('branding', 'welcomeHeading', 'Welcome to ARC Club'),
+        logo: getSetting('branding', 'logo', '/arc-app-icon.png'),
+        useLogo: Boolean(getSetting('branding', 'useLogo', true)),
+        appIcon: getSetting('branding', 'appIcon', '') || getSetting('branding', 'logo', '/arc-app-icon.png'),
+        useCustomAppIcon: Boolean(getSetting('branding', 'useCustomAppIcon', false)),
+        welcomeHeading: getSetting('branding', 'welcomeHeading', 'އާނަންދަ ރިކުރިއޭޝަން ކުލަބު (ARC) ގެ ވެބްސައިޓަށް މަރުޙަބާ!'),
         welcomeMessage: getSetting('branding', 'welcomeMessage', 'Connecting hearts and encouraging excellence.'),
         aboutText: getSetting('branding', 'aboutText', 'ARC Club is a community organization.'),
         headerTitle: getSetting('branding', 'headerTitle', 'ARC Club'),
@@ -626,12 +709,144 @@ app.get('/api/public/site', async (req: Request, res: Response) => {
       contacts: contacts.filter(c => c.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
       socialLinks: socialLinks.filter(s => s.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
       excoMembers: excoMembers.filter(e => e.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
-      events: events.filter(e => e.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
+      events: events.filter(e => e.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
+      healthAwareness: healthAwareness.filter(h => h.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
     };
 
     return res.json(publicData);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
+  }
+};
+
+app.get('/api/public/site', handlePublicSiteData);
+app.get('/api/public/site-data', handlePublicSiteData);
+
+app.get('/api/public/health-awareness', async (req: Request, res: Response) => {
+  try {
+    const items = await db.getHealthAwareness();
+    return res.json(items.filter(h => h.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)));
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Prayer Times Calculation for Today's Date & Auto Device Location
+interface PrayerTimeItem {
+  key: string;
+  nameDv: string;
+  time: string;
+  isNext: boolean;
+}
+
+interface PrayerTimesPayload {
+  ok: boolean;
+  dateStr: string;
+  locationName: string;
+  isAutoLocation: boolean;
+  coordinates: { latitude: number; longitude: number };
+  prayers: PrayerTimeItem[];
+  nextPrayer: PrayerTimeItem | null;
+  fetchedAt: number;
+}
+
+app.get('/api/public/prayer-times', async (req: Request, res: Response) => {
+  try {
+    const latParam = req.query.lat ? parseFloat(req.query.lat as string) : NaN;
+    const lngParam = req.query.lng ? parseFloat(req.query.lng as string) : NaN;
+    const tzParam = (req.query.tz as string) || 'Indian/Maldives';
+
+    const isAutoLocation = !isNaN(latParam) && !isNaN(lngParam);
+    const latitude = isAutoLocation ? latParam : 4.1755;
+    const longitude = isAutoLocation ? lngParam : 73.5093;
+
+    const coordinates = new Coordinates(latitude, longitude);
+    const params = CalculationMethod.MuslimWorldLeague();
+    params.madhab = Madhab.Shafi;
+
+    const today = new Date();
+    const pt = new PrayerTimes(coordinates, today, params);
+
+    const formatTime = (d: Date) => {
+      try {
+        return new Intl.DateTimeFormat('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+          timeZone: tzParam
+        }).format(d);
+      } catch {
+        const h = String(d.getHours()).padStart(2, '0');
+        const m = String(d.getMinutes()).padStart(2, '0');
+        return `${h}:${m}`;
+      }
+    };
+
+    const rawPrayers = [
+      { key: 'fajr', nameDv: 'ފަތިސް', date: pt.fajr },
+      { key: 'sunrise', nameDv: 'އިރުއަރާ', date: pt.sunrise },
+      { key: 'duhr', nameDv: 'މެންދުރު', date: pt.dhuhr },
+      { key: 'asr', nameDv: 'ޢަޞްރު', date: pt.asr },
+      { key: 'maghrib', nameDv: 'މަޣްރިބް', date: pt.maghrib },
+      { key: 'isha', nameDv: 'ޢިޝާ', date: pt.isha }
+    ];
+
+    const now = new Date();
+    let nextKey = 'fajr';
+    if (now < pt.fajr) nextKey = 'fajr';
+    else if (now < pt.sunrise) nextKey = 'sunrise';
+    else if (now < pt.dhuhr) nextKey = 'dhuhr';
+    else if (now < pt.asr) nextKey = 'asr';
+    else if (now < pt.maghrib) nextKey = 'maghrib';
+    else if (now < pt.isha) nextKey = 'isha';
+    else nextKey = 'fajr';
+
+    const prayers: PrayerTimeItem[] = rawPrayers.map((p) => ({
+      key: p.key,
+      nameDv: p.nameDv,
+      time: formatTime(p.date),
+      isNext: p.key === nextKey
+    }));
+
+    const nextPrayer = prayers.find((p) => p.key === nextKey) || prayers[0];
+
+    const dhivehiDays = ['އާދީއްތަ', 'ހޯމަ', 'އަންގާރަ', 'ބުދަ', 'ބުރާސްފަތި', 'ހުކުރު', 'ހޮނިހިރު'];
+    const dhivehiMonths = [
+      'ޖެނުއަރީ', 'ފެބްރުއަރީ', 'މާރިޗު', 'އޭޕްރީލް', 'މެއި', 'ޖޫން',
+      'ޖުލައި', 'އޯގަސްޓް', 'ސެޕްޓެމްބަރ', 'އޮކްޓޯބަރ', 'ނޮވެމްބަރ', 'ޑިސެމްބަރ'
+    ];
+    const dateStr = `${dhivehiDays[today.getDay()]}، ${today.getDate()} ${dhivehiMonths[today.getMonth()]} ${today.getFullYear()}`;
+
+    let locationName = 'މާލެ އަދި ކައިރި ސަރަޙައްދު';
+    if (isAutoLocation) {
+      if (latitude >= -1.5 && latitude <= 7.5 && longitude >= 72.0 && longitude <= 74.5) {
+        if (latitude > 6.0) locationName = 'ހއ. / ހދ. ސަރަޙައްދު';
+        else if (latitude > 4.8) locationName = 'ށ. / ނ. / ރ. / ބ. ސަރަޙައްދު';
+        else if (latitude > 3.8 && latitude <= 4.8) locationName = 'މާލެ އަދި ކައިރި ސަރަޙައްދު';
+        else if (latitude > 2.5 && latitude <= 3.8) locationName = 'ވ. / މ. / ފ. / ދ. ސަރަޙައްދު';
+        else if (latitude > 1.0 && latitude <= 2.5) locationName = 'ތ. / ލ. ސަރަޙައްދު';
+        else if (latitude > -0.2 && latitude <= 1.0) locationName = 'ގއ. / ގދ. ސަރަޙައްދު';
+        else locationName = 'ޏ. ފުވައްމުލައް / ސ. އައްޑޫ';
+      } else {
+        locationName = `${latitude.toFixed(2)}°, ${longitude.toFixed(2)}°`;
+      }
+    }
+
+    const payload: PrayerTimesPayload = {
+      ok: true,
+      dateStr,
+      locationName,
+      isAutoLocation,
+      coordinates: { latitude, longitude },
+      prayers,
+      nextPrayer,
+      fetchedAt: Date.now()
+    };
+
+    return res.json(payload);
+  } catch (err: any) {
+    console.error('Error calculating prayer times:', err);
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -1705,6 +1920,46 @@ app.delete('/api/portal/slideshow/:id', authenticateSession, requirePermission('
   }
 });
 
+// HEALTH AWARENESS PORTAL ROUTES
+app.get('/api/portal/health-awareness', authenticateSession, requirePermission('health_awareness', 'canView'), async (req: Request, res: Response) => {
+  try {
+    const items = await db.getHealthAwareness();
+    return res.json(items.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)));
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/portal/health-awareness', authenticateSession, requirePermission('health_awareness', 'canCreate'), async (req: Request, res: Response) => {
+  try {
+    const created = await db.createHealthAwarenessItem(req.body);
+    realtimeBroadcaster.broadcastTableChange('health_awareness', 'create', created.id, created);
+    return res.status(201).json(created);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/portal/health-awareness/:id', authenticateSession, requirePermission('health_awareness', 'canEdit'), async (req: Request, res: Response) => {
+  try {
+    const updated = await db.updateHealthAwarenessItem(req.params.id, req.body);
+    realtimeBroadcaster.broadcastTableChange('health_awareness', 'update', req.params.id, updated);
+    return res.json(updated);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/portal/health-awareness/:id', authenticateSession, requirePermission('health_awareness', 'canDelete'), async (req: Request, res: Response) => {
+  try {
+    await db.deleteHealthAwarenessItem(req.params.id);
+    realtimeBroadcaster.broadcastTableChange('health_awareness', 'delete', req.params.id);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // CONTENT / GENERAL SETTINGS
 app.get('/api/portal/content', authenticateSession, async (req: Request, res: Response) => {
   try {
@@ -1719,6 +1974,37 @@ app.get('/api/portal/content', authenticateSession, async (req: Request, res: Re
     return res.status(500).json({ error: err.message });
   }
 });
+
+function syncAppIconFiles(imageVal: string) {
+  try {
+    if (!imageVal || typeof imageVal !== 'string') return;
+    const base64Data = imageVal.replace(/^data:image\/\w+;base64,/, '');
+    if (!base64Data || base64Data.length < 50) return;
+    const buffer = Buffer.from(base64Data, 'base64');
+    const publicDir = path.join(process.cwd(), 'public');
+    const tmpSrc = path.join('/tmp', `uploaded_logo_${Date.now()}.png`);
+    fs.writeFileSync(tmpSrc, buffer);
+
+    fs.writeFileSync(path.join(publicDir, 'arc-app-icon.png'), buffer);
+    fs.writeFileSync(path.join(publicDir, 'logo.png'), buffer);
+
+    try {
+      execSync(`convert "${tmpSrc}" -resize 512x512 "${path.join(publicDir, 'pwa-512x512.png')}"`);
+      execSync(`convert "${tmpSrc}" -resize 192x192 "${path.join(publicDir, 'pwa-192x192.png')}"`);
+      execSync(`convert "${tmpSrc}" -resize 180x180 "${path.join(publicDir, 'apple-touch-icon.png')}"`);
+      execSync(`convert "${tmpSrc}" -resize 64x64 "${path.join(publicDir, 'favicon-64.png')}"`);
+      execSync(`convert "${tmpSrc}" -resize 32x32 "${path.join(publicDir, 'favicon-32.png')}"`);
+      execSync(`convert "${tmpSrc}" -resize 16x16 "${path.join(publicDir, 'favicon-16.png')}"`);
+      fs.copyFileSync(path.join(publicDir, 'favicon-64.png'), path.join(publicDir, 'favicon.ico'));
+      fs.copyFileSync(path.join(publicDir, 'favicon-64.png'), path.join(process.cwd(), 'app-favicon.ico'));
+      console.log('Successfully synchronized app icon and favicons from updated branding!');
+    } catch (cmdErr) {
+      console.warn('ImageMagick convert skipped or error:', cmdErr);
+    }
+  } catch (err) {
+    console.error('Failed to sync app icon files:', err);
+  }
+}
 
 app.put('/api/portal/content', authenticateSession, requirePermission('content', 'canEdit'), async (req: Request, res: Response) => {
   try {
@@ -1741,6 +2027,14 @@ app.put('/api/portal/content', authenticateSession, requirePermission('content',
     }
 
     const result = await db.updateSettings(settingsList);
+
+    // Sync app icon files if logo or appIcon was updated
+    const updatedAppIcon = settingsList.find(s => s.group === 'branding' && s.key === 'appIcon');
+    const updatedLogo = settingsList.find(s => s.group === 'branding' && s.key === 'logo');
+    const targetImage = updatedAppIcon?.value || updatedLogo?.value;
+    if (targetImage && typeof targetImage === 'string' && targetImage.startsWith('data:image/')) {
+      syncAppIconFiles(targetImage);
+    }
 
     if (user) {
       await db.logAudit({
@@ -3279,6 +3573,11 @@ app.delete('/api/portal/executive/circulars/:id', authenticateSession, async (re
   }
 });
 
+// Fallback for unmatched API routes to ensure JSON 404 response instead of HTML
+app.all('/api/*', (req: Request, res: Response) => {
+  res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });
+});
+
 
 // Serve frontend assets or Vite middleware in dev
 async function startServer() {
@@ -3286,6 +3585,7 @@ async function startServer() {
     console.log('[Startup] Verifying Firestore database schema...');
     await db.verifyStartupSchema();
     console.log('[Startup] Firestore verification successful.');
+    await rentalDb.ensureRentalSeedData();
   } catch (err) {
     console.error('[Startup] Critical error during Firestore schema verification:', err);
   }

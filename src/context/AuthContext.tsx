@@ -14,6 +14,25 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+export function isUserAdmin(user: any): boolean {
+  if (!user) return false;
+  const roleName = (user.roleName || '').toLowerCase();
+  const roleId = (user.roleId || '').toLowerCase();
+  const username = (user.username || '').toLowerCase();
+  const role = (user.role || '').toLowerCase();
+  return (
+    roleName === 'admin' ||
+    roleName.includes('admin') ||
+    roleId === 'role_admin' ||
+    roleId === 'admin' ||
+    roleId.includes('admin') ||
+    username === 'admin' ||
+    role === 'admin' ||
+    role === 'super_admin' ||
+    user.isAdmin === true
+  );
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -75,10 +94,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     actionKey: keyof Omit<ModulePermission, 'id' | 'userId' | 'moduleKey'> = 'canView'
   ): boolean => {
     if (!user) return false;
-    const roleName = (user.roleName || '').toLowerCase();
-    const roleId = (user.roleId || '').toLowerCase();
-    const isAdmin = roleName === 'admin' || roleId === 'role_admin' || roleId === 'admin';
-    if (isAdmin) return true;
+    // Admin user has universal authorization across all modules and all actions
+    if (isUserAdmin(user)) return true;
 
     if (moduleKey === 'audit_logs') {
       return false; // System audit logs are strictly restricted to Admin panel / Admin users

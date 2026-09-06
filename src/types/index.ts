@@ -19,6 +19,7 @@ export type ModuleKey =
   | 'events_meetings'
   | 'events'
   | 'budget'
+  | 'rental_service'
   | 'slideshow'
   | 'content'
   | 'vision_mission'
@@ -36,7 +37,8 @@ export type ModuleKey =
   | 'audit_logs'
   | 'club_rules'
   | 'settings'
-  | 'messages';
+  | 'messages'
+  | 'health_awareness';
 
 export type MessageCategory = 'general' | 'announcement' | 'quiz_alert' | 'system_alert' | 'direct';
 export type MessagePriority = 'low' | 'normal' | 'high' | 'urgent';
@@ -295,6 +297,22 @@ export interface SlideshowItem {
   updatedAt: string;
 }
 
+export interface HealthAwarenessItem {
+  id: string;
+  title?: string;
+  message: string;
+  content?: string;
+  imageUrl?: string;
+  category?: string;
+  priority?: 'normal' | 'important' | 'urgent';
+  displayOrder: number;
+  status: 'active' | 'inactive';
+  linkUrl?: string;
+  linkLabel?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SiteSetting {
   id: string;
   group: 'branding' | 'public_site' | 'security' | 'quiz' | 'system' | 'budget' | 'invoice' | 'widgets' | 'content';
@@ -488,6 +506,7 @@ export interface AuditLog {
   previousValue?: any;
   newValue?: any;
   reason?: string;
+  notes?: string;
   deviceReference?: string;
   createdAt: string;
 }
@@ -514,6 +533,8 @@ export interface PublicSiteData {
     clubAbbreviation: string;
     logo: string;
     useLogo?: boolean;
+    appIcon?: string;
+    useCustomAppIcon?: boolean;
     welcomeHeading: string;
     welcomeMessage: string;
     aboutText: string;
@@ -555,6 +576,7 @@ export interface PublicSiteData {
   socialLinks: SocialLink[];
   excoMembers: ExcoMember[];
   events?: ClubEvent[];
+  healthAwareness?: HealthAwarenessItem[];
   clubRules?: ClubRulesData;
 }
 
@@ -696,6 +718,8 @@ export interface BankAccount {
   updatedAt: string;
 }
 
+export type BudgetAccount = BankAccount;
+
 export type IncomeCategory = 
   | 'member_contribution'
   | 'sponsorship'
@@ -704,6 +728,7 @@ export type IncomeCategory =
   | 'service_fee'
   | 'merchandise'
   | 'rental'
+  | 'rental_service'
   | 'grant'
   | 'other';
 
@@ -723,6 +748,11 @@ export interface IncomeRecord {
   notes?: string;
   attachments?: string[];
   contributionRecordId?: string;
+  sourceModule?: string;
+  sourceRequestId?: string;
+  sourcePaymentId?: string;
+  sourceBillId?: string;
+  incomeSubcategory?: 'rental_fee' | 'late_fee' | 'damage_charge' | 'other_return_charge';
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
@@ -1001,4 +1031,6 @@ export interface OfficialCircular {
   createdAt?: string;
   updatedAt?: string;
 }
+
+export * from './rental';
 

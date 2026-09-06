@@ -165,6 +165,8 @@ export const SettingsPage: React.FC = () => {
   const [clubAbbreviation, setClubAbbreviation] = useState('ARC');
   const [mainSiteLogo, setMainSiteLogo] = useState('');
   const [useLogo, setUseLogo] = useState(true);
+  const [appIcon, setAppIcon] = useState('');
+  const [useCustomAppIcon, setUseCustomAppIcon] = useState(false);
   const [headerTitle, setHeaderTitle] = useState('Ananda Recreation Club');
   const [headerSubtitle, setHeaderSubtitle] = useState('Community & Youth Empowerment Portal');
   const [welcomeHeading, setWelcomeHeading] = useState('Welcome to Ananda Recreation Club');
@@ -309,11 +311,13 @@ export const SettingsPage: React.FC = () => {
         setClubAbbreviation(getVal('branding', 'clubAbbreviation', 'ARC'));
         setMainSiteLogo(getVal('branding', 'logo', ''));
         setUseLogo(Boolean(getVal('branding', 'useLogo', true)));
+        setAppIcon(getVal('branding', 'appIcon', ''));
+        setUseCustomAppIcon(Boolean(getVal('branding', 'useCustomAppIcon', false)));
         setHeaderTitle(getVal('branding', 'headerTitle', 'Ananda Recreation Club'));
         setHeaderSubtitle(getVal('branding', 'headerSubtitle', 'Community & Youth Empowerment Portal'));
-        setWelcomeHeading(getVal('branding', 'welcomeHeading', 'Welcome to Ananda Recreation Club'));
-        setWelcomeMessage(getVal('branding', 'welcomeMessage', 'Connecting hearts and encouraging excellence.'));
-        setAboutText(getVal('branding', 'aboutText', 'Ananda Recreation Club (ARC) is dedicated to youth empowerment, sports, and community engagement in Male\', Maldives.'));
+        setWelcomeHeading(getVal('branding', 'welcomeHeading', 'އާނަންދަ ރިކުރިއޭޝަން ކުލަބު (ARC) ގެ ވެބްސައިޓަށް މަރުޙަބާ!'));
+        setWelcomeMessage(getVal('branding', 'welcomeMessage', ''));
+        setAboutText(getVal('branding', 'aboutText', ''));
         setCopyrightText(getVal('branding', 'copyrightText', `© ${new Date().getFullYear()} Ananda Recreation Club. All Rights Reserved.`));
         setFooterDescription(getVal('branding', 'footerDescription', 'Official community club website and Ramazan Quiz platform.'));
 
@@ -426,10 +430,13 @@ export const SettingsPage: React.FC = () => {
     e.preventDefault();
     try {
       setBrandingSaving(true);
+      const finalAppIcon = useCustomAppIcon && appIcon ? appIcon : mainSiteLogo;
       await api.updateContentSettings([
         { group: 'branding', key: 'clubName', value: clubName },
         { group: 'branding', key: 'clubAbbreviation', value: clubAbbreviation },
         { group: 'branding', key: 'logo', value: mainSiteLogo },
+        { group: 'branding', key: 'appIcon', value: finalAppIcon },
+        { group: 'branding', key: 'useCustomAppIcon', value: useCustomAppIcon },
         { group: 'branding', key: 'useLogo', value: useLogo },
         { group: 'branding', key: 'headerTitle', value: headerTitle },
         { group: 'branding', key: 'headerSubtitle', value: headerSubtitle },
@@ -1178,7 +1185,7 @@ export const SettingsPage: React.FC = () => {
                     placeholder="Upload public website header logo..."
                   />
 
-                  <div className="pt-2">
+                  <div className="pt-1">
                     <label className="flex items-center gap-3 cursor-pointer">
                       <input
                         type="checkbox"
@@ -1190,6 +1197,98 @@ export const SettingsPage: React.FC = () => {
                         ވެބްސައިޓް ހެޑަރގައި ލޯގޯ އިމޭޖް ދެއްކުމަށް އެނޭބަލްކުރުން (Display Logo Image)
                       </span>
                     </label>
+                  </div>
+
+                  {/* App Icon & Favicon Configuration */}
+                  <div className="p-4 bg-slate-950/80 border border-slate-800/90 rounded-2xl space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></span>
+                          އެޕްލިކޭޝަން އައިކަން އަދި ފެވިކަން (App Icon & Favicon)
+                        </h4>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          ބްރައުޒަރ ޓެބް، ފޯނު ހޯމްސްކްރީން އަދި ޕޯޓަލްގައި ބޭނުންކުރާ އައިކަން
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded-full">
+                        {!useCustomAppIcon ? 'Synced with Main Logo' : 'Custom App Icon'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 p-1 bg-slate-900 border border-slate-800 rounded-xl text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setUseCustomAppIcon(false)}
+                        className={`flex-1 py-1.5 px-2 rounded-lg font-medium transition-all ${
+                          !useCustomAppIcon
+                            ? 'bg-orange-500 text-white font-bold shadow-sm'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        މައި ލޯގޯ އައިކަންގެ ގޮތުގައި ބޭނުންކުރުން (Same as Main Logo)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setUseCustomAppIcon(true)}
+                        className={`flex-1 py-1.5 px-2 rounded-lg font-medium transition-all ${
+                          useCustomAppIcon
+                            ? 'bg-orange-500 text-white font-bold shadow-sm'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        ވަކި ޚާއްޞަ އައިކަނެއް އަޕްލޯޑްކުރުން (Upload Custom Icon)
+                      </button>
+                    </div>
+
+                    {useCustomAppIcon && (
+                      <div className="pt-1">
+                        <ImageUploadInput
+                          label="ވަކި އެޕްލިކޭޝަން އައިކަން (Dedicated App Icon File)"
+                          value={appIcon}
+                          onChange={setAppIcon}
+                          placeholder="Upload square icon (1:1 ratio PNG/SVG recommended)..."
+                        />
+                      </div>
+                    )}
+
+                    {/* Live Previews of the Active App Icon */}
+                    <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                      <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+                        އައިކަން ޕްރިވިއު (Live Icon Previews):
+                      </span>
+                      <div className="grid grid-cols-2 gap-3">
+                        {/* Browser Tab Preview */}
+                        <div className="p-2.5 bg-slate-900/90 border border-slate-800 rounded-xl flex items-center gap-2.5">
+                          <div className="w-6 h-6 rounded bg-slate-800 border border-slate-700 p-0.5 overflow-hidden flex items-center justify-center shrink-0">
+                            <img
+                              src={useCustomAppIcon && appIcon ? appIcon : (mainSiteLogo || '/arc-app-icon.png')}
+                              alt="Tab Icon"
+                              className="w-full h-full object-contain"
+                            />
+                          </div>
+                          <div className="min-w-0">
+                            <span className="text-[10px] text-slate-500 block leading-tight">Browser Tab</span>
+                            <span className="text-xs font-semibold text-slate-200 truncate block">ARC - community portal</span>
+                          </div>
+                        </div>
+
+                        {/* Mobile Squircle Icon Preview */}
+                        <div className="p-2.5 bg-slate-900/90 border border-slate-800 rounded-xl flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-slate-800 border border-slate-700/80 p-0.5 overflow-hidden flex items-center justify-center shadow-md shadow-orange-500/10 shrink-0">
+                            <img
+                              src={useCustomAppIcon && appIcon ? appIcon : (mainSiteLogo || '/arc-app-icon.png')}
+                              alt="Mobile Icon"
+                              className="w-full h-full object-contain rounded-lg"
+                            />
+                          </div>
+                          <div className="min-w-0">
+                            <span className="text-[10px] text-slate-500 block leading-tight">App / PWA Icon</span>
+                            <span className="text-xs font-semibold text-slate-200 truncate block">ARC Portal</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

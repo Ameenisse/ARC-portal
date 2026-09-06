@@ -1,6 +1,6 @@
 {
-  "name": "ARC Club",
+  "name": "ARC - community portal",
   "description": "Official community web portal and Ramazan Quiz platform for ARC Club.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -9,7 +9,7 @@ import { api } from '../../services/api';
 import { 
   Users, ShieldCheck, History, HelpCircle, FileText, ArrowRight, 
   Trophy, Mail, UserCheck, RefreshCw, CheckCircle2, Clock, Sparkles, Award,
-  Calendar, Layers, MessageSquare, LayoutDashboard, BookOpen, Wallet
+  Calendar, Layers, MessageSquare, LayoutDashboard, BookOpen, Wallet, HeartPulse
 } from 'lucide-react';
 import { formatDateTime } from '../../utils/formatters';
 
@@ -594,6 +594,29 @@ export const DashboardPage: React.FC = () => {
                     </p>
                   </div>
                   <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 pt-1">
+                    <span>ވަޑައިގަންނަވާ</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </div>
+                </a>
+              )}
+
+              {(isAdmin || hasPermission('health_awareness', 'canView') || hasPermission('content', 'canView')) && (
+                <a
+                  href="/portal/health-awareness"
+                  className="bg-slate-900 border border-slate-800 hover:border-teal-500/50 rounded-2xl p-5 transition-all hover:scale-[1.02] space-y-3 group"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-400 flex items-center justify-center">
+                    <HeartPulse className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold font-heading text-white group-hover:text-teal-400 transition-colors">
+                      ޞިއްޙީ ހޭލުންތެރިކަން
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-1">
+                      ޞިއްޙީ އިރުޝާދުތައް، ދުޅަހެޔޮކަމުގެ މަޢުލޫމާތު އަދި ބްލޮގް ލިޔުންތައް.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-teal-400 pt-1">
                     <span>ވަޑައިގަންނަވާ</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </div>

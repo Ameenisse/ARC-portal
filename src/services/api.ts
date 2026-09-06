@@ -16,45 +16,110 @@ export function removeStoredToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+export async function authFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
   const token = getStoredToken();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'Cache-Control': 'no-cache, no-store, must-revalidate',
-    'Pragma': 'no-cache',
-    ...(options.headers as Record<string, string> || {})
-  };
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  const headers = new Headers(options.headers || {});
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
   }
-
-  const response = await fetch(endpoint, {
-    cache: 'no-store',
+  return fetch(endpoint, {
+    credentials: 'include',
     ...options,
     headers
   });
+}
 
-  if (response.status === 401) {
-    removeStoredToken();
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+async function request<T>(endpoint: string, options: RequestInit = {}, maxRetries: number = 2): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      const token = getStoredToken();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        ...(options.headers as Record<string, string> || {})
+      };
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(endpoint, {
+        cache: 'no-store',
+        ...options,
+        headers
+      });
+
+      if (response.status === 401) {
+        removeStoredToken();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+        }
+      }
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.error || 'An unexpected server error occurred.');
+      }
+
+      return data as T;
+    } catch (err: any) {
+      attempt++;
+      const isNetworkError =
+        err?.name === 'TypeError' ||
+        err?.message?.includes('Failed to fetch') ||
+        err?.message?.includes('NetworkError') ||
+        err?.message?.includes('Load failed') ||
+        err?.message?.includes('network error');
+
+      const method = (options.method || 'GET').toUpperCase();
+      const canRetry = attempt <= maxRetries && (isNetworkError || (method === 'GET' && err?.message?.includes('temporarily unavailable')));
+
+      if (canRetry) {
+        const delay = Math.min(800 * Math.pow(1.5, attempt - 1), 2500);
+        console.warn(`[API] Retrying ${endpoint} (attempt ${attempt}/${maxRetries}) after ${delay}ms...`);
+        await new Promise(res => setTimeout(res, delay));
+        continue;
+      }
+      throw err;
     }
   }
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(data.error || 'An unexpected server error occurred.');
-  }
-
-  return data as T;
 }
+
+const PUBLIC_SITE_DATA_KEY = 'arc_cached_public_site_data_v1';
 
 export const api = {
   // Public APIs
   getSystemTime: () => request<{ ok: boolean; serverTimeIso: string; serverEpoch: number; timezone: string }>('/api/public/time'),
-  getPublicSiteData: () => request<any>('/api/public/site'),
+  getPublicSiteData: async () => {
+    try {
+      const data = await request<any>('/api/public/site', {}, 3);
+      if (data && typeof window !== 'undefined') {
+        try {
+          sessionStorage.setItem(PUBLIC_SITE_DATA_KEY, JSON.stringify(data));
+        } catch (e) {
+          // Ignore quota errors for large payloads
+        }
+      }
+      return data;
+    } catch (err: any) {
+      if (typeof window !== 'undefined') {
+        try {
+          const cached = sessionStorage.getItem(PUBLIC_SITE_DATA_KEY);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            console.warn('[API] Using cached public site data due to fetch error:', err);
+            return parsed;
+          }
+        } catch (e) {
+          // Ignore parse errors
+        }
+      }
+      throw err;
+    }
+  },
   submitPublicContactMessage: (data: { fullName: string; contactInfo?: string; subject?: string; message: string }) =>
     request<any>('/api/public/contact-messages', { method: 'POST', body: JSON.stringify(data) }),
   getCurrentQuiz: () => request<any>('/api/public/quiz/current'),
@@ -75,6 +140,13 @@ export const api = {
   createSlide: (slide: any) => request<any>('/api/portal/slideshow', { method: 'POST', body: JSON.stringify(slide) }),
   updateSlide: (id: string, slide: any) => request<any>(`/api/portal/slideshow/${id}`, { method: 'PUT', body: JSON.stringify(slide) }),
   deleteSlide: (id: string) => request<any>(`/api/portal/slideshow/${id}`, { method: 'DELETE' }),
+
+  // Health Awareness APIs
+  getHealthAwareness: () => request<any>('/api/portal/health-awareness'),
+  createHealthAwareness: (data: any) => request<any>('/api/portal/health-awareness', { method: 'POST', body: JSON.stringify(data) }),
+  updateHealthAwareness: (id: string, data: any) => request<any>(`/api/portal/health-awareness/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteHealthAwareness: (id: string) => request<any>(`/api/portal/health-awareness/${id}`, { method: 'DELETE' }),
+  getPublicHealthAwareness: () => request<any>('/api/public/health-awareness'),
 
   getContentSettings: () => request<any>('/api/portal/content'),
   updateContentSettings: (settings: any[]) => request<any>('/api/portal/content', { method: 'PUT', body: JSON.stringify({ settings }) }),

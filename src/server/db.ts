@@ -35,7 +35,8 @@ import {
   UserPerformanceBadge,
   InvoiceRecord,
   IncomeCategory,
-  InvoiceStatus
+  InvoiceStatus,
+  HealthAwarenessItem
 } from '../types';
 
 // Helper to hash PINs
@@ -1216,15 +1217,47 @@ export class FirestoreDatabaseStore {
   // -------------------------------------------------------------
   async getSettings(): Promise<SiteSetting[]> {
     const snap = await firestore.collection('siteSettings').get();
-    return snap.docs.map(d => d.data() as SiteSetting);
+    const map = new Map<string, SiteSetting>();
+    for (const d of snap.docs) {
+      const data = d.data() as SiteSetting;
+      if (!data || !data.key) continue;
+      const groupKey = `${data.group || 'branding'}:${data.key}`;
+      const existing = map.get(groupKey);
+      if (!existing) {
+        map.set(groupKey, data);
+      } else {
+        const timeExisting = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+        const timeCurrent = data.updatedAt ? new Date(data.updatedAt).getTime() : 0;
+        if (timeCurrent >= timeExisting) {
+          map.set(groupKey, data);
+        }
+      }
+    }
+    return Array.from(map.values());
   }
 
   async updateSettings(settingsList: any[]): Promise<SiteSetting[]> {
     const batch = firestore.batch();
     for (const s of settingsList) {
-      const docId = s.id || `setting_${s.group || 'general'}_${s.key}`;
+      if (!s || !s.key) continue;
+      const group = s.group || 'branding';
+      const docId = `setting_${group}_${s.key}`;
       const docRef = firestore.collection('siteSettings').doc(docId);
-      batch.set(docRef, { ...s, id: docId, updatedAt: new Date().toISOString() }, { merge: true });
+      batch.set(docRef, {
+        id: docId,
+        group,
+        key: s.key,
+        value: s.value,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      // Clean up any legacy doc ID that may conflict
+      const legacyId = `set_${group}_${s.key}`;
+      batch.delete(firestore.collection('siteSettings').doc(legacyId));
+      if (group === 'branding') {
+        batch.delete(firestore.collection('siteSettings').doc(`set_general_${s.key}`));
+        batch.delete(firestore.collection('siteSettings').doc(`setting_general_${s.key}`));
+      }
     }
     await batch.commit();
     return this.getSettings();
@@ -1294,6 +1327,128 @@ export class FirestoreDatabaseStore {
 
   async deleteSlideshowItem(id: string): Promise<void> {
     await firestore.collection('slideshow').doc(id).delete();
+  }
+
+  // HEALTH AWARENESS METHODS
+  async getHealthAwareness(): Promise<HealthAwarenessItem[]> {
+    const snap = await firestore.collection('health_awareness').get();
+    if (snap.empty) {
+      const initialItems: HealthAwarenessItem[] = [
+        {
+          id: 'health_1',
+          title: 'ދުވަހުގެ ފެން ބުއިން',
+          message: 'ކޮންމެ ދުވަހަކު މަދުވެގެން 2-3 ލީޓަރުގެ ފެން ބޯށެވެ. ފެނަކީ ހަށިގަނޑުގެ ހުރިހާ ގުނަވަނެއްގެ ދުޅަހެޔޮކަމަށް ކޮންމެހެން މުހިންމު އެއްޗެކެވެ.',
+          content: 'ހަށިގަނޑުގެ ބޮޑުބައަކީ ފެނެވެ. ކޮންމެ ދުވަހަކު ބޯންޖެހޭ މިންވަރަށް ފެން ނުބޮއިފިނަމަ ވަރުބަލިވުމާއި، ބޮލުގައި ރިއްސުމާއި، ހަންގަނޑު ހިކުމުގެ އިތުރުން ކިޑްނީގެ މައްސަލަތައް ކުރިމަތިވެދާނެއެވެ.\n\nމުހިންމު ނުކުތާތައް:\n• ކޮންމެ ދުވަހަކު މަދުވެގެން 8-10 ތަށި ނުވަތަ 2-3 ލީޓަރު ފެން ބުއިން\n• ކަރުހިއްކަންދެން މަޑުނުކޮށް ގަވާއިދުން ފެން ބުއިން އާދަކުރުން\n• ކަސްރަތުކުރާ ވަގުތުތަކުގައާއި ހޫނުގަދަ ދުވަސްވަރު އިތުރަށް ފެން ބުއިން',
+          imageUrl: 'https://images.unsplash.com/photo-1548839140-29a749e1bc4e?auto=format&fit=crop&w=1200&q=80',
+          category: 'ޢާންމު ޞިއްޙަތު',
+          priority: 'important',
+          displayOrder: 1,
+          status: 'active',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          id: 'health_2',
+          title: 'ކަސްރަތާއި ހެލިފެލިވުން',
+          message: 'ދުވާލަކު މަދުވެގެން 30 މިނެޓު ހިނގާލުމަކީ ހިތުގެ ދުޅަހެޔޮކަން ދަމަހައްޓައިދީ، ލޭގެ ޕްރެޝަރާއި ސްޓްރެސް ކުޑަކޮށްދޭނެ ކަމެކެވެ.',
+          content: 'ގަވާއިދުން ކަސްރަތު ކުރުމަކީ ދުޅަހެޔޮ ޞިއްޙަތެއްގައި ހުރުމަށް އެޅޭނެ އެންމެ މުހިންމު އެއް ފިޔަވަޅެވެ. މާބޮޑެތި ބުރަ ކަސްރަތުތައް ނުކުރެވުނު ކަމުގައިވިޔަސް، ދުވާލަކު 30 މިނެޓު ފައިމަގުގައި ހިނގާލުމަކީ ފުދޭ މިންވަރެކެވެ.\n\nކަސްރަތުގެ މައިގަނޑު ފައިދާތައް:\n• ހިތުގެ ބަލިތަކާއި ސްޓްރޯކް ޖެހުމުގެ ފުރުޞަތު ކުޑަކޮށްދިނުން\n• ލޭގައި ހަކުރު ހުންނަ މިންވަރު އެއްވަރެއްގައި ހިފެހެއްޓުން\n• ނަފްސާނީ ހަމަޖެހުމާއި ރަނގަޅު ނިދި ލިބުމަށް އެހީތެރިވުން',
+          imageUrl: 'https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?auto=format&fit=crop&w=1200&q=80',
+          category: 'ކަސްރަތު',
+          priority: 'normal',
+          displayOrder: 2,
+          status: 'active',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          id: 'health_3',
+          title: 'ފައިދާހުރި ކެއިންބުއިން',
+          message: 'ހަކުރާއި ލޮނު އަދި ތެޔޮ އެކުލެވޭ ކާނާ މަދުކޮށް، ތާޒާ މޭވާއާއި ތަރުކާރީ ކެއުމުގައި އަބަދުވެސް އިތުރުކުރައްވާށެވެ.',
+          content: 'ކާނާއަކީ އަޅުގަނޑުމެންގެ ހަށިގަނޑުގެ ހަކަތައެވެ. ފައިދާހުރި މާއްދާތައް އެކުލެވޭ ރަނގަޅު ކާނާ ބޭނުންކުރުމަކީ ދިގުމުއްދަތަކަށް ދެމިގެންދާ ބަލިތަކުން ރައްކާތެރިކޮށްދޭނެ ކަމެކެވެ.\n\nޞިއްޙީ ކެއުމުގެ އިރުޝާދު:\n• ތެލާއި ހަކުރު އަދި ލޮނު ގިނަ ކާނާ ކޮންޓްރޯލްކުރުން\n• ކޮންމެ ދުވަހެއްގެ ކެއުމުގައި ތަފާތު ވައްތަރުގެ ތަރުކާރީއާއި މޭވާ ހިމެނުން\n• ޕްރޮސެސްޑް ކާނާއަށް ވުރެ ތާޒާ ޤުދުރަތީ ކާނާއަށް އިސްކަންދިނުން',
+          imageUrl: 'https://images.unsplash.com/photo-1498837167922-ddd27525d352?auto=format&fit=crop&w=1200&q=80',
+          category: 'ކެއިންބުއިން',
+          priority: 'normal',
+          displayOrder: 3,
+          status: 'active',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          id: 'health_4',
+          title: 'އަރާމު ނިދި',
+          message: 'ރޭގަނޑު 7-8 ގަޑިއިރުގެ ފުރިހަމަ އަރާމު ނިންޖެއް ހޯދުމަކީ ނަފްސާނީ ތާޒާކަމާއި ހަށިގަނޑުގެ ދިފާޢީ ނިޒާމު ވަރުގަދަކުރުމަށް ކޮންމެހެން ބޭނުންތެރި ކަމެކެވެ.',
+          content: 'އަރާމު ނިންޖަކީ ހަށިގަނޑުގެ ވަރުބަލިކަން ފިލުވައިދީ، ސިކުނޑި ތާޒާކޮށްދޭ ޤުދުރަތީ ޝިފާއެކެވެ. ނިދިމަދުވުމަކީ ވިސްނުން ކޮށިވުމާއި، ސްޓްރެސް އިތުރުވުމަށް މެދުވެރިވާ މައިގަނޑު އެއް ސަބަބެވެ.\n\nރަނގަޅު ނިންޖަކަށް ޢަމަލުކުރަންވީ ގޮތް:\n• ކޮންމެ ރެއަކުވެސް އެއް ގަޑިއަކަށް ނިދަން އޮށޯތުން\n• ނިދުމުގެ ކުރިން ފޯނާއި ޓީވީ ފަދަ ސްކްރީންތަކާ ދުރުހެލިވުން\n• ނިދާ ކޮޓަރިއަކީ އަނދިރި، ހަމަހިމޭން އަދި ފިނި ތަނަކަށް ހެދުން',
+          imageUrl: 'https://images.unsplash.com/photo-1511295742362-92c96b124e52?auto=format&fit=crop&w=1200&q=80',
+          category: 'ނަފްސާނީ ދުޅަހެޔޮކަން',
+          priority: 'normal',
+          displayOrder: 4,
+          status: 'active',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      ];
+      for (const item of initialItems) {
+        await firestore.collection('health_awareness').doc(item.id).set(item);
+      }
+      return initialItems;
+    }
+    const items = snap.docs.map(d => d.data() as HealthAwarenessItem);
+    return items.map(item => {
+      if (!item.imageUrl) {
+        const cat = (item.category || '').toLowerCase();
+        const title = (item.title || '').toLowerCase();
+        if (cat.includes('ފެން') || title.includes('ފެން')) {
+          item.imageUrl = 'https://images.unsplash.com/photo-1548839140-29a749e1bc4e?auto=format&fit=crop&w=1200&q=80';
+        } else if (cat.includes('ކަސްރަތު') || title.includes('ކަސްރަތު') || title.includes('ހިނގާ')) {
+          item.imageUrl = 'https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?auto=format&fit=crop&w=1200&q=80';
+        } else if (cat.includes('ކެއިން') || cat.includes('ކާނާ') || title.includes('ކެއިން')) {
+          item.imageUrl = 'https://images.unsplash.com/photo-1498837167922-ddd27525d352?auto=format&fit=crop&w=1200&q=80';
+        } else if (cat.includes('ނިދި') || cat.includes('ނަފްސާނީ') || title.includes('ނިދި')) {
+          item.imageUrl = 'https://images.unsplash.com/photo-1511295742362-92c96b124e52?auto=format&fit=crop&w=1200&q=80';
+        } else {
+          item.imageUrl = 'https://images.unsplash.com/photo-1505751172876-fa1923c5c528?auto=format&fit=crop&w=1200&q=80';
+        }
+      }
+      return item;
+    });
+  }
+
+  async createHealthAwarenessItem(data: Partial<HealthAwarenessItem>): Promise<HealthAwarenessItem> {
+    const id = data.id || `health_${Date.now()}`;
+    const item: HealthAwarenessItem = {
+      id,
+      title: data.title || '',
+      message: data.message || '',
+      content: data.content || '',
+      imageUrl: data.imageUrl || '',
+      category: data.category || 'ޢާންމު ޞިއްޙަތު',
+      priority: data.priority || 'normal',
+      displayOrder: Number(data.displayOrder) || 1,
+      status: data.status || 'active',
+      linkUrl: data.linkUrl || '',
+      linkLabel: data.linkLabel || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(data as any)
+    };
+    await firestore.collection('health_awareness').doc(id).set(item);
+    return item;
+  }
+
+  async updateHealthAwarenessItem(id: string, updates: Partial<HealthAwarenessItem>): Promise<HealthAwarenessItem> {
+    const docRef = firestore.collection('health_awareness').doc(id);
+    const updated = {
+      ...updates,
+      id,
+      updatedAt: new Date().toISOString()
+    };
+    await docRef.set(updated, { merge: true });
+    const snap = await docRef.get();
+    return snap.data() as HealthAwarenessItem;
+  }
+
+  async deleteHealthAwarenessItem(id: string): Promise<void> {
+    await firestore.collection('health_awareness').doc(id).delete();
   }
 
   async getContacts(): Promise<any[]> {

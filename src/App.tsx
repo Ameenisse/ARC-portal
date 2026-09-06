@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { CustomerAuthProvider } from './context/CustomerAuthContext';
 import { RealtimeProvider } from './context/RealtimeContext';
 import { ToastProvider } from './components/common/Toast';
 import { ProtectedRoute } from './components/common/ProtectedRoute';
@@ -11,12 +12,14 @@ import { QuizPage } from './pages/public/QuizPage';
 import { QuizResultsPage } from './pages/public/QuizResultsPage';
 import { AboutPage } from './pages/public/AboutPage';
 import { EventsPage } from './pages/public/EventsPage';
+import { HealthAwarenessPage } from './pages/public/HealthAwarenessPage';
 import { LoginPage } from './pages/public/LoginPage';
 
 // Portal Module Pages
 import { DashboardPage } from './pages/portal/DashboardPage';
 import { BudgetPage } from './pages/portal/BudgetPage';
 import { ContentMgmtPage } from './pages/portal/ContentMgmtPage';
+import { HealthAwarenessMgmtPage } from './pages/portal/HealthAwarenessMgmtPage';
 import { RamazanQuizMgmtPage } from './pages/portal/RamazanQuizMgmtPage';
 import { UsersMgmtPage } from './pages/portal/UsersMgmtPage';
 import { AuditLogsPage } from './pages/portal/AuditLogsPage';
@@ -26,13 +29,19 @@ import { ProfilePage } from './pages/portal/ProfilePage';
 import { MessagesPage } from './pages/portal/MessagesPage';
 import { MembersMgmtPage } from './pages/portal/MembersMgmtPage';
 import { EventsMeetingsMgmtPage } from './pages/portal/EventsMeetingsMgmtPage';
+import { RentalServicePage } from './pages/portal/RentalServicePage';
+import { PublicRentalPage } from './pages/public/PublicRentalPage';
+import { CustomerPortalPage } from './pages/public/CustomerPortalPage';
+import { FaviconSync } from './components/common/FaviconSync';
 
 export function App() {
   return (
     <ToastProvider>
       <AuthProvider>
-        <RealtimeProvider>
-          <BrowserRouter>
+        <CustomerAuthProvider>
+          <RealtimeProvider>
+            <FaviconSync />
+            <BrowserRouter>
             <Routes>
               {/* Public Routes */}
               <Route path="/" element={<HomePage />} />
@@ -43,6 +52,21 @@ export function App() {
               <Route path="/team" element={<AboutPage />} />
               <Route path="/contact" element={<AboutPage />} />
               <Route path="/events" element={<EventsPage />} />
+              <Route path="/health-awareness" element={<HealthAwarenessPage />} />
+              <Route path="/health" element={<HealthAwarenessPage />} />
+              <Route path="/health-blog" element={<HealthAwarenessPage />} />
+              <Route path="/wellness" element={<HealthAwarenessPage />} />
+
+              {/* Rental Service Public Catalog & Customer Portal */}
+              <Route path="/rental" element={<PublicRentalPage />} />
+              <Route path="/rentals" element={<PublicRentalPage />} />
+              <Route path="/rental-service" element={<PublicRentalPage />} />
+              <Route path="/customer/portal" element={<CustomerPortalPage />} />
+              <Route path="/customer-portal" element={<CustomerPortalPage />} />
+              <Route path="/customer" element={<CustomerPortalPage />} />
+              <Route path="/my-rentals" element={<CustomerPortalPage />} />
+              <Route path="/rental/my-rentals" element={<CustomerPortalPage />} />
+              <Route path="/rental/portal" element={<CustomerPortalPage />} />
 
               {/* Hidden Login Page */}
               <Route path="/login" element={<LoginPage />} />
@@ -67,10 +91,24 @@ export function App() {
               <Route path="/portal/budget/settings" element={<Navigate to="/portal/budget?tab=settings" replace />} />
               <Route path="/portal/budget/reports" element={<Navigate to="/portal/budget?tab=reports" replace />} />
 
+              {/* Rental Service Module */}
+              <Route path="/portal/rental-service" element={<ProtectedRoute><RentalServicePage /></ProtectedRoute>} />
+              <Route path="/portal/rentals" element={<Navigate to="/portal/rental-service" replace />} />
+              <Route path="/portal/rental-inventory" element={<Navigate to="/portal/rental-service?tab=inventory" replace />} />
+              <Route path="/portal/rental-requests" element={<Navigate to="/portal/rental-service?tab=requests" replace />} />
+              <Route path="/portal/rental-handover" element={<Navigate to="/portal/rental-service?tab=handover" replace />} />
+              <Route path="/portal/rental-returns" element={<Navigate to="/portal/rental-service?tab=returns" replace />} />
+              <Route path="/portal/rental-payments" element={<Navigate to="/portal/rental-service?tab=payments" replace />} />
+
               {/* Ramazan Quiz Module */}
               <Route path="/portal/ramazan-quiz" element={<ProtectedRoute><RamazanQuizMgmtPage /></ProtectedRoute>} />
               <Route path="/portal/quiz-participants" element={<Navigate to="/portal/ramazan-quiz?tab=participants" replace />} />
               <Route path="/portal/quiz-winners" element={<Navigate to="/portal/ramazan-quiz?tab=winners" replace />} />
+
+              {/* Health Awareness Module */}
+              <Route path="/portal/health-awareness" element={<ProtectedRoute><HealthAwarenessMgmtPage /></ProtectedRoute>} />
+              <Route path="/portal/health" element={<Navigate to="/portal/health-awareness" replace />} />
+              <Route path="/portal/wellness" element={<Navigate to="/portal/health-awareness" replace />} />
 
               {/* Public Site Module */}
               <Route path="/portal/public-site" element={<ProtectedRoute><ContentMgmtPage /></ProtectedRoute>} />
@@ -99,6 +137,7 @@ export function App() {
             </Routes>
           </BrowserRouter>
         </RealtimeProvider>
+        </CustomerAuthProvider>
       </AuthProvider>
     </ToastProvider>
   );

@@ -43,14 +43,14 @@ export const SlideshowMgmtPage: React.FC = () => {
 
   const handleOpenCreate = () => {
     setEditingSlide(null);
-    setDesktopImage('https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1600&q=80');
+    setDesktopImage('');
     setMobileImage('');
     setTitle('');
     setSubtitle('');
-    setButtonText('Explore Event');
-    setButtonLink('#quiz');
+    setButtonText('');
+    setButtonLink('');
     setTextAlignment('center');
-    setOverlayLevel(45);
+    setOverlayLevel(0);
     setStatus('active');
     setModalOpen(true);
   };
@@ -59,42 +59,42 @@ export const SlideshowMgmtPage: React.FC = () => {
     setEditingSlide(slide);
     setDesktopImage(slide.desktopImage);
     setMobileImage(slide.mobileImage || '');
-    setTitle(slide.title);
+    setTitle(slide.title || '');
     setSubtitle(slide.subtitle || '');
     setButtonText(slide.buttonText || '');
     setButtonLink(slide.buttonLink || '');
     setTextAlignment(slide.textAlignment || 'center');
-    setOverlayLevel(slide.overlayLevel ?? 45);
+    setOverlayLevel(slide.overlayLevel ?? 0);
     setStatus(slide.status || 'active');
     setModalOpen(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!desktopImage || !title) {
-      showToast('error', 'Desktop image URL and title are required.');
+    if (!desktopImage) {
+      showToast('error', 'Please upload a slide image.');
       return;
     }
 
     const payload = {
       desktopImage,
       mobileImage,
-      title,
-      subtitle,
-      buttonText,
-      buttonLink,
+      title: title || '',
+      subtitle: subtitle || '',
+      buttonText: buttonText || '',
+      buttonLink: buttonLink || '',
       textAlignment,
-      overlayLevel: Number(overlayLevel),
+      overlayLevel: Number(overlayLevel) || 0,
       status
     };
 
     try {
       if (editingSlide) {
         await api.updateSlide(editingSlide.id, payload);
-        showToast('success', 'Slide updated successfully');
+        showToast('success', 'Slide image updated successfully');
       } else {
         await api.createSlide(payload);
-        showToast('success', 'Slide created successfully');
+        showToast('success', 'Slide image added successfully');
       }
       setModalOpen(false);
       fetchSlides();
@@ -145,12 +145,16 @@ export const SlideshowMgmtPage: React.FC = () => {
                   <div className="absolute inset-0 bg-slate-950" style={{ opacity: (slide.overlayLevel || 45) / 100 }} />
                   <div className="absolute inset-0 p-4 flex flex-col justify-end text-white">
                     <span className="text-[10px] uppercase font-bold text-orange-400">Order: #{slide.displayOrder}</span>
-                    <h4 className="text-base font-bold font-heading line-clamp-1">{slide.title}</h4>
+                    {slide.title ? (
+                      <h4 className="text-base font-bold font-heading line-clamp-1">{slide.title}</h4>
+                    ) : (
+                      <h4 className="text-xs font-medium text-slate-300 line-clamp-1">Slide #{slide.displayOrder}</h4>
+                    )}
                   </div>
                 </div>
 
                 <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
-                  <p className="text-xs text-slate-400 line-clamp-2">{slide.subtitle}</p>
+                  {slide.subtitle ? <p className="text-xs text-slate-400 line-clamp-2">{slide.subtitle}</p> : null}
 
                   <div className="flex items-center justify-between pt-3 border-t border-slate-800">
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
@@ -188,106 +192,27 @@ export const SlideshowMgmtPage: React.FC = () => {
         id="slide_modal"
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
-        title={editingSlide ? 'Edit Slideshow Photo' : 'Add New Slideshow Photo'}
+        title={editingSlide ? 'Edit Slide Image' : 'Add Slide Image'}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <ImageUploadInput
-            label="Desktop Image"
+            label="Slide Image"
             required
             value={desktopImage}
             onChange={setDesktopImage}
           />
 
-          <ImageUploadInput
-            label="Mobile Image (Optional)"
-            value={mobileImage}
-            onChange={setMobileImage}
-          />
-
-          <div>
-            <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Heading Title *</label>
-            <input
-              type="text"
-              required
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              placeholder="e.g. Welcome to ARC Club"
-              className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Subtitle Description</label>
-            <textarea
-              rows={2}
-              value={subtitle}
-              onChange={e => setSubtitle(e.target.value)}
-              placeholder="e.g. Empowering youth through community activities"
-              className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">CTA Button Text</label>
-              <input
-                type="text"
-                value={buttonText}
-                onChange={e => setButtonText(e.target.value)}
-                placeholder="e.g. Join Ramazan Quiz"
-                className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">CTA Button Link</label>
-              <input
-                type="text"
-                value={buttonLink}
-                onChange={e => setButtonLink(e.target.value)}
-                placeholder="e.g. /quiz"
-                className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Text Alignment</label>
-              <select
-                value={textAlignment}
-                onChange={e => setTextAlignment(e.target.value as any)}
-                className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
-              >
-                <option value="left">Left</option>
-                <option value="center">Center</option>
-                <option value="right">Right</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Dark Overlay % ({overlayLevel}%)</label>
-              <input
-                type="range"
-                min="0"
-                max="80"
-                value={overlayLevel}
-                onChange={e => setOverlayLevel(Number(e.target.value))}
-                className="w-full"
-              />
-            </div>
-          </div>
-
           <div className="flex justify-end gap-3 pt-3">
             <button
               type="button"
               onClick={() => setModalOpen(false)}
-              className="px-4 py-2 rounded-xl bg-slate-800 text-xs font-semibold text-slate-300"
+              className="px-4 py-2 rounded-xl bg-slate-800 text-xs font-semibold text-slate-300 hover:bg-slate-700 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-xl bg-orange-500 text-white font-bold text-xs hover:bg-orange-400"
+              className="px-5 py-2 rounded-xl bg-orange-500 text-white font-bold text-xs hover:bg-orange-400 transition-colors"
             >
               Save Slide
             </button>

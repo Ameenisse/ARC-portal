@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { PortalLayout } from '../../components/portal/PortalLayout';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
@@ -10,7 +10,7 @@ import { useToast } from '../../components/common/Toast';
 import { useTableSync } from '../../hooks/useRealtimeSync';
 import { 
   Image as ImageIcon, Globe, Target, Users, Share2, PhoneCall, Plus, Edit, Trash2, 
-  Eye, EyeOff, Save, CheckCircle, User, Calendar, MapPin
+  Eye, EyeOff, Save, CheckCircle, User, Calendar, MapPin, ExternalLink, Loader2, HeartPulse, ArrowLeft
 } from 'lucide-react';
 
 export const ContentMgmtPage: React.FC = () => {
@@ -35,11 +35,12 @@ export const ContentMgmtPage: React.FC = () => {
 
   // --- TAB 2: PUBLIC CONTENT & BRANDING STATE ---
   const [loadingContent, setLoadingContent] = useState(false);
+  const [savingContent, setSavingContent] = useState(false);
   const [clubName, setClubName] = useState('Ananda Recreation Club');
   const [clubAbbreviation, setClubAbbreviation] = useState('ARC Club');
   const [clubLogo, setClubLogo] = useState('');
   const [useLogo, setUseLogo] = useState(false);
-  const [welcomeHeading, setWelcomeHeading] = useState('Welcome to Ananda Recreation Club');
+  const [welcomeHeading, setWelcomeHeading] = useState('އާނަންދަ ރިކުރިއޭޝަން ކުލަބު (ARC) ގެ ވެބްސައިޓަށް މަރުޙަބާ!');
   const [welcomeMessage, setWelcomeMessage] = useState('');
   const [aboutText, setAboutText] = useState('');
   const [sectionVisibility, setSectionVisibility] = useState<Record<string, boolean>>({
@@ -135,7 +136,7 @@ export const ContentMgmtPage: React.FC = () => {
       setClubAbbreviation(getVal('branding', 'clubAbbreviation', 'ARC Club'));
       setClubLogo(getVal('branding', 'logo', ''));
       setUseLogo(getVal('branding', 'useLogo', false));
-      setWelcomeHeading(getVal('branding', 'welcomeHeading', 'Welcome to ARC Club'));
+      setWelcomeHeading(getVal('branding', 'welcomeHeading', 'އާނަންދަ ރިކުރިއޭޝަން ކުލަބު (ARC) ގެ ވެބްސައިޓަށް މަރުޙަބާ!'));
       setWelcomeMessage(getVal('branding', 'welcomeMessage', ''));
       setAboutText(getVal('branding', 'aboutText', ''));
       setSectionVisibility(getVal('public_site', 'sectionVisibility', {
@@ -193,6 +194,18 @@ export const ContentMgmtPage: React.FC = () => {
     }
   };
 
+  const [healthCount, setHealthCount] = useState(0);
+  const fetchHealthCount = async () => {
+    try {
+      const data = await api.getHealthAwareness();
+      if (Array.isArray(data)) {
+        setHealthCount(data.length);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   // Define subtabs and permission checks
   const allSubTabs = [
     { key: 'events', label: `ޙަރަކާތްތަކާއި އަލްބަމް (${events.length})`, icon: Calendar, canView: hasPermission('events_meetings', 'canView') || hasPermission('content', 'canView') },
@@ -215,6 +228,10 @@ export const ContentMgmtPage: React.FC = () => {
   };
 
   useEffect(() => {
+    fetchHealthCount();
+  }, []);
+
+  useEffect(() => {
     if (currentTab === 'slideshow') fetchSlides();
     else if (currentTab === 'content') fetchContentSettings();
     else if (currentTab === 'vision_mission') fetchContentSettings();
@@ -222,12 +239,14 @@ export const ContentMgmtPage: React.FC = () => {
     else if (currentTab === 'social_media') fetchSocial();
     else if (currentTab === 'contact') fetchContacts();
     else if (currentTab === 'events') fetchEvents();
+    else if (currentTab === 'health_awareness') fetchHealthCount();
   }, [currentTab]);
 
   // Real-time table sync for Public Site CMS tables
   useTableSync(
-    ['slideshow', 'siteSettings', 'contacts', 'socialLinks', 'excoMembers', 'events'],
+    ['slideshow', 'siteSettings', 'contacts', 'socialLinks', 'excoMembers', 'events', 'health_awareness'],
     () => {
+      fetchHealthCount();
       if (currentTab === 'slideshow') fetchSlides();
       else if (currentTab === 'content') fetchContentSettings();
       else if (currentTab === 'vision_mission') fetchContentSettings();
@@ -325,14 +344,14 @@ export const ContentMgmtPage: React.FC = () => {
   // SLIDESHOW CRUD
   const handleOpenCreateSlide = () => {
     setEditingSlide(null);
-    setDesktopImage('https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1600&q=80');
+    setDesktopImage('');
     setMobileImage('');
     setSlideTitle('');
     setSlideSubtitle('');
-    setButtonText('Explore Ramazan Quiz');
-    setButtonLink('#quiz');
+    setButtonText('');
+    setButtonLink('');
     setTextAlignment('center');
-    setOverlayLevel(45);
+    setOverlayLevel(0);
     setSlideStatus('active');
     setSlideModalOpen(true);
   };
@@ -341,33 +360,40 @@ export const ContentMgmtPage: React.FC = () => {
     setEditingSlide(slide);
     setDesktopImage(slide.desktopImage);
     setMobileImage(slide.mobileImage || '');
-    setSlideTitle(slide.title);
+    setSlideTitle(slide.title || '');
     setSlideSubtitle(slide.subtitle || '');
     setButtonText(slide.buttonText || '');
     setButtonLink(slide.buttonLink || '');
     setTextAlignment(slide.textAlignment || 'center');
-    setOverlayLevel(slide.overlayLevel ?? 45);
+    setOverlayLevel(slide.overlayLevel ?? 0);
     setSlideStatus(slide.status || 'active');
     setSlideModalOpen(true);
   };
 
   const handleSaveSlide = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!desktopImage || !slideTitle) {
-      showToast('error', 'Desktop Image URL and Title are required.');
+    if (!desktopImage) {
+      showToast('error', 'Please upload a slide image.');
       return;
     }
     const payload = {
-      desktopImage, mobileImage, title: slideTitle, subtitle: slideSubtitle,
-      buttonText, buttonLink, textAlignment, overlayLevel: Number(overlayLevel), status: slideStatus
+      desktopImage,
+      mobileImage,
+      title: slideTitle || '',
+      subtitle: slideSubtitle || '',
+      buttonText: buttonText || '',
+      buttonLink: buttonLink || '',
+      textAlignment,
+      overlayLevel: Number(overlayLevel) || 0,
+      status: slideStatus || 'active'
     };
     try {
       if (editingSlide) {
         await api.updateSlide(editingSlide.id, payload);
-        showToast('success', 'Slide updated successfully.');
+        showToast('success', 'Slide image updated successfully.');
       } else {
         await api.createSlide(payload);
-        showToast('success', 'Slide created successfully.');
+        showToast('success', 'Slide image added successfully.');
       }
       setSlideModalOpen(false);
       fetchSlides();
@@ -391,10 +417,12 @@ export const ContentMgmtPage: React.FC = () => {
   const handleSaveContent = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      setSavingContent(true);
       const payload = [
         { group: 'branding', key: 'clubName', value: clubName },
         { group: 'branding', key: 'clubAbbreviation', value: clubAbbreviation },
         { group: 'branding', key: 'logo', value: clubLogo },
+        { group: 'branding', key: 'appIcon', value: clubLogo },
         { group: 'branding', key: 'useLogo', value: useLogo },
         { group: 'branding', key: 'welcomeHeading', value: welcomeHeading },
         { group: 'branding', key: 'welcomeMessage', value: welcomeMessage },
@@ -402,9 +430,12 @@ export const ContentMgmtPage: React.FC = () => {
         { group: 'public_site', key: 'sectionVisibility', value: sectionVisibility }
       ];
       await api.updateContentSettings(payload);
-      showToast('success', 'Public website content settings saved.');
+      showToast('success', 'Public website content settings saved successfully.');
+      await fetchContentSettings();
     } catch (err: any) {
       showToast('error', err.message || 'Failed to save content settings.');
+    } finally {
+      setSavingContent(false);
     }
   };
 
@@ -689,12 +720,16 @@ export const ContentMgmtPage: React.FC = () => {
                       <div className="absolute inset-0 bg-slate-950" style={{ opacity: (slide.overlayLevel || 45) / 100 }} />
                       <div className="absolute inset-0 p-4 flex flex-col justify-end text-white">
                         <span className="text-[10px] uppercase font-bold text-orange-400">Order: #{slide.displayOrder}</span>
-                        <h4 className="text-base font-bold font-heading line-clamp-1">{slide.title}</h4>
+                        {slide.title ? (
+                          <h4 className="text-base font-bold font-heading line-clamp-1">{slide.title}</h4>
+                        ) : (
+                          <h4 className="text-xs font-medium text-slate-300 line-clamp-1">Slide #{slide.displayOrder}</h4>
+                        )}
                       </div>
                     </div>
 
                     <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
-                      <p className="text-xs text-slate-400 line-clamp-2">{slide.subtitle}</p>
+                      {slide.subtitle ? <p className="text-xs text-slate-400 line-clamp-2">{slide.subtitle}</p> : null}
 
                       <div className="flex items-center justify-between pt-3 border-t border-slate-800">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
@@ -824,7 +859,7 @@ export const ContentMgmtPage: React.FC = () => {
                     placeholder="Upload logo file (PNG, SVG, WEBP, JPG)..."
                   />
                   <p className="text-[11px] text-slate-400 mt-1">
-                    Upload a high-quality logo file. Transparent PNGs or SVGs are recommended.
+                    Upload a high-quality logo file. This logo automatically synchronizes as the browser tab favicon and mobile app icon.
                   </p>
                 </div>
               </div>
@@ -834,30 +869,45 @@ export const ContentMgmtPage: React.FC = () => {
                 <input
                   type="text"
                   required
+                  dir="auto"
                   value={welcomeHeading}
                   onChange={e => setWelcomeHeading(e.target.value)}
-                  className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                  placeholder="e.g. އާނަންދަ ރިކުރިއޭޝަން ކުލަބު (ARC) ގެ ވެބްސައިޓަށް މަރުޙަބާ!"
+                  className="w-full p-3 bg-slate-950 border border-slate-800 focus:border-orange-500 rounded-xl text-sm text-white"
                 />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  The primary welcome heading displayed on the public landing page hero/welcome section.
+                </p>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Landing Welcome Message</label>
                 <textarea
                   rows={3}
+                  dir="auto"
                   value={welcomeMessage}
                   onChange={e => setWelcomeMessage(e.target.value)}
-                  className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                  placeholder="Welcome message / subtitle displayed beneath the welcome heading..."
+                  className="w-full p-3 bg-slate-950 border border-slate-800 focus:border-orange-500 rounded-xl text-sm text-white"
                 />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Introductory greeting or motto rendered beneath the main welcome heading.
+                </p>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">About ARC Club</label>
                 <textarea
-                  rows={3}
+                  rows={5}
+                  dir="auto"
                   value={aboutText}
                   onChange={e => setAboutText(e.target.value)}
-                  className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                  placeholder="Club history, mission, community role, and goals..."
+                  className="w-full p-3 bg-slate-950 border border-slate-800 focus:border-orange-500 rounded-xl text-sm text-white"
                 />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Comprehensive club overview displayed in the landing page About section and on the About Us page.
+                </p>
               </div>
             </div>
 
@@ -893,14 +943,25 @@ export const ContentMgmtPage: React.FC = () => {
               </div>
             </div>
 
-            <div>
+            <div className="flex flex-wrap items-center gap-4 pt-2">
               <button
                 type="submit"
-                className="px-6 py-3 rounded-xl bg-orange-500 text-white font-bold text-sm hover:bg-orange-400 flex items-center gap-2 shadow-lg shadow-orange-500/20"
+                disabled={savingContent}
+                className="px-7 py-3 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-50 text-white font-bold text-sm flex items-center gap-2 shadow-lg shadow-orange-500/20 transition-all cursor-pointer"
               >
-                <Save className="w-4 h-4" />
-                <span>Save Content Settings</span>
+                {savingContent ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                <span>{savingContent ? 'Saving Settings...' : 'Save Content Settings'}</span>
               </button>
+
+              <a
+                href="/"
+                target="_blank"
+                rel="noreferrer"
+                className="px-5 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-semibold text-sm flex items-center gap-2 border border-slate-700 transition-all shadow-sm"
+              >
+                <ExternalLink className="w-4 h-4" />
+                <span>View Public Site</span>
+              </a>
             </div>
           </form>
         )}
@@ -1254,28 +1315,41 @@ export const ContentMgmtPage: React.FC = () => {
           </div>
         )}
 
+        {currentTab === 'health_awareness' && (
+          <div className="bg-slate-900 border border-emerald-500/30 rounded-2xl p-8 text-center space-y-4 max-w-xl mx-auto shadow-lg">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+              <HeartPulse className="w-7 h-7 animate-pulse" />
+            </div>
+            <h3 className="text-lg font-bold text-white">ޞިއްޙީ ހޭލުންތެރިކަމުގެ ވަކި ޚާއްޞަ މޮޑިއުލެއް</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              ޞިއްޙީ ހޭލުންތެރިކަން މިހާރު ވަނީ ޕަބްލިކް ވެބްސައިޓް މޮޑިއުލުން ވަކިކުރެވި، ވަކި ޚާއްޞަ މޮޑިއުލެއްގެ ގޮތުގައި ހަމަޖައްސާފައެވެ.
+            </p>
+            <div>
+              <Link
+                to="/portal/health-awareness"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all"
+              >
+                <span>ޞިއްޙީ ހޭލުންތެރިކަމުގެ މޮޑިއުލަށް ވަޑައިގަންނަވާ</span>
+                <ArrowLeft className="w-4 h-4" />
+              </Link>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* Slide Modal */}
-      <Modal isOpen={slideModalOpen} onClose={() => setSlideModalOpen(false)} title={editingSlide ? 'Edit Slide' : 'Add Slide'}>
+      <Modal isOpen={slideModalOpen} onClose={() => setSlideModalOpen(false)} title={editingSlide ? 'Edit Slide Image' : 'Add Slide Image'}>
         <form onSubmit={handleSaveSlide} className="space-y-4">
           <ImageUploadInput
-            label="Desktop Image"
+            label="Slide Image"
             required
             value={desktopImage}
             onChange={setDesktopImage}
           />
-          <div>
-            <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Title *</label>
-            <input type="text" required value={slideTitle} onChange={e => setSlideTitle(e.target.value)} className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white" />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Subtitle</label>
-            <textarea rows={2} value={slideSubtitle} onChange={e => setSlideSubtitle(e.target.value)} className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white" />
-          </div>
           <div className="flex justify-end gap-3 pt-3">
-            <button type="button" onClick={() => setSlideModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs">Cancel</button>
-            <button type="submit" className="px-5 py-2 bg-orange-500 text-white font-bold rounded-xl text-xs">Save Slide</button>
+            <button type="button" onClick={() => setSlideModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold hover:bg-slate-700 transition-colors">Cancel</button>
+            <button type="submit" className="px-5 py-2 bg-orange-500 text-white font-bold rounded-xl text-xs hover:bg-orange-400 transition-colors">Save Slide</button>
           </div>
         </form>
       </Modal>

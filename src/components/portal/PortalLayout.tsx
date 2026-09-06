@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth, isUserAdmin } from '../../context/AuthContext';
 import { usePortalLanguage } from '../../hooks/usePortalLanguage';
 import { ServerTimeBadge } from '../common/ServerTimeBadge';
 import { RealtimeSyncBadge } from '../common/RealtimeSyncBadge';
@@ -31,7 +31,9 @@ import {
   BookOpen,
   CheckCheck,
   ExternalLink,
-  Wallet
+  Wallet,
+  Package,
+  HeartPulse
 } from 'lucide-react';
 import { ModuleKey } from '../../types';
 
@@ -109,9 +111,11 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
     { key: 'dashboard', labelDv: 'ޑޭޝްބޯޑު', labelEn: 'Dashboard', icon: LayoutDashboard, href: '/portal' },
     { key: 'members', labelDv: 'މެންބަރުންގެ ލިސްޓް', labelEn: 'Members Directory', icon: UserCheck, href: '/portal/members' },
     { key: 'budget', labelDv: 'މާލީ ބަޖެޓް', labelEn: 'Budget & Finance', icon: Wallet, href: '/portal/budget' },
+    { key: 'rental_service', labelDv: 'ކުއްޔަށް ދޫކުރާ ޚިދުމަތް', labelEn: 'Rental Service', icon: Package, href: '/portal/rental-service' },
     { key: 'events_meetings', labelDv: 'ޙަރަކާތްތަކާއި ބައްދަލުވުން', labelEn: 'Events & Meetings', icon: Award, href: '/portal/events-meetings' },
     { key: 'ramazan_quiz', labelDv: 'ރަމަޟާން ކުއިޒް', labelEn: 'Ramadan Quiz', icon: HelpCircle, href: '/portal/ramazan-quiz' },
     { key: 'messages', labelDv: 'މެސެޖު އިންބޮކްސް', labelEn: 'Message Inbox', icon: Mail, href: '/portal/messages' },
+    { key: 'health_awareness', labelDv: 'ޞިއްޙީ ހޭލުންތެރިކަން', labelEn: 'Health Awareness', icon: HeartPulse, href: '/portal/health-awareness' },
     { key: 'content', labelDv: 'ޕަބްލިކް ސައިޓް', labelEn: 'Website Content', icon: FileText, href: '/portal/content' },
     { key: 'users', labelDv: 'ޔޫޒަރުން ބެލެހެއްޓުން', labelEn: 'Users & Roles', icon: Users, href: '/portal/users' },
     { key: 'audit_logs', labelDv: 'އޮޑިޓް ލޮގް', labelEn: 'Audit Logs', icon: History, href: '/portal/audit-logs' },
@@ -123,6 +127,11 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
 
   // Filter allowed modules with fallback check for grouped modules
   const allowedMenuItems = menuItems.filter(item => {
+    // Admin user has universal authorization across all portal modules
+    if (isUserAdmin(user)) {
+      return true;
+    }
+
     if (isClubMember) {
       return item.key === 'dashboard';
     }
@@ -136,11 +145,20 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
       const isExco = user.roleName === 'EXCO Member' || user.roleId === 'role_exco' || ['role_president', 'role_vp', 'role_treasurer', 'role_secretary'].includes(user.roleId);
       return isAdmin || isTreasurer || isExco || hasPermission('budget', 'canView');
     }
+    if (item.key === 'rental_service') {
+      const isAdmin = user.roleName === 'Admin' || user.roleId === 'role_admin' || user.roleName?.toLowerCase().includes('admin');
+      const isTreasurer = user.roleName === 'Treasurer' || user.roleId === 'role_treasurer' || user.roleName?.toLowerCase().includes('treasurer') || user.designation?.toLowerCase().includes('treasurer');
+      return isAdmin || isTreasurer || hasPermission('rental_service', 'canView');
+    }
     if (item.key === 'ramazan_quiz') {
       return hasPermission('ramazan_quiz', 'canView') || hasPermission('quiz_participants', 'canView') || hasPermission('quiz_winners', 'canView');
     }
     if (item.key === 'content') {
       return hasPermission('content', 'canView') || hasPermission('slideshow', 'canView') || hasPermission('vision_mission', 'canView') || hasPermission('contact', 'canView') || hasPermission('social_media', 'canView') || hasPermission('exco_team', 'canView');
+    }
+    if (item.key === 'health_awareness') {
+      const isAdmin = user.roleName === 'Admin' || user.roleId === 'role_admin' || user.roleName?.toLowerCase().includes('admin');
+      return isAdmin || hasPermission('health_awareness', 'canView') || hasPermission('content', 'canView');
     }
     if (item.key === 'users') {
       return hasPermission('users', 'canView') || hasPermission('roles_permissions', 'canView');
@@ -177,19 +195,19 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
         <div className="h-20 px-4 flex items-center justify-between border-b border-slate-800">
           {isExpanded ? (
             <div className="flex items-center gap-3 overflow-hidden">
-              <div className="w-9 h-9 rounded-xl bg-orange-500 flex items-center justify-center text-white font-bold text-base shrink-0">
-                ARC
+              <div className="w-10 h-10 rounded-xl bg-slate-800/90 border border-slate-700/80 p-0.5 overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
+                <img src="/arc-app-icon.png" alt="ARC Logo" className="w-full h-full object-contain rounded-lg" />
               </div>
               <div className="truncate">
-                <span className="font-heading font-bold text-base text-white block truncate">ARC Portal</span>
+                <span className="font-heading font-bold text-sm text-white block truncate">ARC - community portal</span>
                 <span className="text-[10px] uppercase text-orange-400 tracking-wider block font-semibold">
                   {user.roleName}
                 </span>
               </div>
             </div>
           ) : (
-            <div className="w-9 h-9 rounded-xl bg-orange-500 flex items-center justify-center text-white font-bold text-base mx-auto">
-              A
+            <div className="w-9 h-9 rounded-xl bg-slate-800/90 border border-slate-700/80 p-0.5 overflow-hidden flex items-center justify-center mx-auto shadow-sm">
+              <img src="/arc-app-icon.png" alt="ARC Logo" className="w-full h-full object-contain rounded-lg" />
             </div>
           )}
 

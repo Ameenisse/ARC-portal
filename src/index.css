@@ -102,4 +102,134 @@ blockquote {
   background: #94a3b8;
 }
 
+/* News Banner Marquee scrolling animation */
+@keyframes marqueeScroll {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+@keyframes marqueeScrollLTR {
+  0% { transform: translateX(-50%); }
+  100% { transform: translateX(0%); }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marqueeScroll 38s linear infinite;
+}
+
+.animate-marquee-ltr {
+  display: flex;
+  width: max-content;
+  animation: marqueeScrollLTR 38s linear infinite;
+}
+
+.animate-marquee:hover,
+.animate-marquee-ltr:hover,
+.pause-marquee {
+  animation-play-state: paused !important;
+}
+
+/* Rich Article & Document Content Styling (with Images, Headings, Lists, Figures) */
+.rich-article-content {
+  line-height: 2;
+  word-break: break-word;
+}
+
+.rich-article-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 1rem;
+  margin: 1.5rem auto;
+  display: block;
+  border: 1px solid rgba(51, 65, 85, 0.7);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+}
+
+.rich-article-content figure {
+  margin: 1.75rem auto;
+  text-align: center;
+}
+
+.rich-article-content figcaption {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  margin-top: 0.5rem;
+  font-weight: 500;
+}
+
+.rich-article-content h1,
+.rich-article-content h2,
+.rich-article-content h3,
+.rich-article-content h4 {
+  font-weight: 800;
+  color: #ffffff;
+  margin-top: 1.75rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.4;
+}
+
+.rich-article-content h2 {
+  font-size: 1.35rem;
+}
+
+.rich-article-content h3 {
+  font-size: 1.15rem;
+}
+
+.rich-article-content p {
+  margin-bottom: 1rem;
+}
+
+.rich-article-content ul {
+  list-style-type: disc;
+  padding-right: 1.75rem;
+  margin: 1rem 0;
+}
+
+.rich-article-content ol {
+  list-style-type: decimal;
+  padding-right: 1.75rem;
+  margin: 1rem 0;
+}
+
+.rich-article-content li {
+  margin-bottom: 0.5rem;
+}
+
+.rich-article-content blockquote {
+  border-right: 4px solid #10b981;
+  padding: 0.75rem 1.25rem;
+  background-color: rgba(6, 78, 59, 0.25);
+  border-radius: 0.75rem;
+  margin: 1.25rem 0;
+  color: #a7f3d0;
+}
+
+.rich-article-content a {
+  color: #34d399;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.rich-article-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.875rem;
+}
+
+.rich-article-content th,
+.rich-article-content td {
+  border: 1px solid rgba(51, 65, 85, 0.8);
+  padding: 0.5rem 0.75rem;
+}
+
+.rich-article-content th {
+  background-color: rgba(15, 23, 42, 0.8);
+  color: #f1f5f9;
+  font-weight: 700;
+}
+
 

@@ -1,10 +1,10 @@
 import { ModuleKey, Role, SiteSetting, ClubRulesData, UserRoleName, SlideshowItem } from '../types';
 
 export const ALL_MODULES: ModuleKey[] = [
-  'dashboard', 'members', 'events_meetings', 'budget', 'slideshow', 'content',
+  'dashboard', 'members', 'events_meetings', 'budget', 'rental_service', 'slideshow', 'content',
   'vision_mission', 'contact', 'social_media', 'exco_team', 'ramazan_quiz',
   'quiz_participants', 'quiz_winners', 'users', 'roles_permissions',
-  'audit_logs', 'club_rules', 'settings', 'messages'
+  'audit_logs', 'club_rules', 'settings', 'messages', 'health_awareness'
 ];
 
 export const defaultRoles: Role[] = [
@@ -131,8 +131,10 @@ export const defaultRoles: Role[] = [
 ];
 
 export const defaultSiteSettingsList: SiteSetting[] = [
-  { id: 'set_branding_clubName', group: 'branding', key: 'clubName', value: 'Ananda Recreation Club', updatedAt: new Date().toISOString() },
+  { id: 'set_branding_clubName', group: 'branding', key: 'clubName', value: 'ARC - community portal', updatedAt: new Date().toISOString() },
   { id: 'set_branding_clubAbbreviation', group: 'branding', key: 'clubAbbreviation', value: 'ARC', updatedAt: new Date().toISOString() },
+  { id: 'set_branding_logo', group: 'branding', key: 'logo', value: '/arc-app-icon.png', updatedAt: new Date().toISOString() },
+  { id: 'set_branding_useLogo', group: 'branding', key: 'useLogo', value: true, updatedAt: new Date().toISOString() },
   { id: 'set_branding_welcomeHeading', group: 'branding', key: 'welcomeHeading', value: 'Welcome to Ananda Recreation Club', updatedAt: new Date().toISOString() },
   { id: 'set_branding_welcomeMessage', group: 'branding', key: 'welcomeMessage', value: 'Connecting hearts and encouraging excellence.', updatedAt: new Date().toISOString() },
   { id: 'set_branding_aboutText', group: 'branding', key: 'aboutText', value: 'Ananda Recreation Club (ARC) is dedicated to youth empowerment, sports, and community engagement in Male\', Maldives.', updatedAt: new Date().toISOString() },

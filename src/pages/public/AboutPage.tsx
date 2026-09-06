@@ -48,7 +48,7 @@ export const AboutPage: React.FC = () => {
             <h1 className="text-3xl sm:text-5xl font-extrabold font-heading text-white tracking-tight">
               އަޅުގަނޑުމެންނާ ބެހޭ (About Us)
             </h1>
-            <p className="text-base sm:text-lg text-slate-300 max-w-2xl mx-auto leading-relaxed font-normal">
+            <p dir="auto" className="text-base sm:text-lg text-slate-300 max-w-3xl mx-auto leading-relaxed font-normal whitespace-pre-line">
               {branding.aboutText || 'އާނަންދާ ރީކްރިއޭޝަން ކްލަބްގެ ވިޝަން، މިޝަން، ހިންގާ ކޮމިޓީ އަދި ގުޅުއްވާނެ މަޢުލޫމާތު'}
             </p>
           </div>

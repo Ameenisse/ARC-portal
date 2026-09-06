@@ -93,10 +93,14 @@ export const ServerTimeBadge: React.FC<ServerTimeBadgeProps> = ({ className = ''
     }
   })();
 
+  const displayClass = className.includes('flex') || className.includes('hidden') || className.includes('block')
+    ? ''
+    : 'inline-flex';
+
   return (
     <div
       title={`Official Server Hosting Time (${serverTimezone})`}
-      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-200 text-xs font-mono shadow-inner ${className}`}
+      className={`${displayClass} items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-200 text-xs font-mono shadow-inner ${className}`}
     >
       <div className="relative flex items-center justify-center shrink-0">
         <span className={`w-2 h-2 rounded-full ${synced ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />

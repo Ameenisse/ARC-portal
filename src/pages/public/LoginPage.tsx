@@ -39,12 +39,12 @@ export const LoginPage: React.FC = () => {
         
         {/* Header Header */}
         <div className="text-center space-y-3">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-orange-500 to-red-500 flex items-center justify-center text-white font-bold text-2xl mx-auto shadow-lg shadow-orange-500/20">
-            ARC
+          <div className="w-20 h-20 rounded-2xl bg-slate-800/90 border border-slate-700/80 p-1 overflow-hidden flex items-center justify-center mx-auto shadow-xl shadow-orange-500/15">
+            <img src="/arc-app-icon.png" alt="ARC Logo" className="w-full h-full object-contain rounded-xl" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold font-heading text-white">އާނަންދާ ރީކްރިއޭޝަން ކްލަބް ޕޯޓަލް</h1>
-            <p className="text-xs text-slate-400 mt-1">ހިންގާ ކޮމިޓީ އަދި އެޑްމިން ސައިޓަށް ވަނުމަށް</p>
+            <h1 className="text-2xl font-bold font-heading text-white">ARC - community portal</h1>
+            <p className="text-xs text-slate-400 mt-1">އާނަންދާ ރީކްރިއޭޝަން ކްލަބް • ހިންގާ ކޮމިޓީ އަދި އެޑްމިން ސައިޓަށް ވަނުމަށް</p>
           </div>
         </div>
 

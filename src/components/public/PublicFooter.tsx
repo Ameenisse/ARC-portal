@@ -16,7 +16,8 @@ interface PublicFooterProps {
 }
 
 export const PublicFooter: React.FC<PublicFooterProps> = ({ branding, socialLinks = [], hasEvents = false }) => {
-  const showLogoImage = Boolean(branding?.useLogo && branding?.logo && branding.logo.trim() !== '');
+  const logoUrl = (branding?.logo && branding.logo.trim() !== '') ? branding.logo : '/arc-app-icon.png';
+  const showLogoImage = branding?.useLogo !== false;
 
   return (
     <footer className="bg-slate-950 text-slate-400 border-t border-slate-800/80 pt-12 pb-8">
@@ -28,7 +29,7 @@ export const PublicFooter: React.FC<PublicFooterProps> = ({ branding, socialLink
             <div className="flex items-center gap-3">
               {showLogoImage ? (
                 <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 p-0.5 overflow-hidden flex items-center justify-center">
-                  <img src={branding.logo} alt="Logo" className="w-full h-full object-contain rounded-lg" />
+                  <img src={logoUrl} alt="Logo" className="w-full h-full object-contain rounded-lg" />
                 </div>
               ) : (
                 <div className="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center text-white font-bold text-lg">

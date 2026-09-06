@@ -152,6 +152,58 @@
     "/quizQuestions/{questionId}": {
       "schema": "QuizQuestion",
       "description": "Ramazan quiz questions"
+    },
+    "/rentalItems/{itemId}": {
+      "schema": "RentalItem",
+      "description": "Equipment and gear catalog items available for rental"
+    },
+    "/rentalUnits/{unitId}": {
+      "schema": "RentalUnit",
+      "description": "Serialized inventory units with barcodes and condition tracking"
+    },
+    "/rentalStockMovements/{movementId}": {
+      "schema": "RentalStockMovement",
+      "description": "Audit trail of inventory movements and status transitions"
+    },
+    "/rentalRequests/{requestId}": {
+      "schema": "RentalRequest",
+      "description": "Customer rental booking requests and workflow state"
+    },
+    "/rentalReservations/{reservationId}": {
+      "schema": "RentalReservation",
+      "description": "Scheduled inventory reservations preventing double-booking"
+    },
+    "/rentalBills/{billId}": {
+      "schema": "RentalBill",
+      "description": "Invoices and return charges bills"
+    },
+    "/rentalPayments/{paymentId}": {
+      "schema": "RentalPayment",
+      "description": "Customer payment submissions and verification status"
+    },
+    "/rentalReceipts/{receiptId}": {
+      "schema": "RentalReceipt",
+      "description": "Official printable payment receipts with counter sequence"
+    },
+    "/rentalHandovers/{handoverId}": {
+      "schema": "RentalHandover",
+      "description": "Handover condition reports with customer digital signature"
+    },
+    "/rentalReturns/{returnId}": {
+      "schema": "RentalReturn",
+      "description": "Return inspection logs, condition checks, and calculated charges"
+    },
+    "/rentalCustomers/{customerUid}": {
+      "schema": "RentalCustomer",
+      "description": "Google authenticated customer profiles"
+    },
+    "/rentalRules/{ruleId}": {
+      "schema": "RentalRule",
+      "description": "Versioned rental terms, regulations, and policies"
+    },
+    "/rentalSettings/{settingsId}": {
+      "schema": "RentalSettings",
+      "description": "Global rental service configuration and operational settings"
     }
   }
 }

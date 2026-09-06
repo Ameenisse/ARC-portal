@@ -31,7 +31,9 @@ export interface ModuleInfo {
 export const ALL_SYSTEM_MODULES: ModuleInfo[] = [
   // Core Operations
   { key: 'dashboard', labelDhivehi: 'ޑޭޝްބޯޑް އޯވަރވިއު', labelEnglish: 'Dashboard Overview', category: 'core', description: 'Overall system metrics, activity overview, and analytics' },
+  { key: 'health_awareness', labelDhivehi: 'ޞިއްޙީ ހޭލުންތެރިކަން', labelEnglish: 'Health Awareness Module', category: 'core', description: 'ޞިއްޙީ އިރުޝާދުތަކާއި، ބްލޮގް މަޢުލޫމާތު އަދި ބެނަރ ޓިކަރ މެނޭޖްކުރުން' },
   { key: 'budget', labelDhivehi: 'ބަޖެޓާއި ފައިސާގެ މޮޑިއުލް', labelEnglish: 'Budget & Finance Management', category: 'core', description: 'Financial ledger, income & expense registers, member contributions, allocations, and bank accounts' },
+  { key: 'rental_service', labelDhivehi: 'ކުއްޔަށް ދޫކުރާ ޚިދުމަތް', labelEnglish: 'Rental Service', category: 'core', description: 'Equipment & item rentals, serialized inventory, customer requests, handovers, returns, and inspection fees' },
   { key: 'members', labelDhivehi: 'ކްލަބް މެންބަރުންގެ ދަފްތަރު', labelEnglish: 'Club Members Register', category: 'core', description: 'Official members registry, registration forms, and details' },
   { key: 'events_meetings', labelDhivehi: 'ޙަރަކާތްތަކާއި ބައްދަލުވުންތައް', labelEnglish: 'Events & Meetings', category: 'core', description: 'Event scheduling, EXCO meeting minutes, attendance, and votings' },
   { key: 'messages', labelDhivehi: 'އިންބޮކްސް އަދި މެސެޖުތައް', labelEnglish: 'Inbox & Direct Messages', category: 'core', description: 'Public contact inquiries, action tracking, and internal alerts' },

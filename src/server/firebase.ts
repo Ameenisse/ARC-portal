@@ -10,9 +10,14 @@ import {
 import {
   getStorage as getAdminStorage
 } from 'firebase-admin/storage';
+import {
+  getAuth as getAdminAuth
+} from 'firebase-admin/auth';
 import { initializeApp as initClientApp, getApps as getClientApps } from 'firebase/app';
 import {
+  initializeFirestore,
   getFirestore as getClientFirestore,
+  setLogLevel,
   collection as clientCollection,
   doc as clientDoc,
   getDocs as clientGetDocs,
@@ -82,12 +87,20 @@ const firebaseApp =
         storageBucket: `${PROJECT_ID}.firebasestorage.app`
       });
 
+export const adminAuth = getAdminAuth(firebaseApp);
+
 let adminDb: any = null;
 try {
   adminDb = getAdminFirestore(firebaseApp, DATABASE_ID);
   adminDb.settings({ ignoreUndefinedProperties: true });
 } catch (err) {
   console.warn('[Firebase Admin] Notice: Direct gRPC admin init deferred.');
+}
+
+try {
+  setLogLevel('error');
+} catch (e) {
+  // Ignore
 }
 
 const clientApp = getClientApps().length
@@ -100,7 +113,49 @@ const clientApp = getClientApps().length
       authDomain: firebaseConfig.authDomain
     });
 
-const rawDb = getClientFirestore(clientApp, DATABASE_ID);
+let rawDb: any;
+try {
+  rawDb = initializeFirestore(clientApp, {
+    ignoreUndefinedProperties: true,
+    experimentalAutoDetectLongPolling: true
+  }, DATABASE_ID);
+} catch (err) {
+  rawDb = getClientFirestore(clientApp, DATABASE_ID);
+}
+
+// Resilient retry wrapper for transient network/gRPC connection drops (Code 14 UNAVAILABLE)
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelayMs = 250): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      attempt++;
+      const msg = typeof err?.message === 'string' ? err.message : '';
+      const code = err?.code;
+      const isTransientUnavailable =
+        code === 'unavailable' ||
+        code === 14 ||
+        code === 'resource-exhausted' ||
+        code === 8 ||
+        msg.includes('UNAVAILABLE') ||
+        msg.includes('14 UNAVAILABLE') ||
+        msg.includes('The service is temporarily unavailable') ||
+        msg.includes('Please retry with exponential backoff') ||
+        msg.includes('deadline exceeded') ||
+        msg.includes('ETIMEDOUT') ||
+        msg.includes('ECONNRESET');
+
+      if (attempt <= maxRetries && isTransientUnavailable) {
+        const delay = initialDelayMs * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 150);
+        console.warn(`[Firestore] Transient unavailable (${code || '14'}, attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
 
 function cleanUndefined(obj: any): any {
   if (obj === null || obj === undefined || typeof obj !== 'object') return obj;
@@ -134,27 +189,29 @@ export class DocRefWrapper {
   }
 
   async get() {
-    const snap = await clientGetDoc(this._rawDocRef);
-    const exists = snap.exists();
-    return {
-      id: snap.id,
-      ref: this,
-      exists,
-      existsFn: () => exists,
-      data: () => snap.data() || {}
-    };
+    return await withRetry(async () => {
+      const snap = await clientGetDoc(this._rawDocRef);
+      const exists = snap.exists();
+      return {
+        id: snap.id,
+        ref: this,
+        exists,
+        existsFn: () => exists,
+        data: () => snap.data() || {}
+      };
+    });
   }
 
   async set(data: any, options: { merge?: boolean } = {}) {
-    return await clientSetDoc(this._rawDocRef, cleanUndefined(data), options);
+    return await withRetry(() => clientSetDoc(this._rawDocRef, cleanUndefined(data), options));
   }
 
   async update(data: any) {
-    return await clientUpdateDoc(this._rawDocRef, cleanUndefined(data));
+    return await withRetry(() => clientUpdateDoc(this._rawDocRef, cleanUndefined(data)));
   }
 
   async delete() {
-    return await clientDeleteDoc(this._rawDocRef);
+    return await withRetry(() => clientDeleteDoc(this._rawDocRef));
   }
 }
 
@@ -189,17 +246,19 @@ export class CollectionRefWrapper {
     const q = this.constraints.length > 0
       ? clientQuery(clientCollection(rawDb, this.name), ...this.constraints)
       : clientCollection(rawDb, this.name);
-    const snap = await clientGetDocs(q);
-    return {
-      empty: snap.empty,
-      size: snap.size,
-      docs: snap.docs.map(d => ({
-        id: d.id,
-        ref: new DocRefWrapper(d.ref, this.name, d.id),
-        exists: true,
-        data: () => d.data()
-      }))
-    };
+    return await withRetry(async () => {
+      const snap = await clientGetDocs(q);
+      return {
+        empty: snap.empty,
+        size: snap.size,
+        docs: snap.docs.map(d => ({
+          id: d.id,
+          ref: new DocRefWrapper(d.ref, this.name, d.id),
+          exists: true,
+          data: () => d.data()
+        }))
+      };
+    });
   }
 }
 
@@ -230,12 +289,12 @@ export const firestore = {
         return this;
       },
       async commit(): Promise<void> {
-        await b.commit();
+        await withRetry(() => b.commit());
       }
     };
   },
   async runTransaction<T>(updateFunction: (transaction: FirestoreTransaction) => Promise<T>): Promise<T> {
-    return await clientRunTransaction(rawDb, async (tx) => {
+    return await withRetry(() => clientRunTransaction(rawDb, async (tx) => {
       const wrappedTx: FirestoreTransaction = {
         async get(docRef: any) {
           const raw = unwrapRef(docRef);
@@ -262,7 +321,7 @@ export const firestore = {
         }
       };
       return await updateFunction(wrappedTx);
-    });
+    }));
   }
 };
 

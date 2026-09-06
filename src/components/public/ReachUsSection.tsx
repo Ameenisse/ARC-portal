@@ -53,56 +53,56 @@ export const ReachUsSection: React.FC<ReachUsProps> = ({ contacts = [] }) => {
   };
 
   return (
-    <section id="contact" className="py-20 bg-slate-950 text-white relative">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-16">
+    <section id="contact" className="py-12 sm:py-20 bg-slate-950 text-white relative">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-10 sm:space-y-16">
         
         <div className="text-center max-w-2xl mx-auto">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 font-semibold text-xs uppercase tracking-wider mb-3">
             <PhoneCall className="w-3.5 h-3.5" />
             <span>ގުޅުއްވާ</span>
           </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold font-heading text-white tracking-tight">
+          <h2 className="text-2xl sm:text-4xl font-extrabold font-heading text-white tracking-tight">
             ގުޅުއްވުމަށް އަދި މެސެޖު ފޮނުއްވުމަށް
           </h2>
-          <p className="text-slate-400 text-base mt-2">
+          <p className="text-slate-400 text-xs sm:text-base mt-2 px-2">
             އާނަންދާ ރީކްރިއޭޝަން ކްލަބުގެ ހަރަކާތްތަކާއި، ރަމަޟާން ކުއިޒް، ނުވަތަ ސުޕޮންސަރޝިޕާ ބެހޭގޮތުން މަޢުލޫމާތު ހޯއްދެވުމަށް ގުޅުއްވާ ނުވަތަ މެސެޖެއް ފޮނުއްވާ!
           </p>
         </div>
 
         {/* Top Info Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
           
           {/* Email */}
           <a
             href={`mailto:${email}`}
-            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 hover:border-orange-500/50 transition-all flex items-start gap-4 group"
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 hover:border-orange-500/50 transition-all flex items-start gap-3.5 sm:gap-4 group"
           >
-            <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
-              <Mail className="w-6 h-6" />
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+              <Mail className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div>
-              <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold block">އީމެއިލް</span>
-              <span className="text-base font-bold text-white group-hover:text-orange-400 transition-colors mt-1 block">
+            <div className="min-w-0 flex-1">
+              <span className="text-[11px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold block">އީމެއިލް</span>
+              <span className="text-sm sm:text-base font-bold text-white group-hover:text-orange-400 transition-colors mt-1 block truncate">
                 {email}
               </span>
-              <span className="text-xs text-slate-500 mt-1 block">އީމެއިލް ފޮނުއްވުމަށް ފިއްތަވާލައްވާ</span>
+              <span className="text-[11px] sm:text-xs text-slate-500 mt-0.5 block">އީމެއިލް ފޮނުއްވުމަށް ފިއްތަވާލައްވާ</span>
             </div>
           </a>
 
           {/* Primary Phone Dialer */}
           <a
             href={`tel:${(primaryPhone || '').replace(/\s+/g, '')}`}
-            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 hover:border-red-500/50 transition-all flex items-start gap-4 group"
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 hover:border-red-500/50 transition-all flex items-start gap-3.5 sm:gap-4 group"
           >
-            <div className="w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
-              <Phone className="w-6 h-6" />
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+              <Phone className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div>
-              <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold block">މައި ފޯނު ނަންބަރު</span>
-              <span className="text-base font-bold text-white group-hover:text-red-400 transition-colors mt-1 block font-mono">
+            <div className="min-w-0 flex-1">
+              <span className="text-[11px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold block">މައި ފޯނު ނަންބަރު</span>
+              <span className="text-sm sm:text-base font-bold text-white group-hover:text-red-400 transition-colors mt-1 block font-mono">
                 {primaryPhone}
               </span>
-              <span className="text-xs text-slate-500 mt-1 block">ފޯނު ކުރެއްވުމަށް ފިއްތަވާލައްވާ</span>
+              <span className="text-[11px] sm:text-xs text-slate-500 mt-0.5 block">ފޯނު ކުރެއްވުމަށް ފިއްތަވާލައްވާ</span>
             </div>
           </a>
 
@@ -111,28 +111,28 @@ export const ReachUsSection: React.FC<ReachUsProps> = ({ contacts = [] }) => {
             href={`https://wa.me/${(whatsapp || '').replace(/[^\d]/g, '')}`}
             target="_blank"
             rel="noreferrer"
-            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 hover:border-orange-500/50 transition-all flex items-start gap-4 group"
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 hover:border-orange-500/50 transition-all flex items-start gap-3.5 sm:gap-4 group"
           >
-            <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
-              <MessageSquare className="w-6 h-6" />
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+              <MessageSquare className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div>
-              <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold block">ވައިބަރ / ވާޓްސްއެޕް</span>
-              <span className="text-base font-bold text-white group-hover:text-orange-400 transition-colors mt-1 block font-mono">
+            <div className="min-w-0 flex-1">
+              <span className="text-[11px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold block">ވައިބަރ / ވާޓްސްއެޕް</span>
+              <span className="text-sm sm:text-base font-bold text-white group-hover:text-orange-400 transition-colors mt-1 block font-mono">
                 {whatsapp}
               </span>
-              <span className="text-xs text-slate-500 mt-1 block">މެސެޖު ކުރެއްވުމަށް ފިއްތަވާލައްވާ</span>
+              <span className="text-[11px] sm:text-xs text-slate-500 mt-0.5 block">މެސެޖު ކުރެއްވުމަށް ފިއްތަވާލައްވާ</span>
             </div>
           </a>
 
           {/* Office Address */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex items-start gap-4">
-            <div className="w-12 h-12 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center shrink-0">
-              <MapPin className="w-6 h-6" />
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 flex items-start gap-3.5 sm:gap-4">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center shrink-0">
+              <MapPin className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div>
-              <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold block">އޮފީސް އެޑްރެސް</span>
-              <span className="text-sm font-semibold text-white mt-1 block leading-relaxed">
+            <div className="min-w-0 flex-1">
+              <span className="text-[11px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold block">އޮފީސް އެޑްރެސް</span>
+              <span className="text-xs sm:text-sm font-semibold text-white mt-1 block leading-relaxed">
                 {address}
               </span>
             </div>
@@ -141,7 +141,7 @@ export const ReachUsSection: React.FC<ReachUsProps> = ({ contacts = [] }) => {
         </div>
 
         {/* MESSAGE BOX FORM CONTAINER */}
-        <div className="max-w-3xl mx-auto bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-10 shadow-2xl relative overflow-hidden">
+        <div className="max-w-3xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl p-4 sm:p-10 shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 right-0 w-64 h-64 bg-orange-500/5 rounded-full blur-3xl pointer-events-none" />
           
           <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-800">
