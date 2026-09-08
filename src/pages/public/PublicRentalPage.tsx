@@ -17,11 +17,16 @@ import {
   Sparkles,
   Search
 } from 'lucide-react';
-import { RentalItem, PublicSiteData } from '../../types';
+import { RentalItem } from '../../types';
 import { useCustomerAuth } from '../../context/CustomerAuthContext';
+import { usePublicSiteData } from '../../hooks/usePublicSiteData';
+import { PageLoader } from '../../components/common/PageLoader';
+import { PageTransition } from '../../components/common/PageTransition';
 import { RentalBookingModal } from '../../components/rental/RentalBookingModal';
 import { RentalRulesModal } from '../../components/rental/RentalRulesModal';
 import { CustomerProfileModal } from '../../components/rental/CustomerProfileModal';
+
+const CACHED_RENTAL_KEY = 'arc_cached_rental_items_v1';
 
 const translateFeatureToDh = (feature: string): string => {
   const map: Record<string, string> = {
@@ -46,26 +51,46 @@ export const PublicRentalPage: React.FC = () => {
   const navigate = useNavigate();
   const { firebaseUser, customer, signInWithGoogle, signOutCustomer, previewDevLogin, isProfileComplete } = useCustomerAuth();
 
-  const [siteData, setSiteData] = useState<PublicSiteData | null>(null);
-  const [items, setItems] = useState<RentalItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: siteData } = usePublicSiteData();
+  const [items, setItems] = useState<RentalItem[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = sessionStorage.getItem(CACHED_RENTAL_KEY);
+        if (cached) return JSON.parse(cached);
+      } catch (e) {
+        // ignore
+      }
+    }
+    return [];
+  });
+  const [loading, setLoading] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return !sessionStorage.getItem(CACHED_RENTAL_KEY);
+      } catch (e) {
+        return true;
+      }
+    }
+    return true;
+  });
   const [selectedItemForBooking, setSelectedItemForBooking] = useState<RentalItem | null>(null);
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    // Load site data
-    fetch('/api/public/site-data')
-      .then(r => r.json())
-      .then(setSiteData)
-      .catch(console.error);
-
     // Load public rental items
     fetch('/api/public/rental/items')
       .then(r => r.json())
       .then(data => {
-        if (Array.isArray(data)) setItems(data);
+        if (Array.isArray(data)) {
+          setItems(data);
+          try {
+            sessionStorage.setItem(CACHED_RENTAL_KEY, JSON.stringify(data));
+          } catch (e) {
+            // ignore
+          }
+        }
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -84,8 +109,9 @@ export const PublicRentalPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white" dir="rtl">
-      <PublicHeader branding={defaultBranding} activePath="/rental" />
+    <PageTransition>
+      <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white" dir="rtl">
+        <PublicHeader branding={defaultBranding} activePath="/rental" />
 
       <main className="flex-1">
         {/* Hero Section */}
@@ -273,8 +299,8 @@ export const PublicRentalPage: React.FC = () => {
           </div>
 
           {loading ? (
-            <div className="py-20 text-center text-slate-400 text-sm">
-              ކެޓަލޮގް ލޯޑްވަނީ...
+            <div className="py-20 text-center">
+              <PageLoader fullscreen={false} message="ކެޓަލޮގް ލޯޑްވަނީ..." />
             </div>
           ) : filteredItems.length === 0 ? (
             <div className="py-16 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-8 space-y-3">
@@ -429,6 +455,7 @@ export const PublicRentalPage: React.FC = () => {
           onClose={() => setShowProfileModal(false)}
         />
       )}
-    </div>
+      </div>
+    </PageTransition>
   );
 };

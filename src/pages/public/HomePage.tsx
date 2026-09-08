@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { api } from '../../services/api';
-import { PublicSiteData } from '../../types';
+import React from 'react';
+import { usePublicSiteData } from '../../hooks/usePublicSiteData';
 import { PublicHeader } from '../../components/public/PublicHeader';
 import { PublicFooter } from '../../components/public/PublicFooter';
 import { HeroSlideshow } from '../../components/public/HeroSlideshow';
@@ -11,88 +10,23 @@ import { EventsSection } from '../../components/public/EventsSection';
 import { ExcoSection } from '../../components/public/ExcoSection';
 import { ReachUsSection } from '../../components/public/ReachUsSection';
 import { useTableSync } from '../../hooks/useRealtimeSync';
+import { PageLoader } from '../../components/common/PageLoader';
+import { PageTransition } from '../../components/common/PageTransition';
 import { Sparkles, ArrowRight, ArrowLeft } from 'lucide-react';
 
-const CACHED_SITE_DATA_KEY = 'arc_cached_public_site_data_v1';
-
 export const HomePage: React.FC = () => {
-  const [data, setData] = useState<PublicSiteData | null>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const cached = sessionStorage.getItem(CACHED_SITE_DATA_KEY);
-        if (cached) return JSON.parse(cached);
-      } catch (e) {
-        // ignore
-      }
-    }
-    return null;
-  });
-  const [loading, setLoading] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        return !sessionStorage.getItem(CACHED_SITE_DATA_KEY);
-      } catch (e) {
-        return true;
-      }
-    }
-    return true;
-  });
-  const [error, setError] = useState<string | null>(null);
-  const retryTimeoutRef = React.useRef<any>(null);
-
-  const fetchSiteData = (silent = false) => {
-    if (retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current);
-      retryTimeoutRef.current = null;
-    }
-    if (!silent && !data) setLoading(true);
-    setError(null);
-    api.getPublicSiteData()
-      .then(res => {
-        setData(res);
-        setError(null);
-      })
-      .catch(err => {
-        console.warn('Failed to load public site data:', err);
-        setError(err.message || 'Database temporarily unavailable.');
-        // Auto-retry once after 3 seconds if data is not loaded yet
-        if (!data) {
-          retryTimeoutRef.current = setTimeout(() => {
-            fetchSiteData(true);
-          }, 3000);
-        }
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  };
-
-  useEffect(() => {
-    fetchSiteData(Boolean(data));
-    return () => {
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current);
-      }
-    };
-  }, []);
+  const { data, loading, error, refresh } = usePublicSiteData();
 
   // Real-time table sync for Public Home Page
   useTableSync(
     ['slideshow', 'siteSettings', 'contacts', 'socialLinks', 'excoMembers', 'events', 'quiz_questions', 'health_awareness'],
     () => {
-      fetchSiteData(true);
+      refresh(true);
     }
   );
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm font-medium text-slate-400">އާނަންދާ ރީކްރިއޭޝަން ކްލަބް ޕޯޓަލް ލޯޑުވަނީ...</p>
-        </div>
-      </div>
-    );
+  if (loading && !data) {
+    return <PageLoader message="އާނަންދާ ރީކްރިއޭޝަން ކްލަބް ވެބްސައިޓް ލޯޑުވަނީ..." />;
   }
 
   if (error && !data) {
@@ -107,7 +41,7 @@ export const HomePage: React.FC = () => {
             ޑޭޓާބޭސްއާ ގުޅުމުގައި މައްސަލައެއް ދިމާވެއްޖެ. ކުޑައިރުކޮޅަކަށްފަހު އަލުން މަސައްކަތްކޮށްލައްވާ.
           </p>
           <button
-            onClick={() => fetchSiteData(false)}
+            onClick={() => refresh(false)}
             className="w-full py-2.5 px-4 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-medium transition-colors shadow-lg shadow-orange-600/20"
           >
             އަލުން މަސައްކަތްކުރައްވާ (Retry)
@@ -123,10 +57,11 @@ export const HomePage: React.FC = () => {
   const hasEvents = events.length > 0;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      <PublicHeader branding={branding} activePath="/" hasEvents={hasEvents} />
+    <PageTransition>
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+        <PublicHeader branding={branding} activePath="/" hasEvents={hasEvents} />
 
-      <main className="flex-1">
+        <main className="flex-1">
         
         {/* Section 1: Hero Slideshow with Overlaid Welcome Text & Buttons (No Solid Background) */}
         {sectionVisibility.slideshow && slideshow.length > 0 ? (
@@ -268,5 +203,6 @@ export const HomePage: React.FC = () => {
 
       <PublicFooter branding={branding} socialLinks={socialLinks} hasEvents={hasEvents} />
     </div>
+  </PageTransition>
   );
 };

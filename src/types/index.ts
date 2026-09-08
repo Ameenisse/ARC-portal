@@ -10,6 +10,7 @@ export type UserRoleName =
   | 'Vice President' 
   | 'Treasurer' 
   | 'Secretary' 
+  | 'Health Promotion Officer'
   | 'EXCO Member'
   | 'Club Member';
 
@@ -148,6 +149,7 @@ export interface MemberDashboardWidgetSettings {
   showPersonalBudgetReport?: boolean;
   showClubRulesQuickButton?: boolean;
   showQuizQuickButton?: boolean;
+  showFeePayQuickButton?: boolean;
   allowMemberConnectProfile?: boolean;
 }
 
@@ -748,6 +750,7 @@ export interface IncomeRecord {
   notes?: string;
   attachments?: string[];
   contributionRecordId?: string;
+  contributionPaymentRequestId?: string;
   sourceModule?: string;
   sourceRequestId?: string;
   sourcePaymentId?: string;
@@ -899,6 +902,10 @@ export interface MemberContributionSetting {
   defaultDepositAccountId: string;
   enableAutoFines: boolean;
   gracePeriodDays: number;
+  allowMemberSelfPayment?: boolean;
+  requirePaymentSlip?: boolean;
+  memberPaymentInstructions?: string;
+  maxSlipFileSizeMb?: number;
   updatedAt: string;
   updatedBy?: string;
 }
@@ -932,6 +939,51 @@ export interface MemberContributionRecord {
   receiptNumber?: string;
   notes?: string;
   recordedBy?: string;
+  paymentRequestId?: string;
+  paymentSlipUrl?: string;
+  approvedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ContributionPaymentType = 'single_month' | 'multiple_months' | 'annual';
+export type ContributionPaymentRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+export interface ContributionPaymentRequest {
+  id: string;
+  requestNumber: string; // e.g. ARC-CP-00001
+  userId: string;
+  memberId: string;
+  memberNumber: string;
+  memberName: string;
+  year: number;
+  paymentType: ContributionPaymentType;
+  months: number[];
+  baseAmount: number;
+  fineAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  accountId: string;
+  accountName: string;
+  accountNumber: string;
+  bankName: string;
+  paymentMethod: 'bank_transfer';
+  referenceNumber: string;
+  slipStoragePath?: string;
+  slipDownloadUrl: string;
+  slipFileName?: string;
+  slipMimeType?: string;
+  slipFileSize?: number;
+  memberNote?: string;
+  status: ContributionPaymentRequestStatus;
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  rejectionReason?: string;
+  approvalNote?: string;
+  incomeRecordId?: string;
+  contributionRecordIds?: string[];
   createdAt: string;
   updatedAt: string;
 }

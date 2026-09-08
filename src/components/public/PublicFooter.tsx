@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Heart } from 'lucide-react';
 import { SocialLink } from '../../types';
 
@@ -51,17 +52,17 @@ export const PublicFooter: React.FC<PublicFooterProps> = ({ branding, socialLink
               އަވަސް ލިންކުތައް
             </h4>
             <ul className="space-y-2 text-sm">
-              <li><a href="/" className="hover:text-orange-400 transition-colors">ފެށުން</a></li>
-              <li><a href="/about" className="hover:text-orange-400 transition-colors">އަޅުގަނޑުމެންނާ ބެހޭ (About Us)</a></li>
+              <li><Link to="/" className="hover:text-orange-400 transition-colors">ފެށުން</Link></li>
+              <li><Link to="/about" className="hover:text-orange-400 transition-colors">އަޅުގަނޑުމެންނާ ބެހޭ (About Us)</Link></li>
               {hasEvents && (
-                <li><a href="/events" className="hover:text-orange-400 transition-colors">ޙަރަކާތްތައް (Events)</a></li>
+                <li><Link to="/events" className="hover:text-orange-400 transition-colors">ޙަރަކާތްތައް (Events)</Link></li>
               )}
-              <li><a href="/about#vision-mission" className="hover:text-orange-400 transition-colors">ވިޝަން އާއި މިޝަން</a></li>
-              <li><a href="/quiz" className="hover:text-orange-400 transition-colors">ރަމަޟާން ކުއިޒް</a></li>
-              <li><a href="/quiz/results" className="hover:text-orange-400 transition-colors">ކުރީގެ ނަތީޖާތަކާއި ކާމިޔާބީތައް</a></li>
-              <li><a href="/about#exco-team" className="hover:text-orange-400 transition-colors">ހިންގާ ކޮމިޓީ (އެކްސްކޯ)</a></li>
-              <li><a href="/about#contact" className="hover:text-orange-400 transition-colors">ގުޅުއްވުމަށް</a></li>
-              <li><a href="/login" className="text-orange-400 hover:underline font-bold transition-colors">ޕޯޓަލް އަށް ވަނުމަށް (ލޮގިން)</a></li>
+              <li><Link to="/about#vision-mission" className="hover:text-orange-400 transition-colors">ވިޝަން އާއި މިޝަން</Link></li>
+              <li><Link to="/quiz" className="hover:text-orange-400 transition-colors">ރަމަޟާން ކުއިޒް</Link></li>
+              <li><Link to="/quiz/results" className="hover:text-orange-400 transition-colors">ކުރީގެ ނަތީޖާތަކާއި ކާމިޔާބީތައް</Link></li>
+              <li><Link to="/about#exco-team" className="hover:text-orange-400 transition-colors">ހިންގާ ކޮމިޓީ (އެކްސްކޯ)</Link></li>
+              <li><Link to="/about#contact" className="hover:text-orange-400 transition-colors">ގުޅުއްވުމަށް</Link></li>
+              <li><Link to="/login" className="text-orange-400 hover:underline font-bold transition-colors">ޕޯޓަލް އަށް ވަނުމަށް (ލޮގިން)</Link></li>
             </ul>
           </div>
 

@@ -49,6 +49,26 @@ export const defaultRoles: Role[] = [
     }))
   },
   {
+    id: 'role_vp',
+    name: 'Vice President' as UserRoleName,
+    description: 'Executive operational coordination, meeting chairing delegation, event supervision, and administrative approvals.',
+    isSystemRole: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    defaultPermissions: ALL_MODULES.map(m => ({
+      roleId: 'role_vp',
+      moduleKey: m,
+      canView: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: false,
+      canPublish: true,
+      canApprove: true,
+      canExport: true,
+      canManageSettings: false
+    }))
+  },
+  {
     id: 'role_treasurer',
     name: 'Treasurer' as UserRoleName,
     description: 'Financial accounting, bank accounts, income/expense records, and member contributions.',
@@ -83,6 +103,26 @@ export const defaultRoles: Role[] = [
       canEdit: m === 'events_meetings' || m === 'members' || m === 'messages',
       canDelete: false,
       canPublish: true,
+      canApprove: false,
+      canExport: true,
+      canManageSettings: false
+    }))
+  },
+  {
+    id: 'role_health_promotion',
+    name: 'Health Promotion Officer' as UserRoleName,
+    description: 'Public health awareness, community wellness campaigns, sports health advisories, and wellness programs.',
+    isSystemRole: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    defaultPermissions: ALL_MODULES.map(m => ({
+      roleId: 'role_health_promotion',
+      moduleKey: m,
+      canView: true,
+      canCreate: m === 'health_awareness' || m === 'events_meetings' || m === 'messages',
+      canEdit: m === 'health_awareness' || m === 'events_meetings' || m === 'messages',
+      canDelete: false,
+      canPublish: m === 'health_awareness',
       canApprove: false,
       canExport: true,
       canManageSettings: false

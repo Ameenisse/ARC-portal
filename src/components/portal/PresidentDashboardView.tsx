@@ -26,14 +26,15 @@ import {
 } from 'lucide-react';
 import { User, PresidentialDirective, BudgetStats, MeetingItem, ClubMember } from '../../types';
 import { PendingApprovalsSection } from './PendingApprovalsSection';
+import { ExcoMemberProfileCard } from './ExcoMemberProfileCard';
 
 interface PresidentDashboardViewProps {
   user: User;
   onRefreshUser?: () => void;
 }
 
-export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ user }) => {
-  const { lang } = usePortalLanguage();
+export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ user, onRefreshUser }) => {
+  const { lang, dir } = usePortalLanguage();
   const isDh = lang === 'dhivehi';
   const { showToast } = useToast();
 
@@ -162,10 +163,10 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-xs uppercase tracking-wider">
               <Crown className="w-3.5 h-3.5" />
-              <span>Office of the President</span>
+              <span>{isDh ? 'ރައީސްގެ އޮފީސް' : 'Office of the President'}</span>
             </span>
             <span className="text-xs px-2.5 py-0.5 rounded bg-slate-800 text-slate-300 font-medium">
-              Strategic Leadership & Governance
+              {isDh ? 'ސްޓްރެޓީޖިކް ލީޑަރޝިޕް އަދި ވެރިކަން' : 'Strategic Leadership & Governance'}
             </span>
           </div>
           <h2 className="text-2xl sm:text-3xl font-extrabold text-white font-heading">
@@ -185,7 +186,7 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
             className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>Issue Directive</span>
+            <span>{isDh ? 'އިރުޝާދު ނެރުއްވާ' : 'Issue Directive'}</span>
           </button>
           <button
             type="button"
@@ -194,55 +195,70 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
             className="px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 hover:text-white font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 text-amber-400 ${refreshing ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
+            <span>{isDh ? 'އާކޮށްލާ' : 'Refresh'}</span>
           </button>
         </div>
       </div>
+
+      {/* Official Club Member Profile & Personal Standing */}
+      <ExcoMemberProfileCard
+        user={user}
+        onRefreshUser={onRefreshUser || fetchData}
+        accentColor="amber"
+      />
 
       {/* Strategic High-Level KPIs */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>Total Club Members</span>
+            <span>{isDh ? 'ޖުމްލަ ކްލަބް މެންބަރުން' : 'Total Club Members'}</span>
             <Users className="w-4 h-4 text-sky-400" />
           </div>
           <div className="text-2xl font-extrabold text-white font-mono">
-            {activeMembersCount} <span className="text-xs text-sky-400 font-sans">Active</span>
+            {activeMembersCount} <span className="text-xs text-sky-400 font-sans">{isDh ? 'އެކްޓިވް' : 'Active'}</span>
           </div>
-          <span className="text-[11px] text-slate-400">{members.length} Registered in Club Roster</span>
+          <span className="text-[11px] text-slate-400">
+            {members.length} {isDh ? 'ރަޖިސްޓްރީވެފައިވާ މެންބަރުން' : 'Registered in Club Roster'}
+          </span>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>Treasury Liquid Reserves</span>
+            <span>{isDh ? 'ޚަޒާނާގެ ލިކުއިޑް ފައިސާ' : 'Treasury Liquid Reserves'}</span>
             <Building2 className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-2xl font-extrabold text-emerald-400 font-mono">
-            {budgetStats ? budgetStats.totalAccountsBalance.toLocaleString() : '0'} <span className="text-xs">MVR</span>
+            {budgetStats ? budgetStats.totalAccountsBalance.toLocaleString() : '0'} <span className="text-xs font-sans">{isDh ? 'ރުފިޔާ' : 'MVR'}</span>
           </div>
-          <span className="text-[11px] text-emerald-400/90 font-medium">Net Position: {budgetStats && budgetStats.netBalance >= 0 ? `+${budgetStats.netBalance.toLocaleString()}` : budgetStats?.netBalance.toLocaleString() || '0'} MVR</span>
+          <span className="text-[11px] text-emerald-400/90 font-medium">
+            {isDh ? 'ނެޓް ޙާލަތު:' : 'Net Position:'} {budgetStats && budgetStats.netBalance >= 0 ? `+${budgetStats.netBalance.toLocaleString()}` : budgetStats?.netBalance.toLocaleString() || '0'} {isDh ? 'ރުފިޔާ' : 'MVR'}
+          </span>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>Active Directives</span>
+            <span>{isDh ? 'ހިނގަމުންދާ އިރުޝާދުތައް' : 'Active Directives'}</span>
             <Crown className="w-4 h-4 text-amber-400" />
           </div>
           <div className="text-2xl font-extrabold text-amber-400 font-mono">
             {activeDirectives.length}
           </div>
-          <span className="text-[11px] text-amber-300/80 font-medium">{urgentDirectives.length} High / Urgent Priority</span>
+          <span className="text-[11px] text-amber-300/80 font-medium">
+            {urgentDirectives.length} {isDh ? 'މުހިންމު / އަވަސް އިރުޝާދު' : 'High / Urgent Priority'}
+          </span>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>Scheduled Meetings</span>
+            <span>{isDh ? 'ތާވަލުކުރެވިފައިވާ ބައްދަލުވުން' : 'Scheduled Meetings'}</span>
             <Calendar className="w-4 h-4 text-purple-400" />
           </div>
           <div className="text-2xl font-extrabold text-white font-mono">
             {upcomingMeetings.length}
           </div>
-          <span className="text-[11px] text-slate-400">EXCO & General Assembly Sessions</span>
+          <span className="text-[11px] text-slate-400">
+            {isDh ? 'ހިންގާ ކޮމިޓީ އަދި ޢާންމު ޖަލްސާތައް' : 'EXCO & General Assembly Sessions'}
+          </span>
         </div>
       </div>
 
@@ -259,20 +275,22 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
           <div className="space-y-1">
             <h3 className="text-lg font-bold text-white flex items-center gap-2 font-heading">
               <Crown className="w-5 h-5 text-amber-400" />
-              <span>Presidential Directives & Action Items (ރިޔާސީ އިރުޝާދުތައް)</span>
+              <span>{isDh ? 'ރިޔާސީ އިރުޝާދުތައް އަދި ފިޔަވަޅުތައް' : 'Presidential Directives & Action Items'}</span>
             </h3>
             <p className="text-xs text-slate-400">
-              Directives issued by the President to EXCO officers, departments, and working committees.
+              {isDh
+                ? 'ރައީސްގެ ފަރާތްޕުޅުން ހިންގާ ކޮމިޓީގެ އޮފިސަރުންނަށާއި ކޮމިޓީތަކަށް ނެރުއްވާފައިވާ އިރުޝާދުތައް.'
+                : 'Directives issued by the President to EXCO officers, departments, and working committees.'}
             </p>
           </div>
 
           {/* Filter Pills */}
           <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
             {[
-              { id: 'all', label: 'All' },
-              { id: 'active', label: 'Active' },
-              { id: 'urgent', label: 'Urgent' },
-              { id: 'completed', label: 'Completed' }
+              { id: 'all', label: isDh ? 'ހުރިހާ' : 'All' },
+              { id: 'active', label: isDh ? 'ހިނގަމުންދާ' : 'Active' },
+              { id: 'urgent', label: isDh ? 'އަވަސް' : 'Urgent' },
+              { id: 'completed', label: isDh ? 'ނިމިފައި' : 'Completed' }
             ].map(f => (
               <button
                 key={f.id}
@@ -293,13 +311,15 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
         {filteredDirectives.length === 0 ? (
           <div className="py-12 text-center text-slate-500 space-y-3">
             <Crown className="w-10 h-10 mx-auto opacity-30 text-amber-400" />
-            <p className="text-sm font-medium">No directives found under the selected filter.</p>
+            <p className="text-sm font-medium">
+              {isDh ? 'ޚިޔާރުކުރެވުނު ފިލްޓަރުގެ ދަށުން އެއްވެސް އިރުޝާދެއް ފެންނާކަށް ނެތް.' : 'No directives found under the selected filter.'}
+            </p>
             <button
               type="button"
               onClick={() => setShowDirectiveModal(true)}
               className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold transition cursor-pointer"
             >
-              + Issue First Presidential Directive
+              {isDh ? '+ ފުރަތަމަ ރިޔާސީ އިރުޝާދު ނެރުއްވާ' : '+ Issue First Presidential Directive'}
             </button>
           </div>
         ) : (
@@ -329,7 +349,7 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
                             : 'bg-slate-800 text-slate-300'
                         }`}
                       >
-                        {dir.priority} Priority
+                        {dir.priority === 'urgent' ? (isDh ? 'އަވަސް އިސްކަން' : 'Urgent Priority') : dir.priority === 'high' ? (isDh ? 'މުހިންމު އިސްކަން' : 'High Priority') : (isDh ? 'ޢާންމު' : `${dir.priority} Priority`)}
                       </span>
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded ${
@@ -338,7 +358,7 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
                             : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
                         }`}
                       >
-                        {dir.status.toUpperCase()}
+                        {isCompleted ? (isDh ? 'ނިމިފައި' : 'COMPLETED') : (isDh ? 'ހިނގަމުންދާ' : 'ACTIVE')}
                       </span>
                     </div>
 
@@ -347,13 +367,13 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
                     )}
 
                     <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
-                      <span>Target: <strong className="text-slate-200">{dir.targetOfficer || 'EXCO Committee'}</strong></span>
+                      <span>{isDh ? 'އަމާޒުވާ ފަރާތް:' : 'Target:'} <strong className="text-slate-200">{dir.targetOfficer || (isDh ? 'ހިންގާ ކޮމިޓީ' : 'EXCO Committee')}</strong></span>
                       <span>•</span>
-                      <span>Issued: {formatDate(dir.issueDate || dir.createdAt)}</span>
+                      <span>{isDh ? 'ނެރުނު ތާރީޚު:' : 'Issued:'} {formatDate(dir.issueDate || dir.createdAt)}</span>
                       {dir.targetDate && (
                         <>
                           <span>•</span>
-                          <span className="text-amber-400">Target Date: {dir.targetDate}</span>
+                          <span className="text-amber-400">{isDh ? 'ނިންމަންޖެހޭ ތާރީޚު:' : 'Target Date:'} {dir.targetDate}</span>
                         </>
                       )}
                     </div>
@@ -370,13 +390,13 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
                       }`}
                     >
                       <Check className="w-3.5 h-3.5" />
-                      <span>{isCompleted ? 'Reopen' : 'Mark Done'}</span>
+                      <span>{isCompleted ? (isDh ? 'އަލުން ހުޅުވާ' : 'Reopen') : (isDh ? 'ނިމުނު ކަމަށް ހަދާ' : 'Mark Done')}</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDeleteDirective(dir.id)}
                       className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-300 transition cursor-pointer"
-                      title="Delete Directive"
+                      title={isDh ? 'އިރުޝާދު ފޮހެލާ' : 'Delete Directive'}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -397,11 +417,17 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
           <div className="p-3 rounded-2xl bg-amber-500/10 text-amber-400 w-fit group-hover:scale-110 transition">
             <Building2 className="w-6 h-6" />
           </div>
-          <h3 className="font-bold text-white text-base">Financial Governance & Reserves</h3>
+          <h3 className="font-bold text-white text-base">
+            {isDh ? 'މާލީ ހިންގުމާއި ރިޒާވް ބެލެހެއްޓުން' : 'Financial Governance & Reserves'}
+          </h3>
           <p className="text-slate-400 text-xs leading-relaxed">
-            Review club bank balances, annual contributions collection rate, and approve major event budget allocations.
+            {isDh
+              ? 'ކްލަބުގެ ބޭންކު ބެލެންސްތަކާއި، އަހަރީ ފީ ބަލައިގަތުމުގެ ރޭޓާއި، އަދި ބޮޑެތި ޙަރަކާތްތަކުގެ ބަޖެޓް ފާސްކުރުން.'
+              : 'Review club bank balances, annual contributions collection rate, and approve major event budget allocations.'}
           </p>
-          <span className="text-xs font-bold text-amber-400 block pt-1">Open Budget Oversight →</span>
+          <span className="text-xs font-bold text-amber-400 block pt-1">
+            {isDh ? 'ބަޖެޓް ބައްލަވާ ←' : 'Open Budget Oversight →'}
+          </span>
         </a>
 
         <a
@@ -411,11 +437,17 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
           <div className="p-3 rounded-2xl bg-sky-500/10 text-sky-400 w-fit group-hover:scale-110 transition">
             <Vote className="w-6 h-6" />
           </div>
-          <h3 className="font-bold text-white text-base">Executive Meetings & Votings</h3>
+          <h3 className="font-bold text-white text-base">
+            {isDh ? 'ހިންގާ ކޮމިޓީގެ ބައްދަލުވުންތަކާއި ވޯޓުތައް' : 'Executive Meetings & Votings'}
+          </h3>
           <p className="text-slate-400 text-xs leading-relaxed">
-            Preside over EXCO meetings, cast presidential tie-breaker votes, and inspect resolution archives.
+            {isDh
+              ? 'އެގްޒެކެޓިވް ބައްދަލުވުންތަކުގެ ރިޔާސަތު ބެލެހެއްޓެވުމާއި، ވޯޓު އެއްވަރުވާ ހާލަތުގައި ރައީސްގެ ވޯޓު ދެއްވުން.'
+              : 'Preside over EXCO meetings, cast presidential tie-breaker votes, and inspect resolution archives.'}
           </p>
-          <span className="text-xs font-bold text-sky-400 block pt-1">Open Meetings Deck →</span>
+          <span className="text-xs font-bold text-sky-400 block pt-1">
+            {isDh ? 'ބައްދަލުވުންތަކަށް ވަޑައިގަންނަވާ ←' : 'Open Meetings Deck →'}
+          </span>
         </a>
 
         <a
@@ -425,27 +457,35 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
           <div className="p-3 rounded-2xl bg-rose-500/10 text-rose-400 w-fit group-hover:scale-110 transition">
             <BookOpen className="w-6 h-6" />
           </div>
-          <h3 className="font-bold text-white text-base">Constitution & Club Rules</h3>
+          <h3 className="font-bold text-white text-base">
+            {isDh ? 'ކްލަބް އަސާސީ ޤަވާޢިދު' : 'Constitution & Club Rules'}
+          </h3>
           <p className="text-slate-400 text-xs leading-relaxed">
-            Review governing articles, executive powers, member bylaws, and amend official club policies.
+            {isDh
+              ? 'ކްލަބް ހިންގާ ޤަވާޢިދުތަކާއި، ރިޔާސީ ބާރުތަކާއި، މެންބަރުންގެ ޙައްޤުތައް ބަލައި އިޞްލާޙުކުރުން.'
+              : 'Review governing articles, executive powers, member bylaws, and amend official club policies.'}
           </p>
-          <span className="text-xs font-bold text-rose-400 block pt-1">View Constitutional Bylaws →</span>
+          <span className="text-xs font-bold text-rose-400 block pt-1">
+            {isDh ? 'ޤަވާޢިދު ބައްލަވާ ←' : 'View Constitutional Bylaws →'}
+          </span>
         </a>
       </div>
 
       {/* Directive Issue Modal */}
       {showDirectiveModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in" dir={dir}>
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-lg w-full space-y-5 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Crown className="w-5 h-5 text-amber-400" />
-                <h3 className="text-lg font-bold text-white font-heading">Issue Presidential Directive</h3>
+                <h3 className="text-lg font-bold text-white font-heading">
+                  {isDh ? 'ރިޔާސީ އިރުޝާދު ނެރުއްވުން' : 'Issue Presidential Directive'}
+                </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowDirectiveModal(false)}
-                className="text-slate-400 hover:text-white text-sm"
+                className="text-slate-400 hover:text-white text-sm cursor-pointer"
               >
                 ✕
               </button>
@@ -453,11 +493,13 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
 
             <form onSubmit={handleCreateDirective} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Directive Title *</label>
+                <label className="text-xs font-semibold text-slate-300">
+                  {isDh ? 'އިރުޝާދުގެ ސުރުޚީ *' : 'Directive Title *'}
+                </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Expedite Ramadan Quiz Sponsor Onboarding"
+                  placeholder={isDh ? 'މިސާލަކަށް: ރަމަޟާން ކުއިޒް ސްޕޮންސަރުން ހޯދުން އަވަސްކުރުން' : 'e.g. Expedite Ramadan Quiz Sponsor Onboarding'}
                   value={directiveForm.title}
                   onChange={e => setDirectiveForm({ ...directiveForm, title: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
@@ -466,7 +508,9 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-300">Target Officer / Team</label>
+                  <label className="text-xs font-semibold text-slate-300">
+                    {isDh ? 'އަމާޒުވާ އޮފިސަރު / ޓީމު' : 'Target Officer / Team'}
+                  </label>
                   <input
                     type="text"
                     value={directiveForm.targetOfficer}
@@ -476,22 +520,26 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-300">Priority Level</label>
+                  <label className="text-xs font-semibold text-slate-300">
+                    {isDh ? 'އިސްކަންދޭ މިންވަރު' : 'Priority Level'}
+                  </label>
                   <select
                     value={directiveForm.priority}
                     onChange={e => setDirectiveForm({ ...directiveForm, priority: e.target.value as any })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
                   >
-                    <option value="urgent">Urgent</option>
-                    <option value="high">High</option>
-                    <option value="normal">Normal</option>
-                    <option value="routine">Routine</option>
+                    <option value="urgent">{isDh ? 'އަވަސް (Urgent)' : 'Urgent'}</option>
+                    <option value="high">{isDh ? 'މުހިންމު (High)' : 'High'}</option>
+                    <option value="normal">{isDh ? 'ޢާންމު (Normal)' : 'Normal'}</option>
+                    <option value="routine">{isDh ? 'އާދައިގެ (Routine)' : 'Routine'}</option>
                   </select>
                 </div>
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Target Completion Date</label>
+                <label className="text-xs font-semibold text-slate-300">
+                  {isDh ? 'ނިންމަންޖެހޭ ތާރީޚު' : 'Target Completion Date'}
+                </label>
                 <input
                   type="date"
                   value={directiveForm.targetDate}
@@ -501,10 +549,12 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Executive Details & Instructions</label>
+                <label className="text-xs font-semibold text-slate-300">
+                  {isDh ? 'ތަފްޞީލީ އިރުޝާދު' : 'Executive Details & Instructions'}
+                </label>
                 <textarea
                   rows={4}
-                  placeholder="Detail the mandate, specific goals, and expectations for the assigned officer..."
+                  placeholder={isDh ? 'މަސައްކަތުގެ މަޤްޞަދާއި، އަމާޒުތައް އަދި އިރުޝާދުތައް ލިޔުއްވާ...' : 'Detail the mandate, specific goals, and expectations for the assigned officer...'}
                   value={directiveForm.description}
                   onChange={e => setDirectiveForm({ ...directiveForm, description: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-amber-500"
@@ -515,15 +565,15 @@ export const PresidentDashboardView: React.FC<PresidentDashboardViewProps> = ({ 
                 <button
                   type="button"
                   onClick={() => setShowDirectiveModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 transition"
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 transition cursor-pointer"
                 >
-                  Cancel
+                  {isDh ? 'ކެންސަލް' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs shadow-lg shadow-amber-500/20 transition cursor-pointer"
                 >
-                  Issue Directive
+                  {isDh ? 'އިރުޝާދު ނެރުއްވާ' : 'Issue Directive'}
                 </button>
               </div>
             </form>

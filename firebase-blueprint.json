@@ -114,6 +114,24 @@
         "version": { "type": "number" }
       },
       "required": ["initialized", "version"]
+    },
+    "ContributionPaymentRequest": {
+      "title": "ContributionPaymentRequest",
+      "description": "Member fund contribution self-payment submission and approval request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "requestNumber": { "type": "string" },
+        "userId": { "type": "string" },
+        "memberId": { "type": "string" },
+        "memberNumber": { "type": "string" },
+        "memberName": { "type": "string" },
+        "year": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string" },
+        "submittedAt": { "type": "string" }
+      },
+      "required": ["id", "requestNumber", "userId", "memberId", "totalAmount", "status", "submittedAt"]
     }
   },
   "firestore": {
@@ -204,6 +222,10 @@
     "/rentalSettings/{settingsId}": {
       "schema": "RentalSettings",
       "description": "Global rental service configuration and operational settings"
+    },
+    "/contributionPaymentRequests/{requestId}": {
+      "schema": "ContributionPaymentRequest",
+      "description": "Member self-payment contribution requests for review and approval"
     }
   }
 }

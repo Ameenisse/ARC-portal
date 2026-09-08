@@ -1,25 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../services/api';
-import { PublicSiteData } from '../../types';
+import { usePublicSiteData } from '../../hooks/usePublicSiteData';
 import { PublicHeader } from '../../components/public/PublicHeader';
 import { PublicFooter } from '../../components/public/PublicFooter';
 import { useTableSync } from '../../hooks/useRealtimeSync';
-import { Trophy, CheckCircle, BookOpen, Calendar } from 'lucide-react';
+import { PageLoader } from '../../components/common/PageLoader';
+import { PageTransition } from '../../components/common/PageTransition';
+import { Trophy, CheckCircle, BookOpen } from 'lucide-react';
 
 export const QuizResultsPage: React.FC = () => {
-  const [data, setData] = useState<PublicSiteData | null>(null);
+  const { data } = usePublicSiteData();
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = () => {
-    Promise.all([
-      api.getPublicSiteData(),
-      api.getQuizResultsHistory()
-    ]).then(([siteRes, quizRes]) => {
-      setData(siteRes);
-      setResults(quizRes.results || []);
-    }).catch(console.error)
-    .finally(() => setLoading(false));
+    api.getQuizResultsHistory()
+      .then((quizRes) => {
+        setResults(quizRes.results || []);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {
@@ -32,23 +32,26 @@ export const QuizResultsPage: React.FC = () => {
   });
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      <PublicHeader branding={data?.branding || { clubName: 'ARC Club', clubAbbreviation: 'ARC' }} activePath="/quiz/results" />
-      
-      <main className="flex-1 py-12 max-w-5xl mx-auto px-4 w-full">
-        <div className="text-center max-w-2xl mx-auto mb-12">
-          <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-3">
-            <Trophy className="w-6 h-6" />
+    <PageTransition>
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+        <PublicHeader branding={data?.branding || { clubName: 'ARC Club', clubAbbreviation: 'ARC' }} activePath="/quiz/results" />
+        
+        <main className="flex-1 py-12 max-w-5xl mx-auto px-4 w-full">
+          <div className="text-center max-w-2xl mx-auto mb-12">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-3">
+              <Trophy className="w-6 h-6" />
+            </div>
+            <h1 className="text-3xl font-bold font-heading text-white">Previous Quiz Results & Winners</h1>
+            <p className="text-sm text-slate-400 mt-2">
+              Archive of completed Ramazan Quiz questions, correct answers, and lucky draw winners.
+            </p>
           </div>
-          <h1 className="text-3xl font-bold font-heading text-white">Previous Quiz Results & Winners</h1>
-          <p className="text-sm text-slate-400 mt-2">
-            Archive of completed Ramazan Quiz questions, correct answers, and lucky draw winners.
-          </p>
-        </div>
 
-        {loading ? (
-          <div className="text-center py-12 text-slate-400">Loading historical results...</div>
-        ) : results.length === 0 ? (
+          {loading ? (
+            <div className="text-center py-12">
+              <PageLoader fullscreen={false} message="Loading historical results..." />
+            </div>
+          ) : results.length === 0 ? (
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-400">
             <BookOpen className="w-10 h-10 mx-auto text-slate-600 mb-3" />
             <p className="text-base font-semibold text-slate-300">No Previous Quiz Results Available Yet</p>
@@ -91,7 +94,8 @@ export const QuizResultsPage: React.FC = () => {
         )}
       </main>
 
-      <PublicFooter branding={data?.branding || { clubName: 'ARC Club', clubAbbreviation: 'ARC' }} socialLinks={data?.socialLinks} />
-    </div>
+        <PublicFooter branding={data?.branding || { clubName: 'ARC Club', clubAbbreviation: 'ARC' }} socialLinks={data?.socialLinks} />
+      </div>
+    </PageTransition>
   );
 };

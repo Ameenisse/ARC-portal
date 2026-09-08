@@ -27,6 +27,8 @@ import {
   AccountTransferRecord,
   MemberContributionSetting,
   MemberContributionRecord,
+  ContributionStatus,
+  ContributionPaymentRequest,
   CategoryBudgetAllocation,
   BudgetStats,
   PresidentialDirective,
@@ -38,6 +40,7 @@ import {
   InvoiceStatus,
   HealthAwarenessItem
 } from '../types';
+import { defaultRoles } from './seedData';
 
 // Helper to hash PINs
 export function hashPin(pin: string, salt: string): string {
@@ -262,6 +265,17 @@ export class FirestoreDatabaseStore {
     await firestore.collection('userSessions').doc(tokenHash).delete();
   }
 
+  async revokeAllUserSessions(userId: string): Promise<number> {
+    const snap = await firestore.collection('userSessions').where('userId', '==', userId).get();
+    if (snap.empty) return 0;
+    const batch = firestore.batch();
+    snap.docs.forEach(doc => {
+      batch.delete(doc.ref);
+    });
+    await batch.commit();
+    return snap.size;
+  }
+
   async touchSession(token: string): Promise<void> {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     try {
@@ -278,7 +292,21 @@ export class FirestoreDatabaseStore {
   // -------------------------------------------------------------
   async getRoles(): Promise<Role[]> {
     const snap = await firestore.collection('roles').get();
-    return snap.docs.map(d => d.data() as Role);
+    if (snap.empty) {
+      for (const r of defaultRoles) {
+        await firestore.collection('roles').doc(r.id).set(r);
+      }
+      return defaultRoles;
+    }
+    const roles = snap.docs.map(d => d.data() as Role);
+    const existingIds = new Set(roles.map(r => r.id));
+    for (const defRole of defaultRoles) {
+      if (!existingIds.has(defRole.id)) {
+        await firestore.collection('roles').doc(defRole.id).set(defRole);
+        roles.push(defRole);
+      }
+    }
+    return roles;
   }
 
   async createRole(data: Partial<Role>): Promise<Role> {
@@ -976,6 +1004,10 @@ export class FirestoreDatabaseStore {
       defaultDepositAccountId: 'acc_primary_001',
       enableAutoFines: true,
       gracePeriodDays: 5,
+      allowMemberSelfPayment: true,
+      requirePaymentSlip: true,
+      memberPaymentInstructions: 'Please transfer your membership contribution to the official ARC BML bank account and upload your payment slip/receipt for verification.',
+      maxSlipFileSizeMb: 5,
       updatedAt: new Date().toISOString()
     };
   }
@@ -1036,6 +1068,525 @@ export class FirestoreDatabaseStore {
 
   async deleteMemberContribution(id: string): Promise<void> {
     await firestore.collection('memberContributions').doc(id).delete();
+  }
+
+  // ============================================================
+  // MEMBER CONTRIBUTION SELF-PAYMENT REQUESTS & APPROVAL WORKFLOW
+  // ============================================================
+
+  async getNextRequestNumber(counterKey = 'contributionPaymentRequests', prefix = 'ARC-CP-', padLength = 5): Promise<string> {
+    const counterRef = firestore.collection('counters').doc(counterKey);
+    return await firestore.runTransaction(async (transaction) => {
+      const doc = await transaction.get(counterRef);
+      let currentSeq = 0;
+      if (doc.exists) {
+        currentSeq = doc.data()?.currentSequence || doc.data()?.count || 0;
+      }
+      const nextSeq = currentSeq + 1;
+      transaction.set(counterRef, { currentSequence: nextSeq, updatedAt: new Date().toISOString() }, { merge: true });
+      return `${prefix}${String(nextSeq).padStart(padLength, '0')}`;
+    });
+  }
+
+  async getContributionPaymentRequests(filter?: { status?: string; memberId?: string; year?: number }): Promise<ContributionPaymentRequest[]> {
+    const snap = await firestore.collection('contributionPaymentRequests').get();
+    let list = snap.docs.map(d => d.data() as ContributionPaymentRequest);
+    if (filter) {
+      if (filter.status && filter.status !== 'all') {
+        list = list.filter(r => r.status === filter.status);
+      }
+      if (filter.memberId) {
+        list = list.filter(r => r.memberId === filter.memberId);
+      }
+      if (filter.year !== undefined && !isNaN(filter.year)) {
+        list = list.filter(r => r.year === filter.year);
+      }
+    }
+    list.sort((a, b) => new Date(b.submittedAt || b.createdAt || 0).getTime() - new Date(a.submittedAt || a.createdAt || 0).getTime());
+    return list;
+  }
+
+  async getContributionPaymentRequestById(id: string): Promise<ContributionPaymentRequest | null> {
+    const doc = await firestore.collection('contributionPaymentRequests').doc(id).get();
+    if (!doc.exists) return null;
+    return doc.data() as ContributionPaymentRequest;
+  }
+
+  async createContributionPaymentRequest(data: Partial<ContributionPaymentRequest>): Promise<ContributionPaymentRequest> {
+    const id = data.id || `cpr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const requestNumber = data.requestNumber || await this.getNextRequestNumber('contributionPaymentRequests', 'ARC-CP-', 5);
+    const now = new Date().toISOString();
+    const item: ContributionPaymentRequest = {
+      id,
+      requestNumber,
+      userId: data.userId || '',
+      memberId: data.memberId || '',
+      memberNumber: data.memberNumber || '',
+      memberName: data.memberName || '',
+      year: data.year || new Date().getFullYear(),
+      paymentType: data.paymentType || 'single_month',
+      months: data.months || [],
+      baseAmount: data.baseAmount || 0,
+      fineAmount: data.fineAmount || 0,
+      discountAmount: data.discountAmount || 0,
+      totalAmount: data.totalAmount || 0,
+      accountId: data.accountId || '',
+      accountName: data.accountName || '',
+      accountNumber: data.accountNumber || '',
+      bankName: data.bankName || '',
+      paymentMethod: 'bank_transfer',
+      referenceNumber: data.referenceNumber || '',
+      slipStoragePath: data.slipStoragePath || '',
+      slipDownloadUrl: data.slipDownloadUrl || '',
+      slipFileName: data.slipFileName || '',
+      slipMimeType: data.slipMimeType || '',
+      slipFileSize: data.slipFileSize || 0,
+      memberNote: data.memberNote || '',
+      status: 'pending',
+      submittedAt: data.submittedAt || now,
+      createdAt: now,
+      updatedAt: now,
+      ...(data as any)
+    };
+    await firestore.collection('contributionPaymentRequests').doc(id).set(item);
+    return item;
+  }
+
+  async cancelContributionPaymentRequest(id: string, memberId: string): Promise<ContributionPaymentRequest> {
+    const docRef = firestore.collection('contributionPaymentRequests').doc(id);
+    const snap = await docRef.get();
+    if (!snap.exists) {
+      throw new Error('Payment request not found.');
+    }
+    const current = snap.data() as ContributionPaymentRequest;
+    if (current.memberId !== memberId) {
+      throw new Error('Unauthorized to cancel this request.');
+    }
+    if (current.status !== 'pending') {
+      throw new Error(`Cannot cancel request with status "${current.status}". Only pending requests can be cancelled.`);
+    }
+    const now = new Date().toISOString();
+    await docRef.update({
+      status: 'cancelled',
+      updatedAt: now
+    });
+    return { ...current, status: 'cancelled', updatedAt: now };
+  }
+
+  async approveContributionPaymentRequest(
+    id: string,
+    reviewer: { id: string; fullName: string },
+    options?: { approvalNote?: string; referenceNumber?: string; approvedAmount?: number } | string
+  ): Promise<{ request: ContributionPaymentRequest; incomeRecord: IncomeRecord }> {
+    const approvalNote = typeof options === 'string' ? options : options?.approvalNote;
+    const approverRefNumber = typeof options === 'object' ? options?.referenceNumber?.trim() : undefined;
+    const approverAmount = typeof options === 'object' && options?.approvedAmount !== undefined && Number(options.approvedAmount) > 0 ? Number(options.approvedAmount) : undefined;
+    const reqRef = firestore.collection('contributionPaymentRequests').doc(id);
+
+    // Initial pre-read to obtain request details, member contributions & settings
+    const initialReqSnap = await reqRef.get();
+    if (!initialReqSnap.exists) {
+      throw new Error('Payment request not found.');
+    }
+    const reqInitial = initialReqSnap.data() as ContributionPaymentRequest;
+    if (reqInitial.status !== 'pending') {
+      throw new Error(`Request cannot be approved because status is "${reqInitial.status}". Only pending requests can be approved.`);
+    }
+
+    const settings = await this.getContributionSettings();
+    const existingContribs = await this.getMemberContributions({ memberId: reqInitial.memberId });
+    const existingMap = new Map<string, MemberContributionRecord>();
+    existingContribs.forEach(c => {
+      existingMap.set(`${c.year}_${c.month}`, c);
+    });
+
+    const monthlyFee = Number(settings.monthlyFee || 50);
+    const annualDiscountMonths = Number(settings.annualAdvanceDiscountMonths || 1);
+    const annualFeeWithDiscount = Math.max(0, (12 - annualDiscountMonths) * monthlyFee);
+    const effectiveTotalAmount = approverAmount !== undefined ? approverAmount : Number(reqInitial.totalAmount || monthlyFee);
+
+    const receivedDate = new Date(reqInitial.submittedAt || Date.now());
+    const isJanuary = receivedDate.getMonth() === 0; // 0 = January
+    const isAnnualReq = reqInitial.paymentType === 'annual';
+    const targetYear = Number(reqInitial.year || receivedDate.getFullYear());
+    const lastYear = targetYear - 1;
+
+    // Rule: "if payment received on January as annual amount and last year all payments complete that amount as annually with discount"
+    const lastYearContribs = existingContribs.filter(c => c.year === lastYear);
+    const hasUnpaidLastYear = lastYearContribs.some(c => c.status !== 'paid');
+    const lastYearAllPaymentsComplete = !hasUnpaidLastYear && (lastYearContribs.length === 0 || lastYearContribs.every(c => c.status === 'paid'));
+
+    const isAnnualDiscountEligible = (isJanuary || isAnnualReq) && lastYearAllPaymentsComplete && (effectiveTotalAmount >= annualFeeWithDiscount);
+
+    interface AllocationItem {
+      year: number;
+      month: number;
+      docId: string;
+      baseAmount: number;
+      fineAmount: number;
+      discountAmount: number;
+      totalPayable: number;
+      paidAmount: number;
+      status: ContributionStatus;
+      isAdvancePayment?: boolean;
+      advancePackageMonths?: number;
+    }
+
+    const allocations: AllocationItem[] = [];
+    let totalDiscountApplied = 0;
+    let totalFinesDeducted = 0;
+
+    if (isAnnualDiscountEligible) {
+      // Annual discount package covering all 12 months of targetYear
+      const totalDiscount = annualDiscountMonths * monthlyFee;
+      totalDiscountApplied = totalDiscount;
+      const monthlyDiscountShare = Math.round((totalDiscount / 12) * 100) / 100;
+      const monthlyPayable = Math.round(((annualFeeWithDiscount) / 12) * 100) / 100;
+
+      for (let m = 1; m <= 12; m++) {
+        const docId = `contrib_${reqInitial.memberId}_${targetYear}_${m}`;
+        allocations.push({
+          year: targetYear,
+          month: m,
+          docId,
+          baseAmount: monthlyFee,
+          fineAmount: 0,
+          discountAmount: m === 12 ? (totalDiscount - (monthlyDiscountShare * 11)) : monthlyDiscountShare,
+          totalPayable: monthlyPayable,
+          paidAmount: monthlyPayable,
+          status: 'paid',
+          isAdvancePayment: true,
+          advancePackageMonths: 12
+        });
+      }
+
+      // If amount exceeds annual amount, split excess into subsequent year/months
+      let excess = effectiveTotalAmount - annualFeeWithDiscount;
+      let nextMonth = 1;
+      while (excess >= monthlyFee && nextMonth <= 12) {
+        const nextYear = targetYear + 1;
+        const docId = `contrib_${reqInitial.memberId}_${nextYear}_${nextMonth}`;
+        allocations.push({
+          year: nextYear,
+          month: nextMonth,
+          docId,
+          baseAmount: monthlyFee,
+          fineAmount: 0,
+          discountAmount: 0,
+          totalPayable: monthlyFee,
+          paidAmount: monthlyFee,
+          status: 'paid',
+          isAdvancePayment: true
+        });
+        excess -= monthlyFee;
+        nextMonth++;
+      }
+    } else {
+      // Rule: "amount has to split unpaid months ... And if amount exceed than monthly pay amount, has to split to next month after deduction of fine."
+      const candidateMonths: Array<{ year: number; month: number }> = [];
+
+      // 1. Any unpaid/overdue months from last year
+      for (let m = 1; m <= 12; m++) {
+        const rec = existingMap.get(`${lastYear}_${m}`);
+        if (rec && rec.status !== 'paid') {
+          candidateMonths.push({ year: lastYear, month: m });
+        }
+      }
+
+      // 2. Unpaid months of targetYear (prioritize any months requested by user if unpaid)
+      const requestedMonthsSet = new Set(reqInitial.months || []);
+      for (let m = 1; m <= 12; m++) {
+        const rec = existingMap.get(`${targetYear}_${m}`);
+        if (!rec || rec.status !== 'paid') {
+          candidateMonths.push({ year: targetYear, month: m });
+        }
+      }
+
+      // If user specifically requested months that are unpaid, sort so those come first if same year
+      candidateMonths.sort((a, b) => {
+        if (a.year !== b.year) return a.year - b.year;
+        const aReq = requestedMonthsSet.has(a.month);
+        const bReq = requestedMonthsSet.has(b.month);
+        if (aReq && !bReq) return -1;
+        if (!aReq && bReq) return 1;
+        return a.month - b.month;
+      });
+
+      // 3. Overflow into next year if needed
+      for (let m = 1; m <= 12; m++) {
+        const rec = existingMap.get(`${targetYear + 1}_${m}`);
+        if (!rec || rec.status !== 'paid') {
+          candidateMonths.push({ year: targetYear + 1, month: m });
+        }
+      }
+
+      let remainingAmount = effectiveTotalAmount;
+
+      for (const cand of candidateMonths) {
+        if (remainingAmount <= 0) break;
+
+        // Calculate fine for this month if past due date
+        const dueDay = settings.dueDayOfMonth || 10;
+        const grace = settings.gracePeriodDays || 5;
+        const dueDate = new Date(cand.year, cand.month - 1, dueDay);
+        dueDate.setDate(dueDate.getDate() + grace);
+
+        let fine = 0;
+        if (settings.enableAutoFines && receivedDate > dueDate) {
+          const diffDays = Math.max(0, Math.floor((receivedDate.getTime() - dueDate.getTime()) / (1000 * 3600 * 24)));
+          fine = Math.min(diffDays * (settings.finePerDay || 5), monthlyFee * 2);
+        }
+
+        // Deduction of fine first
+        const fineDeducted = Math.min(remainingAmount, fine);
+        remainingAmount -= fineDeducted;
+        totalFinesDeducted += fineDeducted;
+
+        const docId = `contrib_${reqInitial.memberId}_${cand.year}_${cand.month}`;
+
+        // Next, check monthly pay amount
+        if (remainingAmount >= monthlyFee) {
+          const basePaid = monthlyFee;
+          remainingAmount -= basePaid;
+
+          allocations.push({
+            year: cand.year,
+            month: cand.month,
+            docId,
+            baseAmount: monthlyFee,
+            fineAmount: fineDeducted,
+            discountAmount: 0,
+            totalPayable: monthlyFee + fineDeducted,
+            paidAmount: basePaid + fineDeducted,
+            status: 'paid',
+            isAdvancePayment: cand.year > targetYear || (cand.year === targetYear && cand.month > (receivedDate.getMonth() + 1))
+          });
+          // Excess automatically cascades to next month in the loop
+        } else if (remainingAmount > 0) {
+          const basePaid = remainingAmount;
+          remainingAmount = 0;
+
+          allocations.push({
+            year: cand.year,
+            month: cand.month,
+            docId,
+            baseAmount: monthlyFee,
+            fineAmount: fineDeducted,
+            discountAmount: 0,
+            totalPayable: monthlyFee + fineDeducted,
+            paidAmount: basePaid + fineDeducted,
+            status: 'paid',
+            isAdvancePayment: false
+          });
+          break;
+        }
+      }
+    }
+
+    // Ensure at least one allocation exists
+    if (allocations.length === 0) {
+      const firstMonth = reqInitial.months?.[0] || 1;
+      const docId = `contrib_${reqInitial.memberId}_${targetYear}_${firstMonth}`;
+      allocations.push({
+        year: targetYear,
+        month: firstMonth,
+        docId,
+        baseAmount: reqInitial.totalAmount,
+        fineAmount: 0,
+        discountAmount: 0,
+        totalPayable: reqInitial.totalAmount,
+        paidAmount: reqInitial.totalAmount,
+        status: 'paid'
+      });
+    }
+
+    // Now execute inside atomic Firestore transaction with strict ALL READS THEN ALL WRITES
+    return await firestore.runTransaction(async (transaction) => {
+      // 1. ALL READS FIRST
+      const reqSnap = await transaction.get(reqRef);
+      if (!reqSnap.exists) {
+        throw new Error('Payment request not found.');
+      }
+      const request = reqSnap.data() as ContributionPaymentRequest;
+      if (request.status !== 'pending') {
+        throw new Error(`Request cannot be approved because status is "${request.status}". Only pending requests can be approved.`);
+      }
+
+      const incomeId = `inc_cpr_${request.id}`;
+      const existingIncomeRef = firestore.collection('incomeRecords').doc(incomeId);
+      const existingIncomeSnap = await transaction.get(existingIncomeRef);
+      if (existingIncomeSnap.exists) {
+        throw new Error('An income record already exists for this payment request.');
+      }
+
+      const accountRef = firestore.collection('budgetAccounts').doc(request.accountId);
+      const accountSnap = await transaction.get(accountRef);
+      if (!accountSnap.exists) {
+        throw new Error(`Deposit account ${request.accountId} not found.`);
+      }
+      const currentAccount = accountSnap.data() as BankAccount;
+      const currentBalance = currentAccount.currentBalance || 0;
+
+      // Read candidate contribution documents
+      const candidateRefs = allocations.map(a => ({
+        ...a,
+        ref: firestore.collection('memberContributions').doc(a.docId)
+      }));
+      const contribSnaps = await Promise.all(candidateRefs.map(c => transaction.get(c.ref)));
+
+      // 2. ALL WRITES AFTER READS
+      const now = new Date().toISOString();
+      const finalReferenceNumber = approverRefNumber || request.referenceNumber || request.requestNumber;
+      const coveredMonthsSorted = allocations.map(a => a.month).sort((a, b) => a - b);
+      const coveredYears = Array.from(new Set(allocations.map(a => a.year)));
+      const periodLabel = isAnnualDiscountEligible
+        ? `${targetYear} Full Year Annual Package (12 Months)`
+        : `${coveredYears.join('/')} M${coveredMonthsSorted.join(', M')}`;
+
+      // Create Income Record
+      const incomeRecord: IncomeRecord = {
+        id: incomeId,
+        title: `Member Contribution - ${request.memberName} (${periodLabel})`,
+        category: 'member_contribution',
+        amount: effectiveTotalAmount,
+        date: now.split('T')[0],
+        accountId: request.accountId,
+        accountName: request.accountName || currentAccount.accountName,
+        paymentMethod: 'bank_transfer',
+        referenceNumber: finalReferenceNumber,
+        receivedFrom: request.memberName,
+        payerMemberId: request.memberId,
+        contributionPaymentRequestId: request.id,
+        notes: `Approved member contribution (${request.requestNumber}). Ref: ${finalReferenceNumber}. Fines Deducted: ${totalFinesDeducted} MVR, Discount Given: ${totalDiscountApplied} MVR. ${approvalNote || ''}`.trim(),
+        status: 'received',
+        attachments: request.slipDownloadUrl ? [request.slipDownloadUrl] : [],
+        sourceModule: 'budget_contributions',
+        createdBy: reviewer.fullName,
+        createdAt: now,
+        updatedAt: now
+      };
+      transaction.set(existingIncomeRef, incomeRecord);
+
+      // Update Bank Account Balance
+      transaction.update(accountRef, {
+        currentBalance: currentBalance + effectiveTotalAmount,
+        updatedAt: now
+      });
+
+      // Write each covered contribution record
+      const updatedContribIds: string[] = [];
+      candidateRefs.forEach((alloc, idx) => {
+        updatedContribIds.push(alloc.docId);
+        const snap = contribSnaps[idx];
+        const receiptNum = `REC-${request.requestNumber}-${alloc.year}-${String(alloc.month).padStart(2, '0')}`;
+
+        if (snap.exists) {
+          transaction.update(alloc.ref, {
+            status: 'paid',
+            paidAmount: alloc.paidAmount,
+            baseAmount: alloc.baseAmount,
+            fineAmount: alloc.fineAmount,
+            discountAmount: alloc.discountAmount,
+            totalPayable: alloc.totalPayable,
+            paidDate: now.split('T')[0],
+            paymentMethod: 'bank_transfer',
+            referenceNumber: finalReferenceNumber,
+            accountId: request.accountId,
+            accountName: request.accountName || currentAccount.accountName,
+            receiptNumber: receiptNum,
+            incomeRecordId: incomeId,
+            paymentRequestId: request.requestNumber,
+            paymentSlipUrl: request.slipDownloadUrl,
+            isAdvancePayment: alloc.isAdvancePayment ?? false,
+            advancePackageMonths: alloc.advancePackageMonths ?? 0,
+            approvedBy: reviewer.id,
+            updatedAt: now
+          });
+        } else {
+          const newRecord: MemberContributionRecord = {
+            id: alloc.docId,
+            memberId: request.memberId,
+            memberName: request.memberName,
+            memberNumber: request.memberNumber,
+            year: alloc.year,
+            month: alloc.month,
+            baseAmount: alloc.baseAmount,
+            fineDays: 0,
+            finePerDay: 5,
+            fineAmount: alloc.fineAmount,
+            discountAmount: alloc.discountAmount,
+            totalPayable: alloc.totalPayable,
+            paidAmount: alloc.paidAmount,
+            dueDate: `${alloc.year}-${String(alloc.month).padStart(2, '0')}-10`,
+            paidDate: now.split('T')[0],
+            status: 'paid',
+            paymentMethod: 'bank_transfer',
+            referenceNumber: finalReferenceNumber,
+            accountId: request.accountId,
+            accountName: request.accountName || currentAccount.accountName,
+            receiptNumber: receiptNum,
+            incomeRecordId: incomeId,
+            paymentRequestId: request.requestNumber,
+            paymentSlipUrl: request.slipDownloadUrl,
+            isAdvancePayment: alloc.isAdvancePayment ?? false,
+            advancePackageMonths: alloc.advancePackageMonths ?? 0,
+            approvedBy: reviewer.id,
+            createdAt: now,
+            updatedAt: now
+          };
+          transaction.set(alloc.ref, newRecord);
+        }
+      });
+
+      // Update Contribution Payment Request
+      const updatedRequest: ContributionPaymentRequest = {
+        ...request,
+        status: 'approved',
+        totalAmount: effectiveTotalAmount,
+        referenceNumber: finalReferenceNumber,
+        months: allocations.filter(a => a.year === targetYear).map(a => a.month),
+        fineAmount: totalFinesDeducted,
+        discountAmount: totalDiscountApplied,
+        reviewedAt: now,
+        reviewedBy: reviewer.id,
+        reviewedByName: reviewer.fullName,
+        approvalNote: approvalNote || '',
+        incomeRecordId: incomeId,
+        contributionRecordIds: updatedContribIds,
+        updatedAt: now
+      };
+      transaction.set(reqRef, updatedRequest, { merge: true });
+
+      return { request: updatedRequest, incomeRecord };
+    });
+  }
+
+  async rejectContributionPaymentRequest(
+    id: string,
+    reviewer: { id: string; fullName: string },
+    reason: string
+  ): Promise<ContributionPaymentRequest> {
+    const reqRef = firestore.collection('contributionPaymentRequests').doc(id);
+    const snap = await reqRef.get();
+    if (!snap.exists) {
+      throw new Error('Payment request not found.');
+    }
+    const request = snap.data() as ContributionPaymentRequest;
+    if (request.status !== 'pending') {
+      throw new Error(`Request cannot be rejected because status is "${request.status}". Only pending requests can be rejected.`);
+    }
+    const now = new Date().toISOString();
+    const updated: ContributionPaymentRequest = {
+      ...request,
+      status: 'rejected',
+      reviewedAt: now,
+      reviewedBy: reviewer.id,
+      reviewedByName: reviewer.fullName,
+      rejectionReason: reason,
+      updatedAt: now
+    };
+    await reqRef.set(updated, { merge: true });
+    return updated;
   }
 
   async batchGenerateContributions(year: number, month: number): Promise<{ generated: number; skipped: number }> {

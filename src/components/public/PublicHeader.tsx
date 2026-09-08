@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { 
   Menu, X, Sparkles, BookOpen, Users, PhoneCall, Home, LogIn, 
   LayoutDashboard, Calendar, Package, HeartPulse, ExternalLink, ArrowRight, ShieldCheck
@@ -106,9 +107,9 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({ branding, activePath
               </button>
 
               {/* 2. Home Button (KEPT IN NAVBAR) */}
-              <a
+              <Link
                 id="nav_home"
-                href="/"
+                to="/"
                 className={`hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all shrink-0 ${
                   activePath === '/'
                     ? 'bg-orange-500/15 text-orange-400 border border-orange-500/30 shadow-sm'
@@ -118,7 +119,7 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({ branding, activePath
               >
                 <Home className="w-4 h-4 text-orange-400" />
                 <span>ފެށުން</span>
-              </a>
+              </Link>
 
               {/* 3. Prayer Time Widget (MOVED TO NAVBAR NEXT TO HOME BUTTON) */}
               <PrayerTimeWidget inNavbar={true} className="shrink-0" />
@@ -130,7 +131,7 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({ branding, activePath
             </div>
 
             {/* Left Side: Logo & Brand Name (Adaptive flex-1 to prevent left edge clipping on mobile) */}
-            <a href="/" id="header_brand_link" dir="ltr" className="flex items-center gap-2 sm:gap-3 group min-w-0 flex-1 justify-end sm:justify-start max-w-[65%] sm:max-w-none">
+            <Link to="/" id="header_brand_link" dir="ltr" className="flex items-center gap-2 sm:gap-3 group min-w-0 flex-1 justify-end sm:justify-start max-w-[65%] sm:max-w-none">
               {showLogoImage ? (
                 <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-slate-800 border border-slate-700/80 p-0.5 overflow-hidden flex items-center justify-center shadow-md shadow-orange-500/10 group-hover:scale-105 transition-transform shrink-0">
                   <img src={logoUrl} alt="Logo" className="w-full h-full object-contain rounded-lg sm:rounded-xl" />
@@ -148,7 +149,7 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({ branding, activePath
                   އާނަންދާ ރީކްރިއޭޝަން ކްލަބް (ARC)
                 </span>
               </div>
-            </a>
+            </Link>
           </div>
         </div>
       </header>
@@ -204,8 +205,8 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({ branding, activePath
               <div className="flex-1 overflow-y-auto px-4 py-5 space-y-6">
                 {/* Main Home Quick Link */}
                 <div>
-                  <a
-                    href="/"
+                  <Link
+                    to="/"
                     onClick={() => setSidebarOpen(false)}
                     className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${
                       activePath === '/'
@@ -223,7 +224,7 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({ branding, activePath
                       </div>
                     </div>
                     <ArrowRight className="w-4 h-4 text-slate-500 rotate-180" />
-                  </a>
+                  </Link>
                 </div>
 
                 {/* Section Header */}
@@ -238,10 +239,10 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({ branding, activePath
                       const Icon = item.icon;
                       const isActive = activePath === item.href;
                       return (
-                        <a
+                        <Link
                           key={item.id}
                           id={item.id}
-                          href={item.href}
+                          to={item.href}
                           onClick={() => setSidebarOpen(false)}
                           className={`flex items-center justify-between p-3 rounded-2xl border transition-all group ${
                             isActive
@@ -274,7 +275,7 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({ branding, activePath
                             </div>
                           </div>
                           <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-orange-400 transition-colors rotate-180" />
-                        </a>
+                        </Link>
                       );
                     })}
                   </div>
@@ -292,25 +293,25 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({ branding, activePath
               {/* Drawer Footer - Selected Portal / Login Button */}
               <div className="p-4 border-t border-slate-800 bg-slate-950/70 space-y-2">
                 {isAuthenticated ? (
-                  <a
-                    href="/portal"
+                  <Link
+                    to="/portal"
                     id="header_portal_btn"
                     onClick={() => setSidebarOpen(false)}
                     className="flex items-center justify-center gap-2.5 w-full px-4 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold text-sm shadow-md hover:brightness-110 active:scale-[0.98] transition-all"
                   >
                     <LayoutDashboard className="w-5 h-5" />
                     <span>ޕޯޓަލް އަށް ވަޑައިގަންނަވާ ({(user?.fullName || user?.username || 'User').split(' ')[0]})</span>
-                  </a>
+                  </Link>
                 ) : (
-                  <a
-                    href="/login"
+                  <Link
+                    to="/login"
                     id="header_login_btn"
                     onClick={() => setSidebarOpen(false)}
                     className="flex items-center justify-center gap-2.5 w-full px-4 py-3 rounded-xl bg-slate-800 border border-orange-500/40 text-orange-400 hover:bg-orange-500 hover:text-white font-bold text-sm shadow-md active:scale-[0.98] transition-all"
                   >
                     <LogIn className="w-5 h-5" />
                     <span>ޕޯޓަލް އަށް ވަނުމަށް (ލޮގިން)</span>
-                  </a>
+                  </Link>
                 )}
               </div>
 

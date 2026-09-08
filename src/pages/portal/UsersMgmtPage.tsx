@@ -12,7 +12,7 @@ import { useTableSync } from '../../hooks/useRealtimeSync';
 import { ModulePermissionsGrid, ALL_SYSTEM_MODULES } from '../../components/portal/ModulePermissionsGrid';
 import { UserPerformanceModal } from '../../components/portal/UserPerformanceModal';
 import { 
-  Plus, Edit, Lock, Unlock, UserX, UserCheck, Shield, Key, Users, Sliders, Trash2, Activity, Award, Sparkles, Copy, Check 
+  Plus, Edit, Lock, Unlock, UserX, UserCheck, Shield, Key, Users, Sliders, Trash2, Activity, Award, Sparkles, Copy, Check, ShieldAlert 
 } from 'lucide-react';
 
 export const UsersMgmtPage: React.FC = () => {
@@ -36,9 +36,12 @@ export const UsersMgmtPage: React.FC = () => {
   // Delete Confirmation State
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
 
-  // Admin PIN Change Modal State
+  // Admin PIN Reset Modal State
   const [pinModalUser, setPinModalUser] = useState<User | null>(null);
-  const [adminNewPin, setAdminNewPin] = useState('2613');
+  const [adminNewPin, setAdminNewPin] = useState('');
+  const [adminConfirmPin, setAdminConfirmPin] = useState('');
+  const [adminRequireChange, setAdminRequireChange] = useState(true);
+  const [showAdminPins, setShowAdminPins] = useState(false);
   const [adminPinLoading, setAdminPinLoading] = useState(false);
 
   // User Form State
@@ -183,7 +186,7 @@ export const UsersMgmtPage: React.FC = () => {
     const roleName = selectedRole?.name || '';
     const isAdmin = roleId === 'role_admin' || roleName.toLowerCase() === 'admin';
     const isMemberRole = roleId === 'role_member' || roleName === 'Club Member';
-    const isExcoRole = roleName === 'EXCO Member' || roleId === 'role_exco' || ['role_president', 'role_vp', 'role_treasurer', 'role_secretary'].includes(roleId);
+    const isExcoRole = roleName === 'EXCO Member' || roleId === 'role_exco' || ['role_president', 'role_vp', 'role_treasurer', 'role_secretary', 'role_health_promotion'].includes(roleId) || roleName.toLowerCase().includes('health') || roleName.toLowerCase().includes('president') || roleName.toLowerCase().includes('treasurer') || roleName.toLowerCase().includes('secretary');
 
     if (!isAdmin && !selectedMemberId) {
       showToast('error', 'All non-admin users (EXCO & Club Members) must be linked to an existing club member (އެގްޒިސްޓިންގ މެންބަރަކާ ގުޅުވަންޖެހޭނެ).');
@@ -257,12 +260,17 @@ export const UsersMgmtPage: React.FC = () => {
 
   const handleOpenChangePin = (u: User) => {
     setPinModalUser(u);
-    setAdminNewPin('2613');
+    setAdminNewPin('');
+    setAdminConfirmPin('');
+    setAdminRequireChange(true);
+    setShowAdminPins(false);
   };
 
   const handleGenerateRandomPin = () => {
     const randomPin = Math.floor(1000 + Math.random() * 9000).toString();
     setAdminNewPin(randomPin);
+    setAdminConfirmPin(randomPin);
+    setShowAdminPins(true);
     showToast('info', `Generated new PIN: ${randomPin}`);
   };
 
@@ -270,19 +278,25 @@ export const UsersMgmtPage: React.FC = () => {
     e.preventDefault();
     if (!pinModalUser) return;
     const cleanPin = adminNewPin.trim();
+    const cleanConfirm = adminConfirmPin.trim();
+
     if (!cleanPin || !/^\d{4,8}$/.test(cleanPin)) {
-      showToast('error', 'PIN must be between 4 and 8 numeric digits.');
+      showToast('error', 'New PIN must be between 4 and 8 numeric digits.');
+      return;
+    }
+    if (cleanPin !== cleanConfirm) {
+      showToast('error', 'New PIN and Confirm PIN do not match.');
       return;
     }
 
     try {
       setAdminPinLoading(true);
-      await api.resetUserPin(pinModalUser.id, cleanPin);
-      showToast('success', `PIN updated for user @${pinModalUser.username} (${cleanPin}).`);
+      await api.resetUserPin(pinModalUser.id, cleanPin, cleanConfirm, adminRequireChange);
+      showToast('success', `PIN successfully reset for @${pinModalUser.username}. Active sessions revoked.`);
       setPinModalUser(null);
       fetchUsers();
     } catch (err: any) {
-      showToast('error', err.message || 'Failed to update PIN.');
+      showToast('error', err.message || 'Failed to reset PIN.');
     } finally {
       setAdminPinLoading(false);
     }
@@ -342,7 +356,7 @@ export const UsersMgmtPage: React.FC = () => {
         {currentTab === 'users' && (() => {
           const filteredUsers = users.filter(u => {
             const isAdminRole = u.roleName === 'Admin' || u.roleId === 'role_admin' || u.roleName?.toLowerCase().includes('admin');
-            const isExcoRole = u.roleName === 'EXCO Member' || u.roleId === 'role_exco' || ['role_president', 'role_vp', 'role_treasurer', 'role_secretary'].includes(u.roleId);
+            const isExcoRole = u.roleName === 'EXCO Member' || u.roleId === 'role_exco' || ['role_president', 'role_vp', 'role_treasurer', 'role_secretary', 'role_health_promotion'].includes(u.roleId || '') || u.roleName?.toLowerCase().includes('health') || u.roleName?.toLowerCase().includes('president') || u.roleName?.toLowerCase().includes('treasurer') || u.roleName?.toLowerCase().includes('secretary') || u.roleName?.toLowerCase().includes('promotion');
             const isMemberRole = u.roleName === 'Club Member' || u.roleId === 'role_member' || (!isAdminRole && !isExcoRole);
 
             if (roleFilter === 'admin' && !isAdminRole) return false;
@@ -362,7 +376,7 @@ export const UsersMgmtPage: React.FC = () => {
           });
 
           const adminCount = users.filter(u => u.roleName === 'Admin' || u.roleId === 'role_admin' || u.roleName?.toLowerCase().includes('admin')).length;
-          const excoCount = users.filter(u => u.roleName === 'EXCO Member' || u.roleId === 'role_exco' || ['role_president', 'role_vp', 'role_treasurer', 'role_secretary'].includes(u.roleId)).length;
+          const excoCount = users.filter(u => u.roleName === 'EXCO Member' || u.roleId === 'role_exco' || ['role_president', 'role_vp', 'role_treasurer', 'role_secretary', 'role_health_promotion'].includes(u.roleId || '') || u.roleName?.toLowerCase().includes('health') || u.roleName?.toLowerCase().includes('president') || u.roleName?.toLowerCase().includes('treasurer') || u.roleName?.toLowerCase().includes('secretary') || u.roleName?.toLowerCase().includes('promotion')).length;
           const memberCount = users.length - adminCount - excoCount;
 
           return (
@@ -537,10 +551,11 @@ export const UsersMgmtPage: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => handleOpenChangePin(u)}
-                              className="p-1.5 rounded-lg bg-slate-800 text-amber-400 hover:text-white hover:bg-slate-700"
-                              title="Admin Change PIN (ޕިން ބަދަލުކުރުން)"
+                              className="px-2.5 py-1.5 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/30 flex items-center gap-1 text-[11px] font-bold transition-colors"
+                              title="Reset User PIN (ޕިން ރީސެޓް ކުރުން)"
                             >
                               <Key className="w-3.5 h-3.5" />
+                              <span>Reset PIN</span>
                             </button>
                             <button
                               type="button"
@@ -755,7 +770,7 @@ export const UsersMgmtPage: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-3">
             {/* Designation field shown ONLY for EXCO Members */}
-            {(roles.find(r => r.id === roleId)?.name === 'EXCO Member' || roleId === 'role_exco' || ['role_president', 'role_vp', 'role_treasurer', 'role_secretary'].includes(roleId)) ? (
+            {(roles.find(r => r.id === roleId)?.name === 'EXCO Member' || roleId === 'role_exco' || ['role_president', 'role_vp', 'role_treasurer', 'role_secretary', 'role_health_promotion'].includes(roleId) || roles.find(r => r.id === roleId)?.name?.toLowerCase().includes('health')) ? (
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Designation * (EXCO Role)</label>
                 <input
@@ -888,80 +903,144 @@ export const UsersMgmtPage: React.FC = () => {
         isDanger={true}
       />
 
-      {/* Admin Change User PIN Modal */}
+      {/* Admin Reset User PIN Modal */}
       <Modal
         id="admin_change_pin_modal"
         isOpen={!!pinModalUser}
         onClose={() => setPinModalUser(null)}
-        title="Change User PIN (ޕިން ބަދަލުކުރުން)"
-        description={`Set a new numeric PIN for user @${pinModalUser?.username || ''} (${pinModalUser?.fullName || ''}).`}
+        title="RESET USER PIN (ޕިން ރީސެޓް ކުރުން)"
+        description={`Set a new numeric PIN for user @${pinModalUser?.username || ''} (${pinModalUser?.fullName || ''}). All active login sessions will be revoked.`}
       >
         <form onSubmit={handleSaveAdminPin} className="space-y-4">
-          <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1 text-xs">
+          <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1.5 text-xs">
             <div className="flex items-center justify-between text-slate-400">
-              <span>User:</span>
-              <strong className="text-white">@{pinModalUser?.username}</strong>
+              <span>User (ޔޫޒަރ):</span>
+              <strong className="text-white font-mono">@{pinModalUser?.username}</strong>
             </div>
             <div className="flex items-center justify-between text-slate-400">
-              <span>Full Name:</span>
+              <span>Full Name (ނަން):</span>
               <strong className="text-slate-200">{pinModalUser?.fullName}</strong>
             </div>
             <div className="flex items-center justify-between text-slate-400">
-              <span>Role:</span>
-              <strong className="text-orange-400">{pinModalUser?.roleName}</strong>
+              <span>Role (މަގާމު):</span>
+              <strong className="text-amber-400">{pinModalUser?.roleName}</strong>
             </div>
           </div>
 
-          <div>
-            <PinInput
-              id="admin_user_new_pin"
-              value={adminNewPin}
-              onChange={setAdminNewPin}
-              label="New Numeric PIN (އައު ޕިން ކޯޑު)"
-              required
-            />
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                New PIN (އައު ޕިން) <span className="text-rose-400">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  type={showAdminPins ? "text" : "password"}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={8}
+                  value={adminNewPin}
+                  onChange={(e) => setAdminNewPin(e.target.value.replace(/\D/g, ''))}
+                  placeholder="Enter 4 to 8 digit PIN"
+                  required
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono text-sm tracking-widest focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Confirm PIN (ޕިން ކަށަވަރުކުރުން) <span className="text-rose-400">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  type={showAdminPins ? "text" : "password"}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={8}
+                  value={adminConfirmPin}
+                  onChange={(e) => setAdminConfirmPin(e.target.value.replace(/\D/g, ''))}
+                  placeholder="Re-enter same numeric PIN"
+                  required
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono text-sm tracking-widest focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={showAdminPins}
+                  onChange={(e) => setShowAdminPins(e.target.checked)}
+                  className="rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0"
+                />
+                <span>Show PIN numbers</span>
+              </label>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleGenerateRandomPin}
+                  className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Generate Random</span>
+                </button>
+                {adminNewPin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(adminNewPin);
+                      showToast('success', `Copied PIN (${adminNewPin}) to clipboard.`);
+                    }}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy</span>
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center justify-between pt-1">
-            <button
-              type="button"
-              onClick={handleGenerateRandomPin}
-              className="px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Generate Random PIN</span>
-            </button>
+          {/* Require change on next login */}
+          <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl">
+            <label className="flex items-start gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={adminRequireChange}
+                onChange={(e) => setAdminRequireChange(e.target.checked)}
+                className="mt-0.5 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0"
+              />
+              <div className="space-y-0.5">
+                <span className="text-xs font-bold text-slate-200">Require user to change PIN on next login</span>
+                <p className="text-[11px] text-slate-400">
+                  User will be prompted to choose their own personal PIN immediately after logging in.
+                </p>
+              </div>
+            </label>
+          </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                if (adminNewPin) {
-                  navigator.clipboard.writeText(adminNewPin);
-                  showToast('success', `Copied PIN (${adminNewPin}) to clipboard.`);
-                }
-              }}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              <span>Copy PIN</span>
-            </button>
+          <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-[11px] text-rose-300 flex items-start gap-2">
+            <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            <span>Resetting this PIN will immediately revoke all existing login sessions for this account across all devices.</span>
           </div>
 
           <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
             <button
               type="button"
               onClick={() => setPinModalUser(null)}
-              className="px-4 py-2 rounded-xl bg-slate-800 text-xs text-slate-300 font-semibold hover:bg-slate-700"
+              className="px-4 py-2 rounded-xl bg-slate-800 text-xs text-slate-300 font-semibold hover:bg-slate-700 transition"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={adminPinLoading}
-              className="px-5 py-2 rounded-xl bg-orange-500 text-white font-bold text-xs hover:bg-orange-400 disabled:opacity-50 flex items-center gap-1.5"
+              disabled={adminPinLoading || !adminNewPin || adminNewPin !== adminConfirmPin}
+              className="px-5 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 disabled:opacity-50 flex items-center gap-1.5 transition shadow-lg shadow-amber-500/10"
             >
               <Key className="w-3.5 h-3.5" />
-              <span>{adminPinLoading ? 'Saving...' : 'Update User PIN'}</span>
+              <span>{adminPinLoading ? 'Resetting...' : 'RESET PIN'}</span>
             </button>
           </div>
         </form>

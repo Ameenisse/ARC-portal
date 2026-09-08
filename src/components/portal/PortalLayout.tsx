@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link } from 'react-router-dom';
 import { useAuth, isUserAdmin } from '../../context/AuthContext';
 import { usePortalLanguage } from '../../hooks/usePortalLanguage';
 import { ServerTimeBadge } from '../common/ServerTimeBadge';
 import { RealtimeSyncBadge } from '../common/RealtimeSyncBadge';
+import { PageLoader } from '../common/PageLoader';
 import { useToast } from '../common/Toast';
 import { api } from '../../services/api';
 import {
@@ -95,12 +96,7 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white p-4" dir="rtl">
-        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="text-sm font-medium text-slate-400">އެޑްމިން ޕޯޓަލް ލޯޑުވަނީ...</p>
-      </div>
-    );
+    return <PageLoader message="އެޑްމިން ޕޯޓަލް ލޯޑުވަނީ..." subMessage="ހުއްދަ ކަށަވަރުކުރެވެނީ (Checking authorization...)" />;
   }
 
   if (!user) {
@@ -232,10 +228,10 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
             const isActive = currentModule === item.key;
             const label = lang === 'english' ? item.labelEn : item.labelDv;
             return (
-              <a
+              <Link
                 key={item.key}
                 id={`sidebar_link_${item.key}`}
-                href={item.href}
+                to={item.href}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                   isActive
                     ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
@@ -257,15 +253,15 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
                 {!isExpanded && item.key === 'messages' && unreadMsgCount > 0 && (
                   <span className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-orange-500 ring-2 ring-slate-900" />
                 )}
-              </a>
+              </Link>
             );
           })}
         </nav>
 
         {/* User Mini Profile Footer */}
         <div className="p-3 border-t border-slate-800 bg-slate-900/80">
-          <a
-            href="/portal/profile"
+          <Link
+            to="/portal/profile"
             className="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-800 transition-colors"
           >
             <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-orange-400 font-bold text-xs shrink-0">
@@ -277,7 +273,7 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
                 <p className="text-[10px] text-slate-400 truncate">{user.designation}</p>
               </div>
             )}
-          </a>
+          </Link>
         </div>
       </aside>
 
@@ -345,8 +341,8 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
             </div>
 
             {/* Messages Inbox Button */}
-            <a
-              href="/portal/messages"
+            <Link
+              to="/portal/messages"
               className="relative p-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-white transition-colors"
               title={lang === 'english' ? "Message Inbox" : "މެސެޖު އިންބޮކްސް"}
             >
@@ -356,7 +352,7 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
                   {unreadMsgCount}
                 </span>
               )}
-            </a>
+            </Link>
 
             {/* Notifications Popover Bell Button */}
             <div className="relative">
@@ -421,21 +417,21 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
                   </div>
 
                   <div className="pt-2 border-t border-slate-800 text-center">
-                    <a
-                      href="/portal/messages"
+                    <Link
+                      to="/portal/messages"
                       onClick={() => setNotifDropdownOpen(false)}
                       className="text-xs font-bold text-orange-400 hover:underline inline-flex items-center gap-1"
                     >
                       <span>{lang === 'english' ? 'View All Inbox & Notifications' : 'ހުރިހާ މެސެޖުތައް ބައްލަވާ'}</span>
                       <ExternalLink className="w-3 h-3" />
-                    </a>
+                    </Link>
                   </div>
                 </div>
               )}
             </div>
 
-            <a
-              href="/portal/profile"
+            <Link
+              to="/portal/profile"
               className="p-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
               title="Profile Settings"
             >
@@ -443,7 +439,7 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
               <span className="hidden md:inline">
                 {lang === 'english' ? 'Profile' : 'ޕްރޯފައިލް'}
               </span>
-            </a>
+            </Link>
 
             <button
               type="button"
@@ -504,9 +500,9 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
                 const label = lang === 'english' ? item.labelEn : item.labelDv;
                 const isActive = currentModule === item.key;
                 return (
-                  <a
+                  <Link
                     key={item.key}
-                    href={item.href}
+                    to={item.href}
                     onClick={() => setMobileDrawerOpen(false)}
                     className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                       isActive
@@ -523,21 +519,21 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ currentModule, title
                         {unreadMsgCount}
                       </span>
                     )}
-                  </a>
+                  </Link>
                 );
               })}
             </nav>
 
             {/* Mobile Bottom Actions */}
             <div className="pt-3 border-t border-slate-800 space-y-2 mt-auto">
-              <a
-                href="/portal/profile"
+              <Link
+                to="/portal/profile"
                 onClick={() => setMobileDrawerOpen(false)}
                 className="flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
               >
                 <UserIcon className="w-4 h-4 text-orange-400" />
                 <span>{lang === 'english' ? 'Profile Settings' : 'ޕްރޯފައިލް ސެޓިންގްސް'}</span>
-              </a>
+              </Link>
 
               <button
                 type="button"

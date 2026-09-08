@@ -235,7 +235,7 @@ export const api = {
   createUser: (user: any) => request<any>('/api/portal/users', { method: 'POST', body: JSON.stringify(user) }),
   updateUser: (id: string, user: any) => request<any>(`/api/portal/users/${id}`, { method: 'PUT', body: JSON.stringify(user) }),
   updateUserStatus: (id: string, data: any) => request<any>(`/api/portal/users/${id}/status`, { method: 'PUT', body: JSON.stringify(data) }),
-  resetUserPin: (id: string, newPin: string) => request<any>(`/api/portal/users/${id}/reset-pin`, { method: 'POST', body: JSON.stringify({ newPin }) }),
+  resetUserPin: (id: string, newPin: string, confirmPin?: string, requirePinChange?: boolean) => request<any>(`/api/portal/users/${id}/reset-pin`, { method: 'POST', body: JSON.stringify({ newPin, confirmPin, requirePinChange }) }),
   deleteUser: (id: string) => request<any>(`/api/portal/users/${id}`, { method: 'DELETE' }),
 
   getRoles: () => request<any>('/api/portal/roles'),
@@ -385,12 +385,74 @@ export const api = {
   },
   processContributionPayment: (data: any) => request<any>('/api/portal/budget/contributions/pay', { method: 'POST', body: JSON.stringify(data) }),
 
+  // Member Contribution Self-Payment & Approval Workflow
+  getMyContributions: () => request<{
+    member: any;
+    settings: any;
+    depositAccount: any;
+    contributions: any[];
+    paymentRequests: any[];
+    summary: {
+      paidCount: number;
+      totalPaid: number;
+      pendingRequestsCount: number;
+      hasPendingPayment: boolean;
+    };
+  }>('/api/portal/my-contributions'),
+
+  submitContributionPaymentRequest: (data: {
+    targetContributionId?: string;
+    year?: number;
+    paymentType?: 'single_month' | 'multiple_months' | 'annual';
+    months?: number[];
+    amount?: number;
+    slipDownloadUrl: string;
+    slipStoragePath?: string;
+    slipFileName?: string;
+    slipMimeType?: string;
+    slipFileSize?: number;
+    referenceNumber?: string;
+    memberNote?: string;
+  }) => request<any>('/api/portal/my-contributions/payment-request', { method: 'POST', body: JSON.stringify(data) }),
+
+  cancelContributionPaymentRequest: (id: string) =>
+    request<any>(`/api/portal/my-contributions/payment-request/${id}/cancel`, { method: 'POST' }),
+
+  getContributionPaymentRequests: (params?: { status?: string; memberId?: string; year?: number }) => {
+    const query = new URLSearchParams(params as any).toString();
+    return request<{
+      requests: any[];
+      pendingCount: number;
+      approvedCount: number;
+      rejectedCount: number;
+      totalCount: number;
+    }>(`/api/portal/budget/contribution-payment-requests${query ? `?${query}` : ''}`);
+  },
+
+  approveContributionPaymentRequest: (id: string, data?: { approvalNote?: string; referenceNumber?: string; approvedAmount?: number; noReferenceException?: boolean }) =>
+    request<{ success: boolean; request: any; incomeRecord: any }>(`/api/portal/budget/contribution-payment-requests/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(data || {})
+    }),
+
+  rejectContributionPaymentRequest: (id: string, data: { rejectionReason: string }) =>
+    request<{ success: boolean; request: any }>(`/api/portal/budget/contribution-payment-requests/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
+
   getBudgetAllocations: (year?: number) => {
     const query = year ? `?year=${year}` : '';
     return request<any[]>(`/api/portal/budget/allocations${query}`);
   },
   saveBudgetAllocation: (data: any) => request<any>('/api/portal/budget/allocations', { method: 'POST', body: JSON.stringify(data) }),
   deleteBudgetAllocation: (id: string) => request<any>(`/api/portal/budget/allocations/${id}`, { method: 'DELETE' }),
+
+  uploadFile: (data: { fileName: string; fileType: string; fileData: string; folder?: string }) =>
+    request<{ url: string; fileName: string; storage: string }>('/api/portal/upload', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
 
   // --- Executive Roles & Directives API ---
   getPresidentialDirectives: () => request<any[]>('/api/portal/executive/directives'),

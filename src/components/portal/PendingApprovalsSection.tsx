@@ -39,7 +39,7 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
   onUpdated,
   className = ''
 }) => {
-  const { lang } = usePortalLanguage();
+  const { lang, dir } = usePortalLanguage();
   const isDh = lang === 'dhivehi';
   const { showToast } = useToast();
 
@@ -216,6 +216,7 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
   return (
     <div
       id="pending-approvals-section"
+      dir={dir}
       className={`bg-slate-900 border ${
         totalPendingCount > 0 ? accentStyles.border : 'border-slate-800'
       } rounded-3xl p-6 sm:p-7 space-y-6 shadow-xl relative overflow-hidden transition-all ${className}`}
@@ -270,7 +271,7 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                All ({totalPendingCount})
+                {isDh ? 'ހުރިހާ' : 'All'} ({totalPendingCount})
               </button>
               <button
                 type="button"
@@ -281,7 +282,7 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Invoices ({invoices.length})
+                {isDh ? 'އިންވޮއިސް' : 'Invoices'} ({invoices.length})
               </button>
               <button
                 type="button"
@@ -292,7 +293,7 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Bills ({expenses.length})
+                {isDh ? 'ބިލްތައް' : 'Bills'} ({expenses.length})
               </button>
             </div>
           )}
@@ -302,7 +303,7 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
             onClick={handleRefresh}
             disabled={refreshing}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
-            title="Refresh Pending Approvals"
+            title={isDh ? 'އާކޮށްލާ' : 'Refresh Pending Approvals'}
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
@@ -315,11 +316,11 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
             <div className="space-y-0.5">
               <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                Total Pending Value
+                {isDh ? 'ޖުމްލަ އަގު' : 'Total Pending Value'}
               </span>
               <div className="text-xl font-bold text-white font-mono">
                 {totalPendingAmount.toLocaleString()}{' '}
-                <span className="text-xs text-amber-400 font-sans">MVR</span>
+                <span className="text-xs text-amber-400 font-sans">{isDh ? 'ރުފިޔާ' : 'MVR'}</span>
               </div>
             </div>
             <DollarSign className="w-6 h-6 text-amber-400/70" />
@@ -328,12 +329,12 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
             <div className="space-y-0.5">
               <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                Pending Invoices / Quotes
+                {isDh ? 'ހުއްދަނުދީ ހުރި އިންވޮއިސް' : 'Pending Invoices / Quotes'}
               </span>
               <div className="text-xl font-bold text-indigo-400 font-mono">
                 {invoices.length}{' '}
                 <span className="text-xs text-slate-400 font-sans">
-                  ({totalPendingInvoicesAmount.toLocaleString()} MVR)
+                  ({totalPendingInvoicesAmount.toLocaleString()} {isDh ? 'ރުފިޔާ' : 'MVR'})
                 </span>
               </div>
             </div>
@@ -343,12 +344,12 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
             <div className="space-y-0.5">
               <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                Pending Bills / Expenses
+                {isDh ? 'ހުއްދަނުދީ ހުރި ޚަރަދު ބިލް' : 'Pending Bills / Expenses'}
               </span>
               <div className="text-xl font-bold text-amber-400 font-mono">
                 {expenses.length}{' '}
                 <span className="text-xs text-slate-400 font-sans">
-                  ({totalPendingExpensesAmount.toLocaleString()} MVR)
+                  ({totalPendingExpensesAmount.toLocaleString()} {isDh ? 'ރުފިޔާ' : 'MVR'})
                 </span>
               </div>
             </div>
@@ -361,7 +362,7 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
       {loading ? (
         <div className="py-12 text-center text-slate-500 space-y-3">
           <div className="w-7 h-7 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <p className="text-xs">Checking for pending approvals...</p>
+          <p className="text-xs">{isDh ? 'ހުއްދައަށް އެދިފައިވާ ތަކެތި ޗެކްކުރެވެނީ...' : 'Checking for pending approvals...'}</p>
         </div>
       ) : totalPendingCount === 0 ? (
         /* Empty State */
@@ -394,30 +395,30 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
                   <div className="space-y-2 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="px-2.5 py-0.5 rounded-lg bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 font-bold text-xs">
-                        {isQuote ? 'Quotation' : 'Outbound Invoice'}
+                        {isQuote ? (isDh ? 'ކޯޓޭޝަން' : 'Quotation') : (isDh ? 'އިންވޮއިސް' : 'Outbound Invoice')}
                       </span>
                       <span className="text-sm font-extrabold text-white font-mono">
                         {invoice.invoiceNumber}
                       </span>
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 border border-amber-500/30 text-amber-300">
-                        PENDING EXECUTIVE APPROVAL
+                        {isDh ? 'ރިޔާސީ ހުއްދައަށް އެދިފައި' : 'PENDING EXECUTIVE APPROVAL'}
                       </span>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300">
                       <div>
-                        <span className="text-slate-400">Bill To / Client: </span>
-                        <strong className="text-white">{invoice.billTo || 'General Client'}</strong>
+                        <span className="text-slate-400">{isDh ? 'ބިލް ކުރެވޭ ފަރާތް: ' : 'Bill To / Client: '}</span>
+                        <strong className="text-white">{invoice.billTo || (isDh ? 'ޢާންމު ކްލައިންޓް' : 'General Client')}</strong>
                       </div>
                       {invoice.invoiceDate && (
                         <div>
-                          <span className="text-slate-400">Date: </span>
+                          <span className="text-slate-400">{isDh ? 'ތާރީޚު: ' : 'Date: '}</span>
                           <span>{invoice.invoiceDate}</span>
                         </div>
                       )}
                       {invoice.createdByName && (
                         <div>
-                          <span className="text-slate-400">Prepared By: </span>
+                          <span className="text-slate-400">{isDh ? 'ތައްޔާރުކުރީ: ' : 'Prepared By: '}</span>
                           <span className="text-slate-300">{invoice.createdByName}</span>
                         </div>
                       )}
@@ -430,12 +431,12 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
 
                   {/* Amount & Actions */}
                   <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 shrink-0 self-end md:self-center">
-                    <div className="text-right">
+                    <div className={isDh ? 'text-left' : 'text-right'}>
                       <span className="text-[10px] text-slate-400 block uppercase font-medium">
-                        Total Amount
+                        {isDh ? 'ޖުމްލަ އަގު' : 'Total Amount'}
                       </span>
                       <span className="text-lg font-extrabold text-indigo-400 font-mono">
-                        {Number(invoice.totalNetPayments || 0).toLocaleString()} MVR
+                        {Number(invoice.totalNetPayments || 0).toLocaleString()} {isDh ? 'ރުފިޔާ' : 'MVR'}
                       </span>
                     </div>
 
@@ -444,10 +445,10 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
                         type="button"
                         onClick={() => setInspectingInvoice(invoice)}
                         className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
-                        title="Review Full Invoice"
+                        title={isDh ? 'އިންވޮއިސް ބައްލަވާ' : 'Review Full Invoice'}
                       >
                         <Eye className="w-3.5 h-3.5" />
-                        <span>Inspect</span>
+                        <span>{isDh ? 'ބައްލަވާ' : 'Inspect'}</span>
                       </button>
 
                       <button
@@ -457,7 +458,7 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
                         className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition cursor-pointer disabled:opacity-50"
                       >
                         <Check className="w-3.5 h-3.5" />
-                        <span>{isProcessing ? 'Approving...' : 'Approve'}</span>
+                        <span>{isProcessing ? (isDh ? 'ހުއްދަދެވެނީ...' : 'Approving...') : (isDh ? 'ހުއްދަދީ' : 'Approve')}</span>
                       </button>
 
                       <button
@@ -465,7 +466,7 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
                         onClick={() => handleRejectInvoice(invoice)}
                         disabled={isProcessing}
                         className="p-2 rounded-xl bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-300 transition cursor-pointer"
-                        title="Reject Invoice"
+                        title={isDh ? 'އިންވޮއިސް ރިޖެކްޓްކުރޭ' : 'Reject Invoice'}
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -488,7 +489,7 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
                   <div className="space-y-2 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-xs">
-                        Expense Bill / Payment Release
+                        {isDh ? 'ޚަރަދު ބިލް / ފައިސާ ދޫކުރުން' : 'Expense Bill / Payment Release'}
                       </span>
                       {expense.billNumber && (
                         <span className="text-xs font-bold text-slate-300 font-mono">
@@ -496,12 +497,12 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
                         </span>
                       )}
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 border border-rose-500/30 text-rose-300">
-                        PAYMENT RELEASE REQUIRED
+                        {isDh ? 'ފައިސާ ދޫކުރުމުގެ ހުއްދަ ބޭނުންވޭ' : 'PAYMENT RELEASE REQUIRED'}
                       </span>
                       {hasBillDoc && (
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-500/15 border border-sky-500/30 text-sky-300 flex items-center gap-1">
                           <FileText className="w-3 h-3" />
-                          Attached Document
+                          <span>{isDh ? 'ލިޔުން އެޓޭޗްކުރެވިފައި' : 'Attached Document'}</span>
                         </span>
                       )}
                     </div>
@@ -512,17 +513,17 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
                       </div>
                       {expense.payee && (
                         <div>
-                          <span className="text-slate-400">Payee / Vendor: </span>
+                          <span className="text-slate-400">{isDh ? 'ފައިސާ ލިބޭ ފަރާތް: ' : 'Payee / Vendor: '}</span>
                           <span className="text-amber-300 font-medium">{expense.payee}</span>
                         </div>
                       )}
                       <div>
-                        <span className="text-slate-400">Category: </span>
+                        <span className="text-slate-400">{isDh ? 'ބައި / ކެޓަގަރީ: ' : 'Category: '}</span>
                         <span className="text-slate-300">{expense.category}</span>
                       </div>
                       {expense.date && (
                         <div>
-                          <span className="text-slate-400">Date: </span>
+                          <span className="text-slate-400">{isDh ? 'ތާރީޚު: ' : 'Date: '}</span>
                           <span>{expense.date}</span>
                         </div>
                       )}
@@ -535,12 +536,12 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
 
                   {/* Amount & Actions */}
                   <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 shrink-0 self-end md:self-center">
-                    <div className="text-right">
+                    <div className={isDh ? 'text-left' : 'text-right'}>
                       <span className="text-[10px] text-slate-400 block uppercase font-medium">
-                        Payment Amount
+                        {isDh ? 'ދޫކުރާ ފައިސާގެ އަދަދު' : 'Payment Amount'}
                       </span>
                       <span className="text-lg font-extrabold text-amber-400 font-mono">
-                        {Number(expense.amount || 0).toLocaleString()} MVR
+                        {Number(expense.amount || 0).toLocaleString()} {isDh ? 'ރުފިޔާ' : 'MVR'}
                       </span>
                     </div>
 
@@ -549,10 +550,10 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
                         type="button"
                         onClick={() => setInspectingExpense(expense)}
                         className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
-                        title="Review Bill & Attachments"
+                        title={isDh ? 'ބިލާއި ލިޔުންތައް ބައްލަވާ' : 'Review Bill & Attachments'}
                       >
                         <Eye className="w-3.5 h-3.5" />
-                        <span>Inspect Bill</span>
+                        <span>{isDh ? 'ބިލް ބައްލަވާ' : 'Inspect Bill'}</span>
                       </button>
 
                       <button
@@ -562,7 +563,7 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
                         className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/20 transition cursor-pointer disabled:opacity-50"
                       >
                         <Check className="w-3.5 h-3.5" />
-                        <span>{isProcessing ? 'Releasing...' : 'Approve & Release'}</span>
+                        <span>{isProcessing ? (isDh ? 'ދޫކުރެވެނީ...' : 'Releasing...') : (isDh ? 'ހުއްދަދީ ފައިސާ ދޫކުރޭ' : 'Approve & Release')}</span>
                       </button>
 
                       <button
@@ -570,7 +571,7 @@ export const PendingApprovalsSection: React.FC<PendingApprovalsSectionProps> = (
                         onClick={() => handleRejectExpense(expense)}
                         disabled={isProcessing}
                         className="p-2 rounded-xl bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-300 transition cursor-pointer"
-                        title="Reject Bill"
+                        title={isDh ? 'ބިލް ރިޖެކްޓްކުރޭ' : 'Reject Bill'}
                       >
                         <X className="w-4 h-4" />
                       </button>

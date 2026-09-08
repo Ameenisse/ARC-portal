@@ -33,6 +33,7 @@ import { RentalServicePage } from './pages/portal/RentalServicePage';
 import { PublicRentalPage } from './pages/public/PublicRentalPage';
 import { CustomerPortalPage } from './pages/public/CustomerPortalPage';
 import { FaviconSync } from './components/common/FaviconSync';
+import { TopProgressBar } from './components/common/TopProgressBar';
 
 export function App() {
   return (
@@ -42,7 +43,8 @@ export function App() {
           <RealtimeProvider>
             <FaviconSync />
             <BrowserRouter>
-            <Routes>
+              <TopProgressBar />
+              <Routes>
               {/* Public Routes */}
               <Route path="/" element={<HomePage />} />
               <Route path="/quiz" element={<QuizPage />} />

@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
-import { User, ClubMember, MemberContributionRecord } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { User, ClubMember, MemberContributionRecord, ContributionPaymentRequest, MemberContributionSetting } from '../../types';
+import { api } from '../../services/api';
 import { Modal } from '../common/Modal';
+import { PayContributionModal } from './budget/PayContributionModal';
+import { PaymentSlipViewerModal } from './budget/PaymentSlipViewerModal';
 import {
   Wallet,
   AlertCircle,
@@ -18,7 +21,12 @@ import {
   ArrowUpRight,
   Sparkles,
   Info,
-  DollarSign
+  DollarSign,
+  Upload,
+  Eye,
+  Ban,
+  XCircle,
+  ExternalLink
 } from 'lucide-react';
 import { formatDateTime } from '../../utils/formatters';
 
@@ -80,10 +88,49 @@ export const MemberBudgetReportView: React.FC<MemberBudgetReportViewProps> = ({
   lang
 }) => {
   const isDh = lang === 'dhivehi';
+  const isAdmin = (user?.roleName || user?.roleId || '').toLowerCase().includes('admin') || user?.roleId === 'role_admin' || user?.roleName === 'Admin';
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [selectedReceipt, setSelectedReceipt] = useState<MemberContributionRecord | null>(null);
   const [showStatementModal, setShowStatementModal] = useState<boolean>(false);
   const [copiedAccount, setCopiedAccount] = useState<boolean>(false);
+
+  // Self-Payment Workflow States
+  const [payModalOpen, setPayModalOpen] = useState<boolean>(false);
+  const [selectedPaymentRequest, setSelectedPaymentRequest] = useState<ContributionPaymentRequest | null>(null);
+  const [paymentRequests, setPaymentRequests] = useState<ContributionPaymentRequest[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState<boolean>(false);
+  const [settingsData, setSettingsData] = useState<MemberContributionSetting | null>(null);
+  const [depositAccountData, setDepositAccountData] = useState<any>(null);
+
+  const fetchMyContributions = async () => {
+    if (isAdmin) return;
+    try {
+      setLoadingRequests(true);
+      const res = await api.getMyContributions();
+      if (res) {
+        setPaymentRequests(res.paymentRequests || []);
+        if (res.settings) setSettingsData(res.settings);
+        if (res.depositAccount) setDepositAccountData(res.depositAccount);
+      }
+    } catch (err) {
+      console.warn('Could not load member contributions info:', err);
+    } finally {
+      setLoadingRequests(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMyContributions();
+  }, [user.id, isAdmin]);
+
+  const handleCancelRequest = async (id: string) => {
+    try {
+      await api.cancelContributionPaymentRequest(id);
+      setPaymentRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled' } : r));
+    } catch (err: any) {
+      alert(err.message || 'Failed to cancel request.');
+    }
+  };
 
   const summary = budgetData?.summary;
   const clubStats = budgetData?.clubStats;
@@ -105,10 +152,10 @@ export const MemberBudgetReportView: React.FC<MemberBudgetReportViewProps> = ({
   };
 
   // Deposit account fallback
-  const depositAcc = summary?.depositAccount || {
+  const depositAcc = depositAccountData || summary?.depositAccount || {
     id: 'acc_main',
-    accountName: 'Ananda Recreation Club',
-    accountNumber: '7701123456001',
+    accountName: 'Aanandha Recreation Club',
+    accountNumber: '7730000308018',
     bankName: 'Bank of Maldives (BML)',
     currency: 'MVR'
   };
@@ -134,7 +181,7 @@ export const MemberBudgetReportView: React.FC<MemberBudgetReportViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-3 w-full sm:w-auto">
+        <div className="flex items-center gap-2.5 w-full sm:w-auto flex-wrap">
           {/* Year Selector */}
           <select
             value={selectedYear}
@@ -145,6 +192,19 @@ export const MemberBudgetReportView: React.FC<MemberBudgetReportViewProps> = ({
             <option value={2025}>2025</option>
             <option value={2024}>2024</option>
           </select>
+
+          {/* Pay Contribution / Submit Slip (Non-Admin Only) */}
+          {!isAdmin ? (
+            <button
+              type="button"
+              id="header-pay-contribution-btn"
+              onClick={() => setPayModalOpen(true)}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-950/50 transition-all cursor-pointer whitespace-nowrap"
+            >
+              <CreditCard className="w-4 h-4" />
+              <span>{isDh ? 'ފީ ދެއްކުން / ސްލިޕް ފޮނުވުން' : 'Pay Dues / Submit Slip'}</span>
+            </button>
+          ) : null}
 
           {/* Print Statement Button */}
           <button
@@ -157,6 +217,21 @@ export const MemberBudgetReportView: React.FC<MemberBudgetReportViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Admin Privilege Notice */}
+      {isAdmin && (
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-3">
+          <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0" />
+          <div>
+            <p className="font-bold">{isDh ? 'އެޑްމިން އެކައުންޓް (Administrative View)' : 'Administrator View'}</p>
+            <p className="text-slate-300 text-[11px] mt-0.5">
+              {isDh
+                ? 'އެޑްމިން ބޭފުޅުން މެންބަރޝިޕް ފީ ބަލައިގަތުމަށާއި ބަލަހައްޓަން ބޭނުންކުރައްވާނީ ބަޖެޓް & ފައިނޭންސް މޮޑިއުލެވެ.'
+                : 'Admin accounts cannot use the member self-payment interface. To record, verify, or manage contributions, please visit Budget & Finance → Fund Manager.'}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* 1. PERSONAL DUES SUMMARY 4-CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -598,9 +673,180 @@ export const MemberBudgetReportView: React.FC<MemberBudgetReportViewProps> = ({
                 {copiedAccount ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               </button>
             </div>
+
+            {!isAdmin && (
+              <button
+                type="button"
+                id="section-submit-slip-btn"
+                onClick={() => setPayModalOpen(true)}
+                className="w-full mt-2 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 transition cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+                <span>{isDh ? 'ސްލިޕް އަޕްލޯޑްކޮށް ފޮނުއްވާ' : 'Upload Bank Transfer Slip'}</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {/* 4.5. MY PAYMENT SUBMISSIONS & SLIP VERIFICATIONS */}
+      {!isAdmin && (
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <CreditCard className="w-4 h-4" />
+                </span>
+                <h4 className="text-base font-bold font-heading text-white">
+                  {isDh ? 'ފޮނުވާފައިވާ ސްލިޕްތަކާއި ޕޭމަންޓް ރިކުއެސްޓްތައް' : 'My Payment Submissions & Slip Verifications'}
+                </h4>
+              </div>
+              <p className="text-xs text-slate-400">
+                {isDh
+                  ? 'ތިބާ ފޮނުއްވި ބޭންކް ސްލިޕްތަކުގެ ސްޓޭޓަސް (ވެރިފައިކުރެވެމުންދާ ނުވަތަ އެޕްރޫވްވެފައިވާ މިންވަރު).'
+                  : 'Track the verification status of bank payment slips submitted for member dues.'}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setPayModalOpen(true)}
+              className="px-4 py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition shadow"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>{isDh ? 'އާ ސްލިޕެއް ފޮނުއްވާ' : 'Submit New Slip'}</span>
+            </button>
+          </div>
+
+          {paymentRequests.length === 0 ? (
+            <div className="p-8 text-center rounded-2xl bg-slate-950/40 border border-slate-800/80">
+              <Clock className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+              <p className="text-xs text-slate-400">
+                {isDh ? 'މިހާތަނަށް އެއްވެސް ސްލިޕެއް ފޮނުއްވާފައެއް ނުވެއެވެ.' : 'No payment slip submissions found yet.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => setPayModalOpen(true)}
+                className="mt-3 text-xs font-bold text-emerald-400 hover:text-emerald-300 underline"
+              >
+                {isDh ? 'މިހާރު ފީ ދައްކާ ސްލިޕް ފޮނުއްވާ' : 'Pay dues and upload slip now →'}
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400 font-semibold bg-slate-950/60">
+                    <th className="py-3 px-3">Request #</th>
+                    <th className="py-3 px-3">Submitted</th>
+                    <th className="py-3 px-3">Year / Month(s)</th>
+                    <th className="py-3 px-3">Amount</th>
+                    <th className="py-3 px-3">Status</th>
+                    <th className="py-3 px-3">Slip & Ref</th>
+                    <th className="py-3 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {paymentRequests.map((req) => {
+                    const monthsStr = (req.months || [])
+                      .sort((a, b) => a - b)
+                      .map(m => MONTH_NAMES.english[m - 1]?.slice(0, 3) || `M${m}`)
+                      .join(', ');
+
+                    return (
+                      <tr key={req.id} className="hover:bg-slate-850/50 transition">
+                        <td className="py-3 px-3 font-mono font-bold text-white">
+                          {req.requestNumber}
+                        </td>
+                        <td className="py-3 px-3 text-slate-400 whitespace-nowrap">
+                          {new Date(req.submittedAt).toLocaleDateString()}
+                        </td>
+                        <td className="py-3 px-3 text-slate-300">
+                          <span className="font-semibold">{req.year}</span>: {monthsStr}
+                          {req.paymentType === 'annual' && (
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300">
+                              Annual
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 font-mono font-bold text-emerald-400 whitespace-nowrap">
+                          {req.totalAmount} MVR
+                        </td>
+                        <td className="py-3 px-3 whitespace-nowrap">
+                          {req.status === 'pending' && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 border border-amber-500/30 text-amber-400">
+                              <Clock className="w-3 h-3" /> Pending Review
+                            </span>
+                          )}
+                          {req.status === 'approved' && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
+                              <CheckCircle2 className="w-3 h-3" /> Approved
+                            </span>
+                          )}
+                          {req.status === 'rejected' && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/15 border border-rose-500/30 text-rose-400">
+                              <XCircle className="w-3 h-3" /> Rejected
+                            </span>
+                          )}
+                          {req.status === 'cancelled' && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-800 text-slate-400">
+                              <Ban className="w-3 h-3" /> Cancelled
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-slate-400">
+                          <div className="flex items-center gap-1.5">
+                            {req.referenceNumber && (
+                              <span className="font-mono text-[11px] text-slate-300">
+                                {req.referenceNumber}
+                              </span>
+                            )}
+                            {req.slipDownloadUrl && (
+                              <a
+                                href={req.slipDownloadUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-emerald-400 hover:text-emerald-300"
+                                title="View slip file"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPaymentRequest(req)}
+                              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition flex items-center gap-1"
+                            >
+                              <Eye className="w-3 h-3 text-emerald-400" />
+                              <span>View Slip</span>
+                            </button>
+                            {req.status === 'pending' && (
+                              <button
+                                type="button"
+                                onClick={() => handleCancelRequest(req.id)}
+                                className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/25 text-rose-400 text-[11px] font-semibold transition flex items-center gap-1"
+                                title="Cancel this pending submission"
+                              >
+                                <Ban className="w-3 h-3" />
+                                <span>Cancel</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 5. OFFICIAL RECEIPT MODAL */}
       {selectedReceipt && (
@@ -851,6 +1097,38 @@ export const MemberBudgetReportView: React.FC<MemberBudgetReportViewProps> = ({
 
           </div>
         </Modal>
+      )}
+
+      {/* Pay Contribution Modal (Non-Admin Only) */}
+      {!isAdmin && (
+        <PayContributionModal
+          isOpen={payModalOpen}
+          onClose={() => setPayModalOpen(false)}
+          onSuccess={(newReq) => {
+            setPaymentRequests(prev => [newReq, ...prev]);
+            fetchMyContributions();
+          }}
+          member={linkedMember || { fullName: user.fullName, memberNumber: user.username }}
+          settings={settingsData}
+          depositAccount={depositAcc}
+          contributions={allContributions}
+          existingRequests={paymentRequests}
+        />
+      )}
+
+      {/* Payment Slip Viewer Modal */}
+      {selectedPaymentRequest && (
+        <PaymentSlipViewerModal
+          isOpen={Boolean(selectedPaymentRequest)}
+          onClose={() => setSelectedPaymentRequest(null)}
+          request={selectedPaymentRequest}
+          canApprove={false}
+          isCurrentUserOwner={true}
+          onCancel={async (id) => {
+            await handleCancelRequest(id);
+            setSelectedPaymentRequest(null);
+          }}
+        />
       )}
 
     </div>

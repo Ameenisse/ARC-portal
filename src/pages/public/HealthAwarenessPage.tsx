@@ -4,12 +4,17 @@ import { PublicHeader } from '../../components/public/PublicHeader';
 import { PublicFooter } from '../../components/public/PublicFooter';
 import { api } from '../../services/api';
 import { useTableSync } from '../../hooks/useRealtimeSync';
+import { usePublicSiteData } from '../../hooks/usePublicSiteData';
+import { PageLoader } from '../../components/common/PageLoader';
+import { PageTransition } from '../../components/common/PageTransition';
 import { HealthAwarenessItem, PublicSiteData } from '../../types';
 import { 
   HeartPulse, Search, BookOpen, Clock, Calendar, Share2, ArrowRight, ArrowLeft, 
   ChevronRight, ExternalLink, Sparkles, AlertCircle, CheckCircle2, Home, Layers, Tag
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+const CACHED_HEALTH_KEY = 'arc_cached_health_items_v1';
 
 const CATEGORY_ICONS: Record<string, string> = {
   'ޢާންމު ޞިއްޙަތު': '💧',
@@ -48,9 +53,28 @@ const sanitizeHtmlContent = (html: string): string => {
 export const HealthAwarenessPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const [siteData, setSiteData] = useState<PublicSiteData | null>(null);
-  const [items, setItems] = useState<HealthAwarenessItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: siteData } = usePublicSiteData();
+  const [items, setItems] = useState<HealthAwarenessItem[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = sessionStorage.getItem(CACHED_HEALTH_KEY);
+        if (cached) return JSON.parse(cached);
+      } catch (e) {
+        // ignore
+      }
+    }
+    return [];
+  });
+  const [loading, setLoading] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return !sessionStorage.getItem(CACHED_HEALTH_KEY);
+      } catch (e) {
+        return true;
+      }
+    }
+    return true;
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [copiedLink, setCopiedLink] = useState(false);
@@ -58,25 +82,26 @@ export const HealthAwarenessPage: React.FC = () => {
   const topicParam = searchParams.get('topic');
 
   const fetchData = async (silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent && items.length === 0) setLoading(true);
     try {
-      const [siteRes, healthRes] = await Promise.all([
-        api.getPublicSiteData().catch(() => null),
-        api.getPublicHealthAwareness().catch(() => [])
-      ]);
-      if (siteRes) setSiteData(siteRes);
+      const healthRes = await api.getPublicHealthAwareness().catch(() => []);
       if (Array.isArray(healthRes)) {
         setItems(healthRes);
+        try {
+          sessionStorage.setItem(CACHED_HEALTH_KEY, JSON.stringify(healthRes));
+        } catch (e) {
+          // ignore
+        }
       }
     } catch (err) {
       console.error('Failed to load health awareness data:', err);
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData(false);
+    fetchData(items.length > 0);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
@@ -152,51 +177,51 @@ export const HealthAwarenessPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-white" dir="rtl">
-      <PublicHeader 
-        branding={siteData?.branding || { clubName: 'އާނަންދާ ރީކްރިއޭޝަން ކްލަބް', clubAbbreviation: 'ARC' }} 
-        activePath="/health-awareness" 
-        hasEvents={Boolean(siteData?.events && siteData.events.length > 0)} 
-      />
+    <PageTransition>
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-white" dir="rtl">
+        <PublicHeader 
+          branding={siteData?.branding || { clubName: 'އާނަންދާ ރީކްރިއޭޝަން ކްލަބް', clubAbbreviation: 'ARC' }} 
+          activePath="/health-awareness" 
+          hasEvents={Boolean(siteData?.events && siteData.events.length > 0)} 
+        />
 
-      <main className="flex-1 pb-16">
-        {/* Hero Header Section */}
-        <section className="bg-gradient-to-b from-emerald-950/70 via-slate-900 to-slate-950 border-b border-emerald-500/20 py-10 sm:py-14 relative overflow-hidden">
-          <div className="absolute top-0 right-1/4 w-96 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 left-1/4 w-64 h-32 bg-teal-500/10 rounded-full blur-2xl pointer-events-none" />
+        <main className="flex-1 pb-16">
+          {/* Hero Header Section */}
+          <section className="bg-gradient-to-b from-emerald-950/70 via-slate-900 to-slate-950 border-b border-emerald-500/20 py-10 sm:py-14 relative overflow-hidden">
+            <div className="absolute top-0 right-1/4 w-96 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute bottom-0 left-1/4 w-64 h-32 bg-teal-500/10 rounded-full blur-2xl pointer-events-none" />
 
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-4 relative z-10">
-            {/* Breadcrumbs */}
-            <div className="flex items-center justify-center gap-2 text-xs text-slate-400 mb-2">
-              <Link to="/" className="hover:text-emerald-400 flex items-center gap-1 transition-colors">
-                <Home className="w-3.5 h-3.5" />
-                <span>ފެށުން</span>
-              </Link>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-600 rotate-180" />
-              <span className="text-emerald-400 font-semibold">ޞިއްޙީ ހޭލުންތެރިކަމުގެ ބްލޮގް</span>
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-4 relative z-10">
+              {/* Breadcrumbs */}
+              <div className="flex items-center justify-center gap-2 text-xs text-slate-400 mb-2">
+                <Link to="/" className="hover:text-emerald-400 flex items-center gap-1 transition-colors">
+                  <Home className="w-3.5 h-3.5" />
+                  <span>ފެށުން</span>
+                </Link>
+                <ChevronRight className="w-3.5 h-3.5 text-slate-600 rotate-180" />
+                <span className="text-emerald-400 font-semibold">ޞިއްޙީ ހޭލުންތެރިކަމުގެ ބްލޮގް</span>
+              </div>
+
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold uppercase tracking-wider">
+                <HeartPulse className="w-4 h-4 text-emerald-400 animate-pulse" />
+                <span>ޞިއްޙީ ހޭލުންތެރިކަން & ދުޅަހެޔޮކަން</span>
+              </div>
+
+              <h1 className="text-2xl sm:text-4xl lg:text-5xl font-extrabold text-white font-heading tracking-tight">
+                ޞިއްޙީ ހޭލުންތެރިކަމުގެ ބްލޮގް
+              </h1>
+
+              <p className="text-slate-300 text-sm sm:text-base max-w-2xl mx-auto leading-relaxed">
+                ދުޅަހެޔޮ، ހަށިހެޔޮ ދިރިއުޅުމަކަށް ބޭނުންތެރި އިރުޝާދުތަކާއި ކާނާއާއި ކަސްރަތާ ގުޅޭ މުހިންމު މަޢުލޫމާތުތައް.
+              </p>
             </div>
+          </section>
 
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold uppercase tracking-wider">
-              <HeartPulse className="w-4 h-4 text-emerald-400 animate-pulse" />
-              <span>ޞިއްޙީ ހޭލުންތެރިކަން & ދުޅަހެޔޮކަން</span>
+          {loading ? (
+            <div className="py-24 text-center max-w-md mx-auto">
+              <PageLoader fullscreen={false} message="ޞިއްޙީ މަޢުލޫމާތުތައް ލޯޑުވަނީ..." />
             </div>
-
-            <h1 className="text-2xl sm:text-4xl lg:text-5xl font-extrabold text-white font-heading tracking-tight">
-              ޞިއްޙީ ހޭލުންތެރިކަމުގެ ބްލޮގް
-            </h1>
-
-            <p className="text-slate-300 text-sm sm:text-base max-w-2xl mx-auto leading-relaxed">
-              ދުޅަހެޔޮ، ހަށިހެޔޮ ދިރިއުޅުމަކަށް ބޭނުންތެރި އިރުޝާދުތަކާއި ކާނާއާއި ކަސްރަތާ ގުޅޭ މުހިންމު މަޢުލޫމާތުތައް.
-            </p>
-          </div>
-        </section>
-
-        {loading ? (
-          <div className="py-24 text-center text-slate-400 max-w-md mx-auto space-y-4">
-            <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto" />
-            <p className="text-sm">ޞިއްޙީ މަޢުލޫމާތުތައް ލޯޑުވަނީ...</p>
-          </div>
-        ) : activeItems.length === 0 ? (
+          ) : activeItems.length === 0 ? (
           <div className="py-24 text-center space-y-4 max-w-md mx-auto px-4">
             <div className="w-16 h-16 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-center mx-auto text-slate-500">
               <BookOpen className="w-8 h-8 text-emerald-500/50" />
@@ -579,8 +604,9 @@ export const HealthAwarenessPage: React.FC = () => {
         )}
       </main>
 
-      <PublicFooter branding={siteData?.branding || { clubName: 'އާނަންދާ ރީކްރިއޭޝަން ކްލަބް', clubAbbreviation: 'ARC' }} />
-    </div>
+        <PublicFooter branding={siteData?.branding || { clubName: 'އާނަންދާ ރީކްރިއޭޝަން ކްލަބް', clubAbbreviation: 'ARC' }} />
+      </div>
+    </PageTransition>
   );
 };
 export default HealthAwarenessPage;

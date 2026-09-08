@@ -63,6 +63,7 @@ import { CategoryAllocationsTab } from '../../components/portal/budget/CategoryA
 import { BudgetReportsTab } from '../../components/portal/budget/BudgetReportsTab';
 import { InvoicesTab } from '../../components/portal/budget/InvoicesTab';
 import { BillViewerModal } from '../../components/portal/budget/BillViewerModal';
+import { ContributionSlipsApprovalTab } from '../../components/portal/budget/ContributionSlipsApprovalTab';
 import { FileText, Paperclip, Upload, ShieldCheck, Eye } from 'lucide-react';
 
 type BudgetTab = 'dashboard' | 'income' | 'expenses' | 'invoices' | 'fund_manager' | 'allocations' | 'accounts' | 'settings' | 'reports';
@@ -116,7 +117,7 @@ export const BudgetPage: React.FC = () => {
   const [membersList, setMembersList] = useState<any[]>([]);
 
   // View modes
-  const [fundViewMode, setFundViewMode] = useState<'roster' | 'annual_matrix'>('roster');
+  const [fundViewMode, setFundViewMode] = useState<'roster' | 'annual_matrix' | 'slips_approval'>('roster');
 
   // Modals state
   const [accountModalOpen, setAccountModalOpen] = useState(false);
@@ -1572,6 +1573,18 @@ export const BudgetPage: React.FC = () => {
                     <FileSpreadsheet className="w-3.5 h-3.5" />
                     <span>12-Month Matrix</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setFundViewMode('slips_approval')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                      fundViewMode === 'slips_approval'
+                        ? 'bg-emerald-500 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <FileCheck className="w-3.5 h-3.5" />
+                    <span>Payment Slips</span>
+                  </button>
                 </div>
 
                 <button
@@ -1615,6 +1628,11 @@ export const BudgetPage: React.FC = () => {
                   setReceiptModalOpen(true);
                 }}
                 onExportCsv={exportContributionsCsv}
+                lang={lang}
+              />
+            ) : fundViewMode === 'slips_approval' ? (
+              <ContributionSlipsApprovalTab
+                onRefreshContributions={loadData}
                 lang={lang}
               />
             ) : (

@@ -1411,11 +1411,20 @@ app.post('/api/portal/users/:id/reset-pin', authenticateSession, requirePermissi
     }
 
     const { id } = req.params;
-    const { newPin, pin } = req.body;
+    const { newPin, confirmPin, pin, requirePinChange = true } = req.body;
     const targetPin = String(newPin || pin || '').trim();
 
     if (!targetPin || !/^\d{4,8}$/.test(targetPin)) {
       return res.status(400).json({ error: 'PIN must be between 4 and 8 numeric digits.' });
+    }
+
+    if (confirmPin !== undefined && confirmPin !== null && String(confirmPin).trim() !== targetPin) {
+      return res.status(400).json({ error: 'New PIN and Confirm PIN do not match.' });
+    }
+
+    const targetUser = await db.getUserById(id);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'User not found.' });
     }
 
     const newSalt = generateSalt();
@@ -1423,20 +1432,35 @@ app.post('/api/portal/users/:id/reset-pin', authenticateSession, requirePermissi
     const updatedUser = await db.updateUser(id, {
       pinHash: newHash,
       pinSalt: newSalt,
-      requirePinChange: false
+      requirePinChange: Boolean(requirePinChange)
     });
 
+    // Revoke all active sessions for that user so they must re-authenticate with new credentials
+    const revokedSessionsCount = await db.revokeAllUserSessions(id);
+
+    // Audit Log: USER_PIN_RESET without storing newPin, pinHash, or pinSalt
     await db.logAudit({
       userId: admin.id,
       username: admin.username,
       fullName: admin.fullName,
-      action: 'ADMIN_CHANGE_USER_PIN',
+      action: 'USER_PIN_RESET',
       module: 'users',
       recordId: id,
-      newValue: { targetUsername: updatedUser.username }
+      newValue: {
+        targetUserId: id,
+        targetUsername: updatedUser.username,
+        performedBy: admin.username,
+        performedAt: new Date().toISOString(),
+        requirePinChange: Boolean(requirePinChange),
+        revokedSessionsCount
+      }
     });
 
-    return res.json({ message: `PIN for user @${updatedUser.username} updated successfully by Admin.`, user: sanitizeUser(updatedUser) });
+    return res.json({
+      success: true,
+      message: `PIN for user @${updatedUser.username} has been reset successfully. ${revokedSessionsCount} active session(s) revoked.`,
+      user: sanitizeUser(updatedUser)
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1828,21 +1852,6 @@ app.post('/api/portal/users/disconnect-member', authenticateSession, async (req:
   }
 });
 
-app.post('/api/portal/users/:id/reset-pin', authenticateSession, requirePermission('users', 'canEdit'), async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { newPin } = req.body;
-    if (!newPin || String(newPin).length < 4) {
-      return res.status(400).json({ error: 'PIN must be at least 4 digits.' });
-    }
-    const salt = generateSalt();
-    const hash = hashPin(String(newPin), salt);
-    await db.updateUser(id, { pinSalt: salt, pinHash: hash, requirePinChange: true });
-    return res.json({ success: true, message: 'User PIN reset successfully.' });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-});
 
 app.put('/api/portal/users/:id/status', authenticateSession, requirePermission('users', 'canEdit'), async (req: Request, res: Response) => {
   try {
@@ -1976,33 +1985,46 @@ app.get('/api/portal/content', authenticateSession, async (req: Request, res: Re
 });
 
 function syncAppIconFiles(imageVal: string) {
+  let tmpSrc = '';
   try {
     if (!imageVal || typeof imageVal !== 'string') return;
+    if (!imageVal.startsWith('data:image/')) return;
     const base64Data = imageVal.replace(/^data:image\/\w+;base64,/, '');
-    if (!base64Data || base64Data.length < 50) return;
+    if (!base64Data || base64Data.length < 100) return;
     const buffer = Buffer.from(base64Data, 'base64');
+    // Verify PNG/JPEG header magic bytes (PNG: 89 50 4E 47, JPEG: FF D8)
+    if (buffer.length < 8) return;
+    const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47;
+    const isJpg = buffer[0] === 0xFF && buffer[1] === 0xD8;
+    const isWebp = buffer.length > 12 && buffer.toString('ascii', 8, 12) === 'WEBP';
+    if (!isPng && !isJpg && !isWebp) return;
+
     const publicDir = path.join(process.cwd(), 'public');
-    const tmpSrc = path.join('/tmp', `uploaded_logo_${Date.now()}.png`);
+    tmpSrc = path.join('/tmp', `uploaded_logo_${Date.now()}.png`);
     fs.writeFileSync(tmpSrc, buffer);
 
     fs.writeFileSync(path.join(publicDir, 'arc-app-icon.png'), buffer);
     fs.writeFileSync(path.join(publicDir, 'logo.png'), buffer);
 
     try {
-      execSync(`convert "${tmpSrc}" -resize 512x512 "${path.join(publicDir, 'pwa-512x512.png')}"`);
-      execSync(`convert "${tmpSrc}" -resize 192x192 "${path.join(publicDir, 'pwa-192x192.png')}"`);
-      execSync(`convert "${tmpSrc}" -resize 180x180 "${path.join(publicDir, 'apple-touch-icon.png')}"`);
-      execSync(`convert "${tmpSrc}" -resize 64x64 "${path.join(publicDir, 'favicon-64.png')}"`);
-      execSync(`convert "${tmpSrc}" -resize 32x32 "${path.join(publicDir, 'favicon-32.png')}"`);
-      execSync(`convert "${tmpSrc}" -resize 16x16 "${path.join(publicDir, 'favicon-16.png')}"`);
+      execSync(`convert "${tmpSrc}" -resize 512x512 "${path.join(publicDir, 'pwa-512x512.png')}"`, { stdio: 'pipe' });
+      execSync(`convert "${tmpSrc}" -resize 192x192 "${path.join(publicDir, 'pwa-192x192.png')}"`, { stdio: 'pipe' });
+      execSync(`convert "${tmpSrc}" -resize 180x180 "${path.join(publicDir, 'apple-touch-icon.png')}"`, { stdio: 'pipe' });
+      execSync(`convert "${tmpSrc}" -resize 64x64 "${path.join(publicDir, 'favicon-64.png')}"`, { stdio: 'pipe' });
+      execSync(`convert "${tmpSrc}" -resize 32x32 "${path.join(publicDir, 'favicon-32.png')}"`, { stdio: 'pipe' });
+      execSync(`convert "${tmpSrc}" -resize 16x16 "${path.join(publicDir, 'favicon-16.png')}"`, { stdio: 'pipe' });
       fs.copyFileSync(path.join(publicDir, 'favicon-64.png'), path.join(publicDir, 'favicon.ico'));
       fs.copyFileSync(path.join(publicDir, 'favicon-64.png'), path.join(process.cwd(), 'app-favicon.ico'));
       console.log('Successfully synchronized app icon and favicons from updated branding!');
     } catch (cmdErr) {
-      console.warn('ImageMagick convert skipped or error:', cmdErr);
+      console.warn('ImageMagick resize skipped.');
     }
   } catch (err) {
     console.error('Failed to sync app icon files:', err);
+  } finally {
+    if (tmpSrc && fs.existsSync(tmpSrc)) {
+      try { fs.unlinkSync(tmpSrc); } catch (_) {}
+    }
   }
 }
 
@@ -3445,6 +3467,414 @@ app.post('/api/portal/budget/contributions/pay', authenticateSession, async (req
     return res.status(201).json(result);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// MEMBER CONTRIBUTION SELF-PAYMENT & APPROVAL WORKFLOW
+// ============================================================
+
+// GET /api/portal/my-contributions - Load member profile, accounts, contributions & payment requests
+app.get('/api/portal/my-contributions', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+
+    let member = null;
+    if (user.memberId) {
+      member = await db.getMemberById(user.memberId);
+    }
+    if (!member) {
+      const members = await db.getMembers();
+      member = members.find((m: any) =>
+        m.userId === user.id ||
+        m.linkedUserId === user.id ||
+        (m.idCardNumber && user.username && m.idCardNumber.toLowerCase() === user.username.toLowerCase())
+      );
+      // Fallback: if user is admin or exco without explicitly linked member, check if there is an active member or first member to test with
+      if (!member && isUserAdmin(user) && members.length > 0) {
+        member = members[0];
+      }
+    }
+
+    const [settings, bankAccounts] = await Promise.all([
+      db.getContributionSettings(),
+      db.getBankAccounts()
+    ]);
+
+    const depositAccount = bankAccounts.find(a => a.id === settings.defaultDepositAccountId) ||
+      bankAccounts.find(a => a.status === 'active') ||
+      bankAccounts[0] ||
+      {
+        id: 'acc_primary_001',
+        accountName: 'Aanandha Recreation Club',
+        accountNumber: '7730000308018',
+        bankName: 'Bank of Maldives (BML)',
+        currentBalance: 0,
+        status: 'active'
+      };
+
+    if (!member) {
+      return res.json({
+        member: null,
+        settings,
+        depositAccount,
+        contributions: [],
+        paymentRequests: [],
+        summary: {
+          paidCount: 0,
+          totalPaid: 0,
+          pendingRequestsCount: 0,
+          hasPendingPayment: false
+        }
+      });
+    }
+
+    const [contributions, paymentRequests] = await Promise.all([
+      db.getMemberContributions({ memberId: member.id }),
+      db.getContributionPaymentRequests({ memberId: member.id })
+    ]);
+
+    const paidCount = contributions.filter(c => c.status === 'paid').length;
+    const totalPaid = contributions.filter(c => c.status === 'paid').reduce((sum, c) => sum + (c.paidAmount || 0), 0);
+    const pendingRequestsCount = paymentRequests.filter(r => r.status === 'pending').length;
+
+    return res.json({
+      member,
+      settings,
+      depositAccount,
+      contributions,
+      paymentRequests,
+      summary: {
+        paidCount,
+        totalPaid,
+        pendingRequestsCount,
+        hasPendingPayment: pendingRequestsCount > 0
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/portal/my-contributions/payment-request - Submit payment slip for review
+app.post('/api/portal/my-contributions/payment-request', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+
+    let member = null;
+    if (req.body.memberId && isUserAdmin(user)) {
+      member = await db.getMemberById(req.body.memberId);
+    }
+    if (!member && user.memberId) {
+      member = await db.getMemberById(user.memberId);
+    }
+    if (!member) {
+      const members = await db.getMembers();
+      member = members.find((m: any) =>
+        m.userId === user.id ||
+        m.linkedUserId === user.id ||
+        (m.idCardNumber && user.username && m.idCardNumber.toLowerCase() === user.username.toLowerCase())
+      );
+      if (!member && isUserAdmin(user) && members.length > 0) {
+        member = members[0];
+      }
+    }
+
+    if (!member) {
+      return res.status(400).json({
+        error: 'No linked ARC Club Member found for your account.'
+      });
+    }
+
+    const {
+      targetContributionId,
+      slipDownloadUrl,
+      slipStoragePath,
+      slipFileName,
+      slipMimeType,
+      slipFileSize,
+      memberNote = ''
+    } = req.body;
+
+    if (!slipDownloadUrl) {
+      return res.status(400).json({ error: 'A valid bank payment slip image or document is required.' });
+    }
+
+    const settings = await db.getContributionSettings();
+    const monthlyFee = Number(settings.monthlyFee || 50);
+
+    // Fetch existing contributions for this member across all years to find oldest unpaid
+    const allMemberContribs = await db.getMemberContributions({ memberId: member.id });
+    const existingRequests = await db.getContributionPaymentRequests({ memberId: member.id, status: 'pending' });
+    const currentlyPendingDocIds = new Set(existingRequests.flatMap(r => r.contributionRecordIds || []));
+
+    let chosenYear: number = new Date().getFullYear();
+    let chosenMonths: number[] = [];
+    let baseAmount: number = monthlyFee;
+    let fineAmount: number = 0;
+    let discountAmount: number = 0;
+    let targetContributionRecord: any = null;
+
+    if (targetContributionId) {
+      targetContributionRecord = allMemberContribs.find(c => c.id === targetContributionId);
+      if (targetContributionRecord && targetContributionRecord.memberId === member.id) {
+        chosenYear = targetContributionRecord.year;
+        chosenMonths = [targetContributionRecord.month];
+        baseAmount = targetContributionRecord.baseAmount || monthlyFee;
+        fineAmount = targetContributionRecord.fineAmount || 0;
+        discountAmount = targetContributionRecord.discountAmount || 0;
+      }
+    }
+
+    if (!targetContributionRecord) {
+      // Priority: Find oldest unpaid contribution that isn't already paid or pending
+      const unpaidPast = allMemberContribs
+        .filter(c => c.status !== 'paid' && !currentlyPendingDocIds.has(c.id))
+        .sort((a, b) => {
+          if (a.year !== b.year) return a.year - b.year;
+          return a.month - b.month;
+        });
+
+      if (unpaidPast.length > 0) {
+        targetContributionRecord = unpaidPast[0];
+        chosenYear = targetContributionRecord.year;
+        chosenMonths = [targetContributionRecord.month];
+        baseAmount = targetContributionRecord.baseAmount || monthlyFee;
+        fineAmount = targetContributionRecord.fineAmount || 0;
+        discountAmount = targetContributionRecord.discountAmount || 0;
+      } else {
+        // Use currently due contribution (current month and year)
+        const now = new Date();
+        chosenYear = now.getFullYear();
+        const curMonth = now.getMonth() + 1;
+        chosenMonths = [curMonth];
+        baseAmount = monthlyFee;
+
+        if (settings.enableAutoFines) {
+          const dueDay = settings.dueDayOfMonth || 10;
+          const grace = settings.gracePeriodDays || 5;
+          const dueDate = new Date(chosenYear, curMonth - 1, dueDay);
+          dueDate.setDate(dueDate.getDate() + grace);
+          if (now > dueDate) {
+            const diffDays = Math.max(0, Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 3600 * 24)));
+            fineAmount = Math.min(diffDays * (settings.finePerDay || 5), monthlyFee * 2);
+          }
+        }
+      }
+    }
+
+    const totalAmount = Math.max(0, baseAmount + fineAmount - discountAmount);
+
+    const bankAccounts = await db.getBankAccounts();
+    const depositAccount = bankAccounts.find(a => a.id === settings.defaultDepositAccountId) ||
+      bankAccounts.find(a => a.status === 'active') ||
+      bankAccounts[0] ||
+      {
+        id: 'acc_primary_001',
+        accountName: 'Aanandha Recreation Club',
+        accountNumber: '7730000308018',
+        bankName: 'Bank of Maldives (BML)'
+      };
+
+    const newRequest = await db.createContributionPaymentRequest({
+      userId: user.id,
+      memberId: member.id,
+      memberNumber: member.memberNumber,
+      memberName: member.fullName,
+      year: Number(chosenYear),
+      paymentType: 'single_month',
+      months: chosenMonths,
+      baseAmount,
+      fineAmount,
+      discountAmount,
+      totalAmount,
+      accountId: depositAccount.id,
+      accountName: depositAccount.accountName,
+      accountNumber: depositAccount.accountNumber || '',
+      bankName: depositAccount.bankName || 'Bank of Maldives',
+      paymentMethod: 'bank_transfer',
+      referenceNumber: '', // Reference number is entered exclusively during approval by reviewer
+      slipStoragePath,
+      slipDownloadUrl,
+      slipFileName,
+      slipMimeType,
+      slipFileSize,
+      memberNote: memberNote.trim(),
+      status: 'pending',
+      contributionRecordIds: targetContributionRecord?.id ? [targetContributionRecord.id] : []
+    });
+
+    // Create Audit Log
+    await db.createAuditLog({
+      userId: user.id,
+      username: user.username,
+      action: 'create',
+      module: 'budget',
+      targetId: newRequest.id,
+      details: `Submitted contribution payment request ${newRequest.requestNumber} for ${member.fullName} (${totalAmount} MVR)`
+    });
+
+    // Send notification to Budget reviewers
+    try {
+      await db.createAppNotification({
+        title: 'New Member Contribution Payment',
+        message: `${member.fullName} submitted a payment slip for MVR ${totalAmount} (${newRequest.requestNumber}). Awaiting verification.`,
+        type: 'info',
+        link: '/portal/budget'
+      });
+    } catch (_) {}
+
+    return res.status(201).json(newRequest);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/portal/my-contributions/payment-request/:id/cancel - Cancel pending request
+app.post('/api/portal/my-contributions/payment-request/:id/cancel', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    let memberId = user.memberId;
+    if (!memberId) {
+      const members = await db.getMembers();
+      const m = members.find((m: any) => m.userId === user.id || m.linkedUserId === user.id);
+      if (m) memberId = m.id;
+    }
+
+    if (!memberId) {
+      return res.status(403).json({ error: 'No linked member profile found.' });
+    }
+
+    const cancelled = await db.cancelContributionPaymentRequest(req.params.id, memberId);
+    await db.createAuditLog({
+      userId: user.id,
+      username: user.username,
+      action: 'cancel',
+      module: 'budget',
+      targetId: cancelled.id,
+      details: `Cancelled contribution payment request ${cancelled.requestNumber}`
+    });
+
+    return res.json(cancelled);
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+// GET /api/portal/budget/contribution-payment-requests - Reviewer list of requests
+app.get('/api/portal/budget/contribution-payment-requests', authenticateSession, requirePermission('budget', 'canView'), async (req: Request, res: Response) => {
+  try {
+    const { status, memberId, year } = req.query as Record<string, string>;
+    const requests = await db.getContributionPaymentRequests({
+      status,
+      memberId,
+      year: year ? Number(year) : undefined
+    });
+
+    const pendingCount = requests.filter(r => r.status === 'pending').length;
+    const approvedCount = requests.filter(r => r.status === 'approved').length;
+    const rejectedCount = requests.filter(r => r.status === 'rejected').length;
+
+    return res.json({
+      requests,
+      pendingCount,
+      approvedCount,
+      rejectedCount,
+      totalCount: requests.length
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/portal/budget/contribution-payment-requests/:id/approve - Approve request atomically
+app.post('/api/portal/budget/contribution-payment-requests/:id/approve', authenticateSession, requirePermission('budget', 'canApprove'), async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const { approvalNote, referenceNumber, approvedAmount, noReferenceException } = req.body;
+    const cleanRef = String(referenceNumber || '').trim();
+
+    if (!cleanRef && !noReferenceException) {
+      return res.status(400).json({ error: 'Payment Reference Number is required before approving payment request.' });
+    }
+
+    const result = await db.approveContributionPaymentRequest(
+      req.params.id,
+      { id: user.id, fullName: user.fullName || user.username },
+      { approvalNote, referenceNumber: cleanRef, approvedAmount: approvedAmount ? Number(approvedAmount) : undefined }
+    );
+
+    // Audit Log
+    await db.createAuditLog({
+      userId: user.id,
+      username: user.username,
+      action: 'approve',
+      module: 'budget',
+      targetId: result.request.id,
+      details: `Approved contribution payment ${result.request.requestNumber} for ${result.request.memberName} (${result.request.totalAmount} MVR). Income record ${result.incomeRecord.id} generated.`
+    });
+
+    // Notify member user
+    if (result.request.userId) {
+      try {
+        await db.createAppNotification({
+          recipientId: result.request.userId,
+          title: 'Contribution Payment Approved',
+          message: `Your ARC membership contribution payment (${result.request.requestNumber}) for MVR ${result.request.totalAmount} has been verified and approved.`,
+          type: 'success',
+          link: '/portal'
+        });
+      } catch (_) {}
+    }
+
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /api/portal/budget/contribution-payment-requests/:id/reject - Reject request
+app.post('/api/portal/budget/contribution-payment-requests/:id/reject', authenticateSession, requirePermission('budget', 'canApprove'), async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const { rejectionReason } = req.body;
+
+    if (!rejectionReason || !rejectionReason.trim()) {
+      return res.status(400).json({ error: 'A reason for rejection must be provided.' });
+    }
+
+    const updated = await db.rejectContributionPaymentRequest(
+      req.params.id,
+      { id: user.id, fullName: user.fullName || user.username },
+      rejectionReason.trim()
+    );
+
+    // Audit Log
+    await db.createAuditLog({
+      userId: user.id,
+      username: user.username,
+      action: 'reject',
+      module: 'budget',
+      targetId: updated.id,
+      details: `Rejected contribution payment ${updated.requestNumber} for ${updated.memberName}. Reason: ${rejectionReason}`
+    });
+
+    // Notify member user
+    if (updated.userId) {
+      try {
+        await db.createAppNotification({
+          recipientId: updated.userId,
+          title: 'Contribution Payment Rejected',
+          message: `Your ARC membership contribution payment (${updated.requestNumber}) was not approved. Reason: ${rejectionReason}`,
+          type: 'error',
+          link: '/portal'
+        });
+      } catch (_) {}
+    }
+
+    return res.json(updated);
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
   }
 });
 

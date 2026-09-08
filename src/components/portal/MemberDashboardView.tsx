@@ -1,9 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { User, UserPerformanceData, ClubMember, MemberDashboardWidgetSettings } from '../../types';
+import {
+  User,
+  UserPerformanceData,
+  ClubMember,
+  MemberDashboardWidgetSettings,
+  ContributionPaymentRequest,
+  MemberContributionSetting,
+  MemberContributionRecord
+} from '../../types';
 import { api } from '../../services/api';
 import { useToast } from '../common/Toast';
 import { ClubRulesModal } from './ClubRulesModal';
 import { MemberBudgetReportView } from './MemberBudgetReportView';
+import { PayContributionModal } from './budget/PayContributionModal';
+import { MemberPerformanceStatusCard } from './MemberPerformanceStatusCard';
+import { UserPerformanceModal } from './UserPerformanceModal';
 import { usePortalLanguage } from '../../hooks/usePortalLanguage';
 import {
   UserCheck,
@@ -30,7 +41,15 @@ import {
   Wallet,
   FileText,
   DollarSign,
-  AlertCircle
+  AlertCircle,
+  CreditCard,
+  Upload,
+  Copy,
+  Check,
+  Building2,
+  Calculator,
+  Loader2,
+  Image as ImageIcon
 } from 'lucide-react';
 import { formatDateTime } from '../../utils/formatters';
 
@@ -49,10 +68,26 @@ const DEFAULT_WIDGET_SETTINGS: MemberDashboardWidgetSettings = {
   showAttendanceHistory: true,
   showClubRulesQuickButton: true,
   showQuizQuickButton: true,
+  showFeePayQuickButton: true,
   allowMemberConnectProfile: true,
   showBudgetStats: true,
   showPersonalBudgetReport: true
 };
+
+const MONTH_NAMES = [
+  { num: 1, en: 'January', dv: 'ޖެނުއަރީ' },
+  { num: 2, en: 'February', dv: 'ފެބްރުއަރީ' },
+  { num: 3, en: 'March', dv: 'މާރިޗު' },
+  { num: 4, en: 'April', dv: 'އޭޕްރީލް' },
+  { num: 5, en: 'May', dv: 'މެއި' },
+  { num: 6, en: 'June', dv: 'ޖޫން' },
+  { num: 7, en: 'July', dv: 'ޖުލައި' },
+  { num: 8, en: 'August', dv: 'އޯގަސްޓް' },
+  { num: 9, en: 'September', dv: 'ސެޕްޓެމްބަރ' },
+  { num: 10, en: 'October', dv: 'އޮކްޓޯބަރ' },
+  { num: 11, en: 'November', dv: 'ނޮވެމްބަރ' },
+  { num: 12, en: 'December', dv: 'ޑިސެމްބަރ' }
+];
 
 const translations = {
   dhivehi: {
@@ -123,7 +158,29 @@ const translations = {
     present: 'ޙާޟިރުވި',
     excused: 'ޢުޛުރުވެރި',
     absent: 'ސަލާމުގައި',
-    noAttendance: 'ޙާޟިރީ ރެކޯޑެއް އަދި ފެންނާކަށް ނެތެވެ.'
+    noAttendance: 'ޙާޟިރީ ރެކޯޑެއް އަދި ފެންނާކަށް ނެތެވެ.',
+    submitContributionPayment: 'މެންބަރޝިޕް ފީ ދެއްކުން',
+    submitSlipDesc: 'ބޭންކް އޮފް މޯލްޑިވްސް މެދުވެރިކޮށް ފީ ޓްރާންސްފަރ ކުރައްވައި، ސްލިޕް އަޕްލޯޑްކުރައްވާ.',
+    bmlAccountName: 'އާނަންދާ ރީކްރިއޭޝަން ކްލަބް',
+    bmlBankTitle: 'ބޭންކް އޮފް މޯލްޑިވްސް (BML)',
+    copyAccount: 'އެކައުންޓް ކޮޕީކުރައްވާ',
+    copiedAcc: 'ކޮޕީ ވެއްޖެ!',
+    payContributionBtn: 'ފީ ދައްކާ / ސްލިޕް އަޕްލޯޑްކުރައްވާ',
+    viewHistoryBtn: 'ފީގެ ތަފްޞީލާއި ކަލަންޑަރު ބައްލަވާ',
+    pendingVerificationBadge: 'ވެރިފައިކުރުމުގެ މަރުޙަލާގައި',
+    slipsUnderReview: 'ސްލިޕް ވެރިފައިކުރުމުގެ މަރުޙަލާގައި',
+    monthlyRateLabel: 'މަހު ފީ:',
+    annualDiscountLabel: '12 މަހުގެ ފީ އެއްފަހަރާ ދައްކަވާނަމަ 1 މަހުގެ ފީ ޑިސްކައުންޓް ލިބޭނެ',
+    quickSubmitTitle: 'އަވަހަށް ފީ ދައްކާ ސްލިޕް ފޮނުއްވާ',
+    selectMonth: 'މަސް އިޚްތިޔާރު ކުރައްވާ',
+    selectYear: 'އަހަރު',
+    uploadSlip: 'ސްލިޕް އަޕްލޯޑް ކުރައްވާ',
+    refNoOptional: 'ރިފަރެންސް ނަންބަރު (އިޚްތިޔާރީ)',
+    openFullForm: 'ތަފްޞީލު ބައްލަވާ / ގިނަ މަސްތަކަށް ފީ ދައްކަވާ',
+    submitPaymentBtn: 'ސްލިޕް ފޮނުއްވާ',
+    submitting: 'ފޮނުވެނީ...',
+    chooseSlipFile: 'ސްލިޕް ފައިލް އިޚްތިޔާރުކުރައްވާ (PNG, JPG, PDF)',
+    amountToPay: 'ދައްކަންޖެހޭ މިންވަރު:'
   },
   english: {
     panelTitle: 'Members Panel',
@@ -193,18 +250,49 @@ const translations = {
     present: 'Present',
     excused: 'Excused',
     absent: 'Absent',
-    noAttendance: 'No attendance records found yet.'
+    noAttendance: 'No attendance records found yet.',
+    submitContributionPayment: 'Submit Membership Contribution Payment',
+    submitSlipDesc: 'Transfer your monthly dues to the official ARC bank account and upload your transfer slip for verification.',
+    bmlAccountName: 'Aanandha Recreation Club',
+    bmlBankTitle: 'Bank of Maldives (BML)',
+    copyAccount: 'Copy Account #',
+    copiedAcc: 'Copied!',
+    payContributionBtn: 'Submit Payment & Upload Slip',
+    viewHistoryBtn: 'View Statement & Calendar',
+    pendingVerificationBadge: 'Under Review',
+    slipsUnderReview: 'slip(s) awaiting verification',
+    monthlyRateLabel: 'Monthly Rate:',
+    annualDiscountLabel: 'Annual advance discount: Pay full year (12 months) and receive 1 month free!',
+    quickSubmitTitle: 'Quick Submit Contribution Payment',
+    selectMonth: 'Select Month',
+    selectYear: 'Year',
+    uploadSlip: 'Upload Transfer Slip',
+    refNoOptional: 'Reference Number (Optional)',
+    openFullForm: 'Open Detailed Calculator / Multi-Month Payment',
+    submitPaymentBtn: 'Submit Payment Slip',
+    submitting: 'Submitting...',
+    chooseSlipFile: 'Choose Slip File (PNG, JPG, PDF)',
+    amountToPay: 'Payable Amount:'
   }
 };
 
 export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, onRefreshUser }) => {
   const { showToast } = useToast();
-  const { lang, setLang, dir } = usePortalLanguage();
+  const { lang, dir } = usePortalLanguage();
   const [data, setData] = useState<UserPerformanceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'quiz' | 'attendance' | 'wins' | 'budget'>('overview');
   const [showRulesModal, setShowRulesModal] = useState(false);
+  const [showPerformanceModal, setShowPerformanceModal] = useState(false);
   const [widgetSettings, setWidgetSettings] = useState<MemberDashboardWidgetSettings>(DEFAULT_WIDGET_SETTINGS);
+
+  // Self-Payment modal & contribution states for instant dashboard access
+  const [payModalOpen, setPayModalOpen] = useState<boolean>(false);
+  const [paymentRequests, setPaymentRequests] = useState<ContributionPaymentRequest[]>([]);
+  const [settingsData, setSettingsData] = useState<MemberContributionSetting | null>(null);
+  const [depositAccountData, setDepositAccountData] = useState<any>(null);
+  const [myContributions, setMyContributions] = useState<MemberContributionRecord[]>([]);
+  const [copiedAccount, setCopiedAccount] = useState<boolean>(false);
 
   const txt = translations[lang];
 
@@ -240,6 +328,7 @@ export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, 
           showAttendanceHistory: getVal('showAttendanceHistory', true),
           showClubRulesQuickButton: getVal('showClubRulesQuickButton', true),
           showQuizQuickButton: getVal('showQuizQuickButton', true),
+          showFeePayQuickButton: getVal('showFeePayQuickButton', true),
           allowMemberConnectProfile: getVal('allowMemberConnectProfile', true),
           showBudgetStats: getVal('showBudgetStats', true),
           showPersonalBudgetReport: getVal('showPersonalBudgetReport', true)
@@ -252,9 +341,47 @@ export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, 
     }
   };
 
+  const isAdmin = Boolean(
+    user.roleName === 'Admin' ||
+    user.roleId === 'role_admin' ||
+    user.roleName?.toLowerCase().includes('admin')
+  );
+
+  const fetchMyContributions = async () => {
+    try {
+      const res = await api.getMyContributions();
+      if (res) {
+        setPaymentRequests(res.paymentRequests || []);
+        if (res.settings) setSettingsData(res.settings);
+        if (res.depositAccount) setDepositAccountData(res.depositAccount);
+        if (res.contributions) setMyContributions(res.contributions);
+      }
+    } catch (err) {
+      console.warn('Could not load member contributions info:', err);
+    }
+  };
+
   useEffect(() => {
     fetchPerformance();
+    fetchMyContributions();
   }, [user.id, user.memberId]);
+
+  const handleCopyAccount = (accNum: string) => {
+    navigator.clipboard.writeText(accNum);
+    setCopiedAccount(true);
+    showToast('success', lang === 'english' ? 'Account number copied to clipboard!' : 'އެކައުންޓް ނަންބަރު ކޮޕީ ކުރެވިއްޖެ!');
+    setTimeout(() => setCopiedAccount(false), 2000);
+  };
+
+  const handlePaymentSuccess = (newRequest: ContributionPaymentRequest) => {
+    setPaymentRequests(prev => [newRequest, ...prev]);
+    showToast('success', lang === 'english'
+      ? `Payment request ${newRequest.requestNumber} submitted! Our finance team will review and verify it shortly.`
+      : `ޕޭމަންޓް ރިކުއެސްޓް ${newRequest.requestNumber} ކާމިޔާބުކަމާއެކު ފޮނުވިއްޖެ! ވެރިފައިކުރުމަށްފަހު ފީ ރެކޯޑު އަޕްޑޭޓްވާނެއެވެ.`);
+    setPayModalOpen(false);
+    fetchPerformance();
+    fetchMyContributions();
+  };
 
   const handleConnectMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -292,11 +419,6 @@ export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, 
 
   const linkedMember: ClubMember | undefined = data?.member;
   const budgetSummary = data?.budget?.summary;
-  const isAdmin = Boolean(
-    user.roleName === 'Admin' ||
-    user.roleId === 'role_admin' ||
-    user.roleName?.toLowerCase().includes('admin')
-  );
 
   return (
     <div className="space-y-8" dir={dir}>
@@ -333,31 +455,17 @@ export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, 
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/* Language Toggle Button (ENG / DHI) */}
-              <div className="flex items-center bg-slate-950/90 border border-slate-700/80 rounded-2xl p-1 gap-1 shadow-inner shrink-0" dir="ltr">
+              {widgetSettings.showFeePayQuickButton && (
                 <button
                   type="button"
-                  onClick={() => setLang('dhivehi')}
-                  className={`px-3 py-1.5 rounded-xl font-extrabold text-xs transition-all cursor-pointer ${
-                    lang === 'dhivehi'
-                      ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-md'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
+                  id="top-banner-pay-fee-btn"
+                  onClick={() => setPayModalOpen(true)}
+                  className="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-emerald-950/40 hover:shadow-emerald-900/40 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer whitespace-nowrap"
                 >
-                  ދިވެހި (DHI)
+                  <CreditCard className="w-4 h-4" />
+                  <span>{lang === 'english' ? 'Pay Membership Fee' : 'މެންބަރޝިޕް ފީ ދައްކަވާ'}</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setLang('english')}
-                  className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
-                    lang === 'english'
-                      ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-md'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  ENG
-                </button>
-              </div>
+              )}
 
               {widgetSettings.showClubRulesQuickButton && (
                 <button
@@ -545,6 +653,7 @@ export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, 
           )}
         </div>
       )}
+
       {/* User Performance Key Metrics Grid */}
       {loading ? (
         <div className="py-12 text-center text-slate-400 space-y-3">
@@ -554,143 +663,12 @@ export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, 
       ) : data ? (
         <div className="space-y-6">
           
-          {/* Main Stat Cards */}
+          {/* Member Individual Performance Status */}
           {widgetSettings.showStatsSummary && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              
-              {/* Overall Score */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2 relative overflow-hidden">
-                <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-xs font-bold uppercase tracking-wider">{txt.overallScore}</span>
-                  <TrendingUp className="w-4 h-4 text-emerald-400" />
-                </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-black font-mono text-white">{data.overallScore}</span>
-                  <span className="text-xs font-bold text-emerald-400">/ 100</span>
-                </div>
-                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all duration-500" 
-                    style={{ width: `${data.overallScore}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Quiz Attempts & Accuracy */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2">
-                <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-xs font-bold uppercase tracking-wider">{txt.quizSubmissions}</span>
-                  <HelpCircle className="w-4 h-4 text-orange-400" />
-                </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-black font-mono text-white">{data.quiz.totalAttempts}</span>
-                  {(data.quiz.revealedAnswersCount || 0) > 0 && (
-                    <span className="text-xs font-bold text-orange-400">({data.quiz.accuracyRate}% {txt.correctAccuracy})</span>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
-                  <span>{data.quiz.correctAnswers} {txt.correctAnswers}</span>
-                  {(data.quiz.pendingRevealCount || 0) > 0 && (
-                    <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 text-[10px] font-medium border border-amber-500/20">
-                      {data.quiz.pendingRevealCount} {txt.pendingRevealShort}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Lucky Draw Wins */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2">
-                <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-xs font-bold uppercase tracking-wider">{txt.luckyWins}</span>
-                  <Trophy className="w-4 h-4 text-amber-400" />
-                </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-black font-mono text-white">{data.quiz.wins.length}</span>
-                  <span className="text-xs font-bold text-amber-400">{txt.prizesSuffix}</span>
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  {data.quiz.wins.filter(w => w.prizeCollectionStatus === 'collected').length} {txt.collected}
-                </p>
-              </div>
-
-              {/* Attendance Rate */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2">
-                <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-xs font-bold uppercase tracking-wider">{txt.attendance}</span>
-                  <Award className="w-4 h-4 text-sky-400" />
-                </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-black font-mono text-white">{data.attendance.attendanceRate}%</span>
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  {lang === 'english' ? `Attended ${data.attendance.totalPresent} Activities` : `${data.attendance.totalPresent} ޙަރަކާތަށް ބައިވެރިވި`}
-                </p>
-              </div>
-
-            </div>
-          )}
-
-          {/* Badges Earned Banner */}
-          {widgetSettings.showBadges && data.badges && data.badges.length > 0 && (
-            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center gap-3">
-              <span className={`text-xs font-bold text-slate-400 flex items-center gap-1.5 ${lang === 'english' ? 'pr-2 border-r' : 'pl-2 border-l'} border-slate-800`}>
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>{txt.badgesEarned}</span>
-              </span>
-              {data.badges.map(b => (
-                <div key={b.id} className="px-3 py-1.5 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-300 text-xs font-bold flex items-center gap-2">
-                  <Award className="w-3.5 h-3.5 text-orange-400" />
-                  <span>{b.title}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Quick Dues Status Card in Overview */}
-          {widgetSettings.showBudgetStats && budgetSummary && (
-            <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl relative overflow-hidden">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="flex items-start gap-3.5">
-                  <div className="p-3 rounded-2xl bg-orange-500/15 border border-orange-500/30 text-orange-400 shrink-0">
-                    <Wallet className="w-5 h-5" />
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-sm sm:text-base font-bold font-heading text-white">
-                        {txt.duesSummaryTitle}
-                      </h4>
-                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                        budgetSummary.status === 'good_standing'
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                          : budgetSummary.status === 'pending'
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                          : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                      }`}>
-                        {budgetSummary.status === 'good_standing'
-                          ? (lang === 'english' ? 'In Good Standing' : 'ގަވާއިދުން ފީ ދައްކާފައި')
-                          : budgetSummary.status === 'pending'
-                          ? (lang === 'english' ? 'Pending Dues' : 'ފީ ދައްކަންޖެހޭ')
-                          : (lang === 'english' ? 'Overdue Dues' : 'މުއްދަތު ހަމަވެފައި')}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
-                      <span>{txt.totalPaidDues} <strong className="text-emerald-400 font-mono">{budgetSummary.totalPaid} MVR</strong></span>
-                      <span>{txt.pendingDues} <strong className={budgetSummary.totalPending > 0 ? 'text-rose-400 font-mono font-bold' : 'text-slate-300 font-mono'}>{budgetSummary.totalPending} MVR</strong></span>
-                      <span>{txt.totalFines} <strong className="text-amber-400 font-mono">{budgetSummary.totalFines} MVR</strong></span>
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('budget')}
-                  className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-orange-500/20 transition-all cursor-pointer whitespace-nowrap self-end sm:self-center"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>{txt.viewBudgetDetails}</span>
-                </button>
-              </div>
-            </div>
+            <MemberPerformanceStatusCard
+              data={data}
+              onOpenReport={() => setShowPerformanceModal(true)}
+            />
           )}
 
           {/* Tabbed Performance Records */}
@@ -960,6 +938,29 @@ export const MemberDashboardView: React.FC<MemberDashboardViewProps> = ({ user, 
       ) : null}
 
       <ClubRulesModal isOpen={showRulesModal} onClose={() => setShowRulesModal(false)} />
+
+      <PayContributionModal
+        isOpen={payModalOpen}
+        onClose={() => setPayModalOpen(false)}
+        onSuccess={handlePaymentSuccess}
+        member={linkedMember || { fullName: user.fullName, memberNumber: user.username }}
+        settings={settingsData}
+        depositAccount={depositAccountData || {
+          bankName: 'Bank of Maldives (BML)',
+          accountName: 'Aanandha Recreation Club',
+          accountNumber: '7730000308018',
+          currency: 'MVR'
+        }}
+        contributions={myContributions}
+        existingRequests={paymentRequests}
+      />
+
+      <UserPerformanceModal
+        isOpen={showPerformanceModal}
+        onClose={() => setShowPerformanceModal(false)}
+        userId={user.id}
+        userName={user.fullName || user.username}
+      />
     </div>
   );
 };
