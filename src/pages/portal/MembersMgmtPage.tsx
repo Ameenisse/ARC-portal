@@ -23,7 +23,10 @@ import {
   Shield,
   Download,
   X,
-  Filter
+  Filter,
+  Coins,
+  CalendarClock,
+  AlertCircle
 } from 'lucide-react';
 
 export const MembersMgmtPage: React.FC = () => {
@@ -53,6 +56,10 @@ export const MembersMgmtPage: React.FC = () => {
     excoDesignation: '',
     status: 'active' as ClubMember['status'],
     joinedDate: new Date().toISOString().split('T')[0],
+    membershipFeeStartDate: new Date().toISOString().split('T')[0],
+    deactivationDate: '',
+    deactivationReason: '',
+    creditBalance: 0,
     notes: ''
   });
 
@@ -92,6 +99,7 @@ export const MembersMgmtPage: React.FC = () => {
 
   const handleOpenAddModal = () => {
     setEditingMember(null);
+    const today = new Date().toISOString().split('T')[0];
     setFormData({
       memberNumber: `ARC-M-${String(members.length + 1).padStart(3, '0')}`,
       fullName: '',
@@ -102,7 +110,11 @@ export const MembersMgmtPage: React.FC = () => {
       memberType: 'standard',
       excoDesignation: '',
       status: 'active',
-      joinedDate: new Date().toISOString().split('T')[0],
+      joinedDate: today,
+      membershipFeeStartDate: today,
+      deactivationDate: '',
+      deactivationReason: '',
+      creditBalance: 0,
       notes: ''
     });
     setIsModalOpen(true);
@@ -121,6 +133,10 @@ export const MembersMgmtPage: React.FC = () => {
       excoDesignation: member.excoDesignation || '',
       status: member.status,
       joinedDate: member.joinedDate || new Date().toISOString().split('T')[0],
+      membershipFeeStartDate: member.membershipFeeStartDate || member.joinedDate || new Date().toISOString().split('T')[0],
+      deactivationDate: member.deactivationDate || '',
+      deactivationReason: member.deactivationReason || '',
+      creditBalance: Number(member.creditBalance || 0),
       notes: member.notes || ''
     });
     setIsModalOpen(true);
@@ -340,6 +356,24 @@ export const MembersMgmtPage: React.FC = () => {
                         <span>ގުޅުނު ތާރީޚު: {formatDate(member.joinedDate || member.createdAt)}</span>
                       </div>
                     )}
+                    {member.membershipFeeStartDate && (
+                      <div className="flex items-center gap-2 text-xs text-orange-400/90 font-medium">
+                        <CalendarClock className="w-3.5 h-3.5 text-orange-500" />
+                        <span>ފީ ފެށޭ ތާރީޚު: {formatDate(member.membershipFeeStartDate)}</span>
+                      </div>
+                    )}
+                    {member.status === 'inactive' && member.deactivationDate && (
+                      <div className="flex items-center gap-2 text-xs text-rose-400 font-medium">
+                        <AlertCircle className="w-3.5 h-3.5 text-rose-500" />
+                        <span>ބާތިލުކުރި ތާރީޚު: {formatDate(member.deactivationDate)}</span>
+                      </div>
+                    )}
+                    {(Number(member.creditBalance) > 0) && (
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-md text-xs font-semibold text-emerald-400">
+                        <Coins className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>ކެރީ ފޯވާޑް ބާކީ: {member.creditBalance} MVR</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -510,7 +544,14 @@ export const MembersMgmtPage: React.FC = () => {
                     </label>
                     <select
                       value={formData.status}
-                      onChange={e => setFormData({ ...formData, status: e.target.value as any })}
+                      onChange={e => {
+                        const nextStatus = e.target.value as any;
+                        setFormData({
+                          ...formData,
+                          status: nextStatus,
+                          deactivationDate: nextStatus === 'inactive' ? (formData.deactivationDate || new Date().toISOString().split('T')[0]) : ''
+                        });
+                      }}
                       className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-orange-500"
                     >
                       <option value="active">އެކްޓިވް (Active)</option>
@@ -529,6 +570,90 @@ export const MembersMgmtPage: React.FC = () => {
                       className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-orange-500"
                     />
                   </div>
+                </div>
+
+                {/* Membership Fee & Auto-Billing Settings */}
+                <div className="p-4 rounded-xl bg-slate-950/80 border border-orange-500/20 space-y-4">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-orange-400">
+                    <CalendarClock className="w-4 h-4 text-orange-500" />
+                    <span>މެންބަރޝިޕް ފީ އަދި ޖޫރިމަނާ ބެލެހެއްޓުން (Fee & Auto-Fine Schedule)</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">
+                        ފީ ދައްކަން ފަށާ ތާރީޚު (Fee Start Date) *
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={formData.membershipFeeStartDate}
+                        onChange={e => setFormData({ ...formData, membershipFeeStartDate: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-750 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-orange-500"
+                      />
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        މި ތާރީޚުން ފެށިގެން މި މެންބަރަށް މަހީ ފީ އަދި ޖޫރިމަނާ އޮޓޯއިން ހިސާބުކުރެވޭނެ.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center justify-between">
+                        <span>ކެރީ ފޯވާޑް ބާކީ (Credit Balance)</span>
+                        <span className="text-[10px] text-emerald-400 font-mono">MVR</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={formData.creditBalance}
+                        onChange={e => setFormData({ ...formData, creditBalance: Number(e.target.value) || 0 })}
+                        placeholder="0"
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-750 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-orange-500"
+                      />
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        އިތުރަށް ދައްކާފައިވާ ބާކީ، ކުރިއަށް އޮތް މަސްތަކަށް އޮޓޯއިން ކެނޑޭނެ.
+                      </p>
+                    </div>
+                  </div>
+
+                  {formData.status === 'inactive' && (
+                    <div className="p-3 bg-rose-950/30 border border-rose-800/40 rounded-lg space-y-3">
+                      <div className="flex items-center gap-1.5 text-xs font-medium text-rose-400">
+                        <AlertCircle className="w-4 h-4 text-rose-400" />
+                        <span>މެންބަރުކަން ބާތިލުކުރާ ތާރީޚު ކަނޑައެޅުން (Deactivation Period)</span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-300 mb-1">
+                            ބާތިލުކުރި ތާރީޚު (Deactivation Date)
+                          </label>
+                          <input
+                            type="date"
+                            value={formData.deactivationDate}
+                            onChange={e => setFormData({ ...formData, deactivationDate: e.target.value })}
+                            className="w-full px-3 py-2 bg-slate-900 border border-rose-900/50 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-rose-500"
+                          />
+                          <p className="text-[11px] text-slate-400 mt-1">
+                            މި ތާރީޚުން ފެށިގެން މި މެންބަރަށް އިތުރު ފީއެއް އަދި ޖޫރިމަނާއެއް ނުހިނގާނެ.
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-slate-300 mb-1">
+                            ބާތިލުކުރި ސަބަބު (Reason)
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.deactivationReason}
+                            onChange={e => setFormData({ ...formData, deactivationReason: e.target.value })}
+                            placeholder="މެންބަރު އެދިގެން / ރަށުން ބޭރަށް ބަދަލުވުން"
+                            className="w-full px-3 py-2 bg-slate-900 border border-rose-900/50 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-rose-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">

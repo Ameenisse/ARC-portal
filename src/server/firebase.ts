@@ -255,6 +255,7 @@ export class CollectionRefWrapper {
           id: d.id,
           ref: new DocRefWrapper(d.ref, this.name, d.id),
           exists: true,
+          existsFn: () => true,
           data: () => d.data()
         }))
       };

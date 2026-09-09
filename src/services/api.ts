@@ -401,22 +401,28 @@ export const api = {
   }>('/api/portal/my-contributions'),
 
   submitContributionPaymentRequest: (data: {
-    targetContributionId?: string;
-    year?: number;
-    paymentType?: 'single_month' | 'multiple_months' | 'annual';
-    months?: number[];
-    amount?: number;
     slipDownloadUrl: string;
+    slipDataUrl?: string;
     slipStoragePath?: string;
     slipFileName?: string;
     slipMimeType?: string;
     slipFileSize?: number;
-    referenceNumber?: string;
     memberNote?: string;
+    amountPaid?: number;
   }) => request<any>('/api/portal/my-contributions/payment-request', { method: 'POST', body: JSON.stringify(data) }),
 
   cancelContributionPaymentRequest: (id: string) =>
     request<any>(`/api/portal/my-contributions/payment-request/${id}/cancel`, { method: 'POST' }),
+
+  getContributionPaymentRequestsSummary: () =>
+    request<{
+      pending: number;
+      submittedToday: number;
+      approvedThisMonth: number;
+      approved: number;
+      rejected: number;
+      total: number;
+    }>('/api/portal/budget/contribution-payment-requests/summary'),
 
   getContributionPaymentRequests: (params?: { status?: string; memberId?: string; year?: number }) => {
     const query = new URLSearchParams(params as any).toString();
@@ -429,14 +435,65 @@ export const api = {
     }>(`/api/portal/budget/contribution-payment-requests${query ? `?${query}` : ''}`);
   },
 
-  approveContributionPaymentRequest: (id: string, data?: { approvalNote?: string; referenceNumber?: string; approvedAmount?: number; noReferenceException?: boolean }) =>
-    request<{ success: boolean; request: any; incomeRecord: any }>(`/api/portal/budget/contribution-payment-requests/${id}/approve`, {
+  getContributionWaterfallPreview: (memberId: string, amount: number) =>
+    request<{
+      memberId: string;
+      memberName: string;
+      amountPaid: number;
+      creditBalanceBefore: number;
+      totalAvailable: number;
+      allocations: Array<{
+        contributionId: string;
+        year: number;
+        month: number;
+        monthName: string;
+        baseFeeDue: number;
+        baseFeePaid: number;
+        fineDue: number;
+        finePaid: number;
+        totalPaid: number;
+        statusAfter: 'paid' | 'partial' | 'pending';
+      }>;
+      totalBasePaid: number;
+      totalFinesPaid: number;
+      totalApplied: number;
+      creditBalanceAfter: number;
+      carryForwardCredit: number;
+    }>(`/api/portal/budget/members/${memberId}/waterfall-preview?amount=${amount}`),
+
+  approveContributionPaymentRequest: (id: string, data: {
+    referenceNumber: string;
+    paymentType: 'monthly' | 'annual' | 'waterfall';
+    month?: number;
+    accountId: string;
+    approvalNote?: string;
+    amountPaid?: number;
+    approvedAmount?: number;
+  }) =>
+    request<{ success?: boolean; request: any; incomeRecord: any }>(`/api/portal/budget/contribution-payment-requests/${id}/approve`, {
       method: 'POST',
-      body: JSON.stringify(data || {})
+      body: JSON.stringify(data)
     }),
 
   rejectContributionPaymentRequest: (id: string, data: { rejectionReason: string }) =>
     request<{ success: boolean; request: any }>(`/api/portal/budget/contribution-payment-requests/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
+
+  updateContributionPaymentRequestSlip: (
+    id: string,
+    data: {
+      slipDownloadUrl: string;
+      slipDataUrl?: string;
+      slipStoragePath?: string;
+      slipFileName?: string;
+      slipMimeType?: string;
+      slipFileSize?: number;
+      referenceNumber?: string;
+    }
+  ) =>
+    request<any>(`/api/portal/budget/contribution-payment-requests/${id}/slip`, {
       method: 'POST',
       body: JSON.stringify(data)
     }),
@@ -449,7 +506,7 @@ export const api = {
   deleteBudgetAllocation: (id: string) => request<any>(`/api/portal/budget/allocations/${id}`, { method: 'DELETE' }),
 
   uploadFile: (data: { fileName: string; fileType: string; fileData: string; folder?: string }) =>
-    request<{ url: string; fileName: string; storage: string }>('/api/portal/upload', {
+    request<{ url: string; fileName: string; storage: string; storagePath?: string }>('/api/portal/upload', {
       method: 'POST',
       body: JSON.stringify(data)
     }),

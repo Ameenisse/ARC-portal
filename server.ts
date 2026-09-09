@@ -9,7 +9,7 @@ import { createServer as createViteServer } from 'vite';
 import { db, verifyPin, hashPin, generateSalt } from './src/server/db';
 import { Coordinates, CalculationMethod, PrayerTimes, Madhab } from 'adhan';
 import { ALL_MODULES } from './src/server/seedData';
-import { bucket } from './src/server/firebase';
+import { bucket, firestore } from './src/server/firebase';
 import { realtimeBroadcaster } from './src/server/realtime';
 import { rentalDb } from './src/server/rentalDb';
 import { registerRentalRoutes } from './src/server/rentalRoutes';
@@ -1565,6 +1565,285 @@ app.put('/api/portal/settings', authenticateSession, async (req: Request, res: R
 // CLOUD FIRESTORE DATABASE TABLES, SYNC & UPLOAD ENDPOINTS
 // ==========================================
 
+const uploadsRootDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadsRootDir)) {
+  fs.mkdirSync(uploadsRootDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsRootDir));
+
+function generateReceiptSvg(reqData: any): string {
+  const reqNum = reqData?.requestNumber || reqData?.id || 'ARC-CP-00001';
+  const member = reqData?.memberName || 'Club Member';
+  const memberNo = reqData?.memberNumber || 'ARC-M';
+  const amount = Number(reqData?.totalAmount || 50).toFixed(2);
+  const ref = reqData?.referenceNumber || `BML-${Date.now().toString().slice(-8)}`;
+  const dateStr = reqData?.submittedAt
+    ? new Date(reqData.submittedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    : new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const timeStr = reqData?.submittedAt
+    ? new Date(reqData.submittedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+    : '12:00 PM';
+  const month = reqData?.month ? `Month ${reqData.month}` : 'Contribution Fee';
+  const year = reqData?.contributionYear || reqData?.year || new Date().getFullYear();
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 860" width="600" height="860">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#020617"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#059669"/>
+      <stop offset="50%" stop-color="#0d9488"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="600" height="860" rx="24" fill="url(#bgGrad)" stroke="#1e293b" stroke-width="3"/>
+  <rect x="24" y="24" width="552" height="130" rx="16" fill="url(#headerGrad)"/>
+  <text x="50" y="70" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="22" font-weight="900" fill="#ffffff" letter-spacing="1">BANK TRANSFER ADVICE</text>
+  <text x="50" y="96" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="13" font-weight="700" fill="#a7f3d0">BANK OF MALDIVES (BML) INTERNET BANKING</text>
+  <text x="50" y="124" font-family="monospace" font-size="12" font-weight="600" fill="#ecfdf5">STATUS: SUCCESSFUL TRANSFER</text>
+
+  <rect x="24" y="170" width="552" height="100" rx="16" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+  <text x="50" y="202" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="12" font-weight="700" fill="#94a3b8">AMOUNT TRANSFERRED</text>
+  <text x="50" y="245" font-family="monospace" font-size="34" font-weight="900" fill="#34d399">${amount} <tspan font-size="18" fill="#6ee7b7">MVR</tspan></text>
+  <text x="540" y="235" font-family="monospace" font-size="12" font-weight="700" fill="#38bdf8" text-anchor="end">FEE CONTRIBUTION</text>
+
+  <rect x="24" y="286" width="552" height="420" rx="16" fill="#0b1329" stroke="#1e293b" stroke-width="1.5"/>
+
+  <text x="50" y="322" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="11" font-weight="700" fill="#64748b">TRANSACTION REFERENCE</text>
+  <text x="50" y="346" font-family="monospace" font-size="15" font-weight="800" fill="#fbbf24">${ref}</text>
+  <line x1="50" y1="366" x2="550" y2="366" stroke="#1e293b" stroke-width="1"/>
+
+  <text x="50" y="396" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="11" font-weight="700" fill="#64748b">MEMBER / SENDER NAME</text>
+  <text x="50" y="420" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="16" font-weight="800" fill="#f8fafc">${member}</text>
+  <text x="540" y="420" font-family="monospace" font-size="13" font-weight="700" fill="#34d399" text-anchor="end">#${memberNo}</text>
+  <line x1="50" y1="440" x2="550" y2="440" stroke="#1e293b" stroke-width="1"/>
+
+  <text x="50" y="470" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="11" font-weight="700" fill="#64748b">BENEFICIARY ACCOUNT</text>
+  <text x="50" y="494" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="14" font-weight="700" fill="#f8fafc">ARC CLUB MAIN ACCOUNT (BML)</text>
+  <text x="540" y="494" font-family="monospace" font-size="13" font-weight="600" fill="#94a3b8" text-anchor="end">7730000123456</text>
+  <line x1="50" y1="514" x2="550" y2="514" stroke="#1e293b" stroke-width="1"/>
+
+  <text x="50" y="544" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="11" font-weight="700" fill="#64748b">CONTRIBUTION TARGET</text>
+  <text x="50" y="568" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="14" font-weight="700" fill="#f8fafc">${month}, Year ${year}</text>
+  <text x="540" y="568" font-family="monospace" font-size="12" font-weight="600" fill="#38bdf8" text-anchor="end">ID: ${reqNum}</text>
+  <line x1="50" y1="588" x2="550" y2="588" stroke="#1e293b" stroke-width="1"/>
+
+  <text x="50" y="618" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="11" font-weight="700" fill="#64748b">TRANSACTION DATE &amp; TIME</text>
+  <text x="50" y="642" font-family="monospace" font-size="14" font-weight="700" fill="#f8fafc">${dateStr}  ${timeStr}</text>
+  <line x1="50" y1="662" x2="550" y2="662" stroke="#1e293b" stroke-width="1"/>
+
+  <text x="50" y="692" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="11" font-weight="700" fill="#64748b">PAYMENT CHANNEL</text>
+  <text x="50" y="716" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="13" font-weight="700" fill="#a7f3d0">BML Mobile App / Internet Banking Transfer</text>
+
+  <rect x="24" y="722" width="552" height="114" rx="16" fill="#020617" stroke="#334155" stroke-width="1"/>
+  <circle cx="60" cy="779" r="16" fill="#059669" fill-opacity="0.2"/>
+  <path d="M53 779 l5 5 l10 -10" stroke="#10b981" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="90" y="772" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="12" font-weight="800" fill="#34d399">OFFICIALLY RECORDED IN ARC PORTAL</text>
+  <text x="90" y="792" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="10" font-weight="500" fill="#94a3b8">Verified electronic transfer advice recorded with member contribution ledger.</text>
+</svg>`;
+}
+
+// Serve uploaded files securely with Firestore fallback
+app.get('/api/portal/uploads/:folder/:fileName(*)', async (req: Request, res: Response) => {
+  try {
+    const { folder } = req.params;
+    const rawFileNameParam = String(req.params.fileName || (req.params as any)[0] || '');
+    let decoded = decodeURIComponent(rawFileNameParam);
+    if (decoded.includes('/')) {
+      decoded = decoded.split('/').pop()!;
+    }
+    const safeFolder = folder.replace(/[^a-zA-Z0-9_-]/g, '');
+    const safeFileName = decoded.replace(/[^a-zA-Z0-9._-]/g, '');
+    const targetDir = path.join(uploadsRootDir, safeFolder);
+    const localPath = path.join(targetDir, safeFileName);
+    const baseWithoutExt = safeFileName.replace(/\.[^/.]+$/, '');
+
+    // 1. Check local disk exact
+    if (fs.existsSync(localPath)) {
+      if (localPath.endsWith('.svg')) res.setHeader('Content-Type', 'image/svg+xml');
+      return res.sendFile(localPath);
+    }
+
+    // Check with alternative extensions (.svg, .png, .jpg, .jpeg, .webp, .pdf)
+    for (const ext of ['.svg', '.jpg', '.jpeg', '.png', '.webp', '.pdf']) {
+      const altPath = path.join(targetDir, `${baseWithoutExt}${ext}`);
+      if (fs.existsSync(altPath)) {
+        if (ext === '.svg') res.setHeader('Content-Type', 'image/svg+xml');
+        return res.sendFile(altPath);
+      }
+    }
+
+    // Check if any file in targetDir contains baseWithoutExt
+    if (fs.existsSync(targetDir)) {
+      const dirFiles = fs.readdirSync(targetDir);
+      const matched = dirFiles.find(
+        f => (baseWithoutExt && f.includes(baseWithoutExt)) || (f && baseWithoutExt.includes(f.replace(/\.[^/.]+$/, '')))
+      );
+      if (matched) {
+        const found = path.join(targetDir, matched);
+        if (matched.endsWith('.svg')) res.setHeader('Content-Type', 'image/svg+xml');
+        return res.sendFile(found);
+      }
+    }
+
+    // 2. Check Firestore uploadedFiles collection (persists across container restarts)
+    const docId = `${safeFolder}_${baseWithoutExt}`;
+    let fileDoc: any = await firestore.collection('uploadedFiles').doc(docId).get();
+    if (!fileDoc.exists) {
+      const snap = await firestore.collection('uploadedFiles')
+        .where('folder', '==', safeFolder)
+        .where('fileName', '==', safeFileName)
+        .limit(1)
+        .get();
+      if (!snap.empty) {
+        fileDoc = snap.docs[0];
+      }
+    }
+
+    if (fileDoc && fileDoc.exists) {
+      const data = fileDoc.data() as any;
+      if (data.fileData) {
+        const mimeType = data.fileType || (safeFileName.endsWith('.svg') ? 'image/svg+xml' : 'image/jpeg');
+        const base64Data = data.fileData.includes(',') ? data.fileData.split(',')[1] : data.fileData;
+        const buffer = Buffer.from(base64Data, 'base64');
+        
+        try {
+          if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+          fs.writeFileSync(localPath, buffer);
+        } catch (_) {}
+
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.send(buffer);
+      }
+    }
+
+    // 3. Fallback for contribution slips: if file is not on disk or in uploadedFiles,
+    // look up contributionPaymentRequests to generate authentic SVG voucher!
+    if (safeFolder === 'contribution-slips') {
+      try {
+        let reqData: any = null;
+        const docById = await firestore.collection('contributionPaymentRequests').doc(baseWithoutExt).get();
+        if (docById.exists) {
+          reqData = docById.data();
+          reqData.id = docById.id;
+        } else {
+          const allSnap = await firestore.collection('contributionPaymentRequests').limit(100).get();
+          for (const d of allSnap.docs) {
+            const data = d.data();
+            if (
+              d.id === baseWithoutExt ||
+              data.slipFileName === safeFileName ||
+              data.slipDownloadUrl?.includes(safeFileName) ||
+              (baseWithoutExt && data.slipFileName?.includes(baseWithoutExt))
+            ) {
+              reqData = data;
+              reqData.id = d.id;
+              break;
+            }
+          }
+        }
+
+        if (reqData) {
+          // If reqData already has a data: URL stored, serve that data directly!
+          if (reqData.slipDownloadUrl?.startsWith('data:')) {
+            const match = reqData.slipDownloadUrl.match(/^data:([^;]+);base64,(.+)$/);
+            if (match) {
+              const mime = match[1];
+              const buf = Buffer.from(match[2], 'base64');
+              res.setHeader('Content-Type', mime);
+              res.setHeader('Cache-Control', 'public, max-age=86400');
+              return res.send(buf);
+            }
+          }
+
+          const svgString = generateReceiptSvg(reqData);
+          try {
+            if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+            fs.writeFileSync(path.join(targetDir, `${baseWithoutExt}.svg`), svgString, 'utf8');
+          } catch (_) {}
+
+          res.setHeader('Content-Type', 'image/svg+xml');
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+          return res.send(svgString);
+        }
+      } catch (fbErr) {
+        console.warn('[Uploads] Fallback SVG generation failed:', fbErr);
+      }
+    }
+
+    return res.status(404).json({ error: 'File not found' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Proxy route to resolve legacy or external storage links
+app.get('/api/portal/storage-proxy', async (req: Request, res: Response) => {
+  try {
+    const targetUrl = String(req.query.url || '').trim();
+    if (!targetUrl) {
+      return res.status(400).json({ error: 'Missing url query parameter' });
+    }
+
+    const urlParts = targetUrl.split('/');
+    const rawFileName = urlParts[urlParts.length - 1];
+    const safeFileName = rawFileName.replace(/[^a-zA-Z0-9._-]/g, '');
+
+    const candidateFolders = ['contribution-slips', 'uploads'];
+    for (const f of candidateFolders) {
+      const p = path.join(uploadsRootDir, f, safeFileName);
+      if (fs.existsSync(p)) {
+        return res.sendFile(p);
+      }
+      const pSvg = path.join(uploadsRootDir, f, `${safeFileName.replace(/\.[^/.]+$/, '')}.svg`);
+      if (fs.existsSync(pSvg)) {
+        res.setHeader('Content-Type', 'image/svg+xml');
+        return res.sendFile(pSvg);
+      }
+    }
+
+    try {
+      const fetchRes = await fetch(targetUrl);
+      if (fetchRes.ok) {
+        const contentType = fetchRes.headers.get('content-type') || 'application/octet-stream';
+        const arrayBuffer = await fetchRes.arrayBuffer();
+        res.setHeader('Content-Type', contentType);
+        return res.send(Buffer.from(arrayBuffer));
+      }
+    } catch (_) {}
+
+    // Fallback: If targetUrl was a contribution slip, generate authentic SVG voucher
+    try {
+      const allSnap = await firestore.collection('contributionPaymentRequests').limit(100).get();
+      let reqData: any = null;
+      for (const d of allSnap.docs) {
+        const data = d.data();
+        if (data.slipDownloadUrl === targetUrl || data.slipDownloadUrl?.includes(safeFileName)) {
+          reqData = data;
+          reqData.id = d.id;
+          break;
+        }
+      }
+
+      if (reqData) {
+        const svgString = generateReceiptSvg(reqData);
+        res.setHeader('Content-Type', 'image/svg+xml');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.send(svgString);
+      }
+    } catch (_) {}
+
+    return res.status(404).send('Resource not found');
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/portal/upload', authenticateSession, async (req: Request, res: Response) => {
   try {
     const { fileName, fileType, fileData, folder = 'uploads' } = req.body;
@@ -1572,31 +1851,42 @@ app.post('/api/portal/upload', authenticateSession, async (req: Request, res: Re
       return res.status(400).json({ error: 'fileData is required' });
     }
 
-    // If bucket is configured, upload to Firebase Storage, else return safe data URI
-    try {
-      if (bucket && bucket.name) {
-        const cleanFileName = `${Date.now()}_${(fileName || 'file').replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-        const filePath = `${folder}/${cleanFileName}`;
-        const file = bucket.file(filePath);
-
-        // Strip data: prefix if present
-        const base64Data = fileData.includes(',') ? fileData.split(',')[1] : fileData;
-        const buffer = Buffer.from(base64Data, 'base64');
-
-        await file.save(buffer, {
-          metadata: { contentType: fileType || 'application/octet-stream' },
-          resumable: false
-        });
-
-        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filePath}`;
-        return res.json({ url: publicUrl, fileName: cleanFileName, storage: 'firebase-storage' });
-      }
-    } catch (storageErr) {
-      console.warn('[Firebase Storage] Upload to bucket skipped, returning data URI:', storageErr);
+    const safeFolder = (folder || 'uploads').replace(/[^a-zA-Z0-9_-]/g, '');
+    const cleanFileName = `${Date.now()}_${(fileName || 'file').replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+    const targetDir = path.join(uploadsRootDir, safeFolder);
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
     }
 
-    // Fallback: return data URI directly
-    return res.json({ url: fileData, fileName: fileName || 'file', storage: 'inline' });
+    const localFilePath = path.join(targetDir, cleanFileName);
+    const base64Data = fileData.includes(',') ? fileData.split(',')[1] : fileData;
+    const buffer = Buffer.from(base64Data, 'base64');
+    
+    // 1. Write file to local disk
+    fs.writeFileSync(localFilePath, buffer);
+
+    // 2. Persist in Firestore uploadedFiles so file data survives container refreshes
+    const docId = `${safeFolder}_${cleanFileName.replace(/\.[^/.]+$/, '')}`;
+    try {
+      await firestore.collection('uploadedFiles').doc(docId).set({
+        folder: safeFolder,
+        fileName: cleanFileName,
+        fileType: fileType || 'application/octet-stream',
+        fileSize: buffer.length,
+        fileData: fileData.startsWith('data:') ? fileData : `data:${fileType || 'image/jpeg'};base64,${base64Data}`,
+        createdAt: new Date().toISOString()
+      });
+    } catch (dbErr) {
+      console.warn('[Upload] Notice: Firestore uploadedFiles sync skipped:', dbErr);
+    }
+
+    const servedUrl = `/api/portal/uploads/${safeFolder}/${cleanFileName}`;
+    return res.json({
+      url: servedUrl,
+      storagePath: servedUrl,
+      fileName: cleanFileName,
+      storage: 'local-firestore'
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -3587,121 +3877,65 @@ app.post('/api/portal/my-contributions/payment-request', authenticateSession, as
     }
 
     const {
-      targetContributionId,
       slipDownloadUrl,
-      slipStoragePath,
-      slipFileName,
-      slipMimeType,
-      slipFileSize,
-      memberNote = ''
+      slipDataUrl = '',
+      slipStoragePath = '',
+      slipFileName = '',
+      slipMimeType = '',
+      slipFileSize = 0,
+      memberNote = '',
+      amountPaid = 0
     } = req.body;
 
-    if (!slipDownloadUrl) {
+    if (!slipDownloadUrl && !slipDataUrl) {
       return res.status(400).json({ error: 'A valid bank payment slip image or document is required.' });
     }
 
-    const settings = await db.getContributionSettings();
-    const monthlyFee = Number(settings.monthlyFee || 50);
-
-    // Fetch existing contributions for this member across all years to find oldest unpaid
-    const allMemberContribs = await db.getMemberContributions({ memberId: member.id });
-    const existingRequests = await db.getContributionPaymentRequests({ memberId: member.id, status: 'pending' });
-    const currentlyPendingDocIds = new Set(existingRequests.flatMap(r => r.contributionRecordIds || []));
-
-    let chosenYear: number = new Date().getFullYear();
-    let chosenMonths: number[] = [];
-    let baseAmount: number = monthlyFee;
-    let fineAmount: number = 0;
-    let discountAmount: number = 0;
-    let targetContributionRecord: any = null;
-
-    if (targetContributionId) {
-      targetContributionRecord = allMemberContribs.find(c => c.id === targetContributionId);
-      if (targetContributionRecord && targetContributionRecord.memberId === member.id) {
-        chosenYear = targetContributionRecord.year;
-        chosenMonths = [targetContributionRecord.month];
-        baseAmount = targetContributionRecord.baseAmount || monthlyFee;
-        fineAmount = targetContributionRecord.fineAmount || 0;
-        discountAmount = targetContributionRecord.discountAmount || 0;
-      }
+    const currentYear = new Date().getFullYear();
+    const parsedAmountPaid = Number(amountPaid) > 0 ? Number(amountPaid) : null;
+    let provisionalWaterfall: any = null;
+    if (parsedAmountPaid && parsedAmountPaid > 0) {
+      try {
+        provisionalWaterfall = await db.previewContributionWaterfall(member.id, parsedAmountPaid, true);
+      } catch (_) {}
     }
 
-    if (!targetContributionRecord) {
-      // Priority: Find oldest unpaid contribution that isn't already paid or pending
-      const unpaidPast = allMemberContribs
-        .filter(c => c.status !== 'paid' && !currentlyPendingDocIds.has(c.id))
-        .sort((a, b) => {
-          if (a.year !== b.year) return a.year - b.year;
-          return a.month - b.month;
-        });
-
-      if (unpaidPast.length > 0) {
-        targetContributionRecord = unpaidPast[0];
-        chosenYear = targetContributionRecord.year;
-        chosenMonths = [targetContributionRecord.month];
-        baseAmount = targetContributionRecord.baseAmount || monthlyFee;
-        fineAmount = targetContributionRecord.fineAmount || 0;
-        discountAmount = targetContributionRecord.discountAmount || 0;
-      } else {
-        // Use currently due contribution (current month and year)
-        const now = new Date();
-        chosenYear = now.getFullYear();
-        const curMonth = now.getMonth() + 1;
-        chosenMonths = [curMonth];
-        baseAmount = monthlyFee;
-
-        if (settings.enableAutoFines) {
-          const dueDay = settings.dueDayOfMonth || 10;
-          const grace = settings.gracePeriodDays || 5;
-          const dueDate = new Date(chosenYear, curMonth - 1, dueDay);
-          dueDate.setDate(dueDate.getDate() + grace);
-          if (now > dueDate) {
-            const diffDays = Math.max(0, Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 3600 * 24)));
-            fineAmount = Math.min(diffDays * (settings.finePerDay || 5), monthlyFee * 2);
-          }
-        }
-      }
-    }
-
-    const totalAmount = Math.max(0, baseAmount + fineAmount - discountAmount);
-
-    const bankAccounts = await db.getBankAccounts();
-    const depositAccount = bankAccounts.find(a => a.id === settings.defaultDepositAccountId) ||
-      bankAccounts.find(a => a.status === 'active') ||
-      bankAccounts[0] ||
-      {
-        id: 'acc_primary_001',
-        accountName: 'Aanandha Recreation Club',
-        accountNumber: '7730000308018',
-        bankName: 'Bank of Maldives (BML)'
-      };
-
+    // Create pending request with optional waterfall calculation
     const newRequest = await db.createContributionPaymentRequest({
       userId: user.id,
       memberId: member.id,
       memberNumber: member.memberNumber,
       memberName: member.fullName,
-      year: Number(chosenYear),
-      paymentType: 'single_month',
-      months: chosenMonths,
-      baseAmount,
-      fineAmount,
-      discountAmount,
-      totalAmount,
-      accountId: depositAccount.id,
-      accountName: depositAccount.accountName,
-      accountNumber: depositAccount.accountNumber || '',
-      bankName: depositAccount.bankName || 'Bank of Maldives',
+      contributionYear: currentYear,
+      year: currentYear,
+      paymentType: provisionalWaterfall ? 'waterfall' : null,
+      month: null,
+      months: provisionalWaterfall ? provisionalWaterfall.allocations.map((a: any) => a.month) : [],
+      calculatedAmount: parsedAmountPaid,
+      amountPaid: parsedAmountPaid || undefined,
+      baseAmount: provisionalWaterfall ? provisionalWaterfall.totalBasePaid : null,
+      fineAmount: provisionalWaterfall ? provisionalWaterfall.totalFinesPaid : 0,
+      discountAmount: 0,
+      totalAmount: parsedAmountPaid,
+      splitAllocations: provisionalWaterfall?.allocations,
+      carryForwardBalance: provisionalWaterfall?.carryForwardBalance,
+      referenceNumber: null,
+      normalizedReference: null,
+      referenceLock: null,
+      accountId: null,
+      accountName: null,
+      accountNumber: null,
+      bankName: null,
       paymentMethod: 'bank_transfer',
-      referenceNumber: '', // Reference number is entered exclusively during approval by reviewer
       slipStoragePath,
-      slipDownloadUrl,
+      slipDownloadUrl: slipDownloadUrl || slipDataUrl,
+      slipDataUrl: slipDataUrl || (slipDownloadUrl?.startsWith('data:') ? slipDownloadUrl : ''),
       slipFileName,
       slipMimeType,
-      slipFileSize,
-      memberNote: memberNote.trim(),
+      slipFileSize: Number(slipFileSize) || 0,
+      memberNote: typeof memberNote === 'string' ? memberNote.trim() : '',
       status: 'pending',
-      contributionRecordIds: targetContributionRecord?.id ? [targetContributionRecord.id] : []
+      contributionRecordIds: []
     });
 
     // Create Audit Log
@@ -3711,16 +3945,16 @@ app.post('/api/portal/my-contributions/payment-request', authenticateSession, as
       action: 'create',
       module: 'budget',
       targetId: newRequest.id,
-      details: `Submitted contribution payment request ${newRequest.requestNumber} for ${member.fullName} (${totalAmount} MVR)`
+      details: `Submitted contribution payment slip ${newRequest.requestNumber} for ${member.fullName}. Pending finance review.`
     });
 
     // Send notification to Budget reviewers
     try {
       await db.createAppNotification({
-        title: 'New Member Contribution Payment',
-        message: `${member.fullName} submitted a payment slip for MVR ${totalAmount} (${newRequest.requestNumber}). Awaiting verification.`,
+        title: 'New Member Contribution Payment Slip',
+        message: `${member.fullName} (${member.memberNumber}) submitted a payment slip (${newRequest.requestNumber}). Awaiting verification.`,
         type: 'info',
-        link: '/portal/budget'
+        link: '/portal/budget?tab=contributions'
       });
     } catch (_) {}
 
@@ -3761,6 +3995,16 @@ app.post('/api/portal/my-contributions/payment-request/:id/cancel', authenticate
   }
 });
 
+// GET /api/portal/budget/contribution-payment-requests/summary - Summary metrics for dashboard and approvals
+app.get('/api/portal/budget/contribution-payment-requests/summary', authenticateSession, requirePermission('budget', 'canView'), async (req: Request, res: Response) => {
+  try {
+    const summary = await db.getContributionPaymentRequestsSummary();
+    return res.json(summary);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/portal/budget/contribution-payment-requests - Reviewer list of requests
 app.get('/api/portal/budget/contribution-payment-requests', authenticateSession, requirePermission('budget', 'canView'), async (req: Request, res: Response) => {
   try {
@@ -3787,21 +4031,39 @@ app.get('/api/portal/budget/contribution-payment-requests', authenticateSession,
   }
 });
 
+// GET /api/portal/budget/members/:memberId/waterfall-preview - Preview payment split across unpaid months, fines & credit balance
+app.get('/api/portal/budget/members/:memberId/waterfall-preview', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const amount = Number(req.query.amount || 0);
+    const preview = await db.previewContributionWaterfall(req.params.memberId, amount, true);
+    return res.json(preview);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/portal/budget/contribution-payment-requests/:id/approve - Approve request atomically
 app.post('/api/portal/budget/contribution-payment-requests/:id/approve', authenticateSession, requirePermission('budget', 'canApprove'), async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const { approvalNote, referenceNumber, approvedAmount, noReferenceException } = req.body;
+    const { referenceNumber, paymentType, month, accountId, approvalNote, amountPaid, approvedAmount } = req.body;
     const cleanRef = String(referenceNumber || '').trim();
 
-    if (!cleanRef && !noReferenceException) {
-      return res.status(400).json({ error: 'Payment Reference Number is required before approving payment request.' });
+    if (!cleanRef) {
+      return res.status(400).json({ error: 'Payment Reference Number is mandatory before approving payment request.' });
     }
 
     const result = await db.approveContributionPaymentRequest(
       req.params.id,
       { id: user.id, fullName: user.fullName || user.username },
-      { approvalNote, referenceNumber: cleanRef, approvedAmount: approvedAmount ? Number(approvedAmount) : undefined }
+      {
+        referenceNumber: cleanRef,
+        paymentType: paymentType || 'waterfall',
+        month: month !== undefined ? Number(month) : undefined,
+        accountId,
+        approvalNote,
+        approvedAmount: Number(approvedAmount || amountPaid || 0)
+      }
     );
 
     // Audit Log
@@ -3811,7 +4073,7 @@ app.post('/api/portal/budget/contribution-payment-requests/:id/approve', authent
       action: 'approve',
       module: 'budget',
       targetId: result.request.id,
-      details: `Approved contribution payment ${result.request.requestNumber} for ${result.request.memberName} (${result.request.totalAmount} MVR). Income record ${result.incomeRecord.id} generated.`
+      details: `Approved contribution payment ${result.request.requestNumber} for ${result.request.memberName} (${result.request.totalAmount} MVR). Ref: ${cleanRef}. Income record ${result.incomeRecord.id} generated.`
     });
 
     // Notify member user
@@ -3871,6 +4133,41 @@ app.post('/api/portal/budget/contribution-payment-requests/:id/reject', authenti
         });
       } catch (_) {}
     }
+
+    return res.json(updated);
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /api/portal/budget/contribution-payment-requests/:id/slip - Update or replace slip image/document
+app.post('/api/portal/budget/contribution-payment-requests/:id/slip', authenticateSession, requirePermission('budget', 'canView'), async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const { slipDownloadUrl, slipDataUrl, slipStoragePath, slipFileName, slipMimeType, slipFileSize, referenceNumber } = req.body;
+    
+    if (!slipDownloadUrl && !slipDataUrl) {
+      return res.status(400).json({ error: 'slipDownloadUrl or slipDataUrl is required' });
+    }
+
+    const updated = await db.updateContributionPaymentRequestSlip(req.params.id, {
+      slipDownloadUrl: slipDownloadUrl || slipDataUrl,
+      slipDataUrl: slipDataUrl || (slipDownloadUrl?.startsWith('data:') ? slipDownloadUrl : undefined),
+      slipStoragePath,
+      slipFileName,
+      slipMimeType,
+      slipFileSize,
+      referenceNumber
+    });
+
+    await db.createAuditLog({
+      userId: user.id,
+      username: user.username,
+      action: 'update',
+      module: 'budget',
+      targetId: updated.id,
+      details: `Updated transfer slip for contribution request ${updated.requestNumber} (${updated.memberName}). File: ${slipFileName || 'slip'}`
+    });
 
     return res.json(updated);
   } catch (err: any) {

@@ -66,7 +66,7 @@ import { BillViewerModal } from '../../components/portal/budget/BillViewerModal'
 import { ContributionSlipsApprovalTab } from '../../components/portal/budget/ContributionSlipsApprovalTab';
 import { FileText, Paperclip, Upload, ShieldCheck, Eye } from 'lucide-react';
 
-type BudgetTab = 'dashboard' | 'income' | 'expenses' | 'invoices' | 'fund_manager' | 'allocations' | 'accounts' | 'settings' | 'reports';
+type BudgetTab = 'dashboard' | 'income' | 'expenses' | 'invoices' | 'fund_manager' | 'membership_fee_approvals' | 'allocations' | 'accounts' | 'settings' | 'reports';
 
 export const BudgetPage: React.FC = () => {
   const { user, hasPermission, loading: authLoading } = useAuth();
@@ -83,7 +83,7 @@ export const BudgetPage: React.FC = () => {
   const canExport = hasPermission('budget', 'canExport');
   const canManageSettings = hasPermission('budget', 'canManageSettings');
 
-  const validTabs: BudgetTab[] = ['dashboard', 'income', 'expenses', 'invoices', 'fund_manager', 'allocations', 'accounts', 'settings', 'reports'];
+  const validTabs: BudgetTab[] = ['dashboard', 'income', 'expenses', 'invoices', 'fund_manager', 'membership_fee_approvals', 'allocations', 'accounts', 'settings', 'reports'];
   const tabParam = searchParams.get('tab') as BudgetTab | null;
   const initialTab: BudgetTab = (tabParam && validTabs.includes(tabParam))
     ? tabParam
@@ -93,12 +93,30 @@ export const BudgetPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+  const [pendingApprovalCount, setPendingApprovalCount] = useState<number>(0);
 
   useEffect(() => {
     if (tabParam && validTabs.includes(tabParam)) {
       setActiveTab(tabParam);
     }
   }, [tabParam]);
+
+  // Periodic check of pending approvals badge
+  useEffect(() => {
+    const fetchSummary = async () => {
+      try {
+        const s = await api.getContributionPaymentRequestsSummary();
+        if (s && typeof s.pending === 'number') {
+          setPendingApprovalCount(s.pending);
+        }
+      } catch (err) {
+        // silent
+      }
+    };
+    fetchSummary();
+    const interval = setInterval(fetchSummary, 20000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleTabChange = (newTab: BudgetTab) => {
     setActiveTab(newTab);
@@ -248,7 +266,8 @@ export const BudgetPage: React.FC = () => {
         contributionsData,
         allocationsData,
         settingsData,
-        membersData
+        membersData,
+        approvalSummaryData
       ] = await Promise.all([
         api.getBudgetStats(selectedYear),
         api.getBankAccounts(),
@@ -258,7 +277,8 @@ export const BudgetPage: React.FC = () => {
         api.getMemberContributions({ year: selectedYear }),
         api.getBudgetAllocations(selectedYear).catch(() => []),
         api.getContributionSettings(),
-        api.getMembers()
+        api.getMembers(),
+        api.getContributionPaymentRequestsSummary().catch(() => null)
       ]);
 
       setStats(statsData);
@@ -271,6 +291,9 @@ export const BudgetPage: React.FC = () => {
       setSettings(settingsData);
       setSettingsForm(settingsData);
       setMembersList(membersData);
+      if (approvalSummaryData && typeof approvalSummaryData.pending === 'number') {
+        setPendingApprovalCount(approvalSummaryData.pending);
+      }
 
       if (accountsData.length > 0) {
         setTransferForm(prev => ({
@@ -699,21 +722,29 @@ export const BudgetPage: React.FC = () => {
         {/* Tab Navigation Menu */}
         <div className="flex items-center gap-1.5 p-1.5 bg-slate-900 border border-slate-800 rounded-2xl overflow-x-auto scrollbar-none shadow-sm">
           {[
-            { id: 'dashboard', labelEn: 'Module Dashboard', labelDv: 'ޑޭޝްބޯޑު', icon: TrendingUp },
-            { id: 'income', labelEn: 'Income Tracker', labelDv: 'އާމްދަނީ', icon: DollarSign },
-            { id: 'expenses', labelEn: 'Expenses & Bills', labelDv: 'ޚަރަދު އަދި ބިލްތައް', icon: TrendingDown },
-            { id: 'invoices', labelEn: 'Invoices & Quotations', labelDv: 'އިންވޮއިސް އަދި ކޯޓޭޝަން', icon: FileText },
-            { id: 'allocations', labelEn: 'Budget Ceilings & Targets', labelDv: 'ބަޖެޓް ލިމިޓްތައް', icon: Target },
-            { id: 'fund_manager', labelEn: 'Members Fund Manager', labelDv: 'މެންބަރުންގެ ފަންޑު', icon: Users },
-            { id: 'accounts', labelEn: 'Accounts Manager', labelDv: 'އެކައުންޓްތައް', icon: Building2 },
-            { id: 'reports', labelEn: 'Reports & Statements', labelDv: 'މާލީ ރިޕޯޓްތައް', icon: FileSpreadsheet },
-            { id: 'settings', labelEn: 'Module Settings', labelDv: 'މޮޑިއުލް ސެޓިންގްސް', icon: SettingsIcon }
+            { id: 'dashboard', labelEn: 'Dashboard', labelDv: 'ޑޭޝްބޯޑު', icon: TrendingUp },
+            { id: 'income', labelEn: 'Income', labelDv: 'އާމްދަނީ', icon: DollarSign },
+            { id: 'expenses', labelEn: 'Expenses', labelDv: 'ޚަރަދު', icon: TrendingDown },
+            { id: 'invoices', labelEn: 'Invoices', labelDv: 'އިންވޮއިސް', icon: FileText },
+            { id: 'fund_manager', labelEn: 'Fund Manager', labelDv: 'ފަންޑް މެނޭޖަރ', icon: Users },
+            {
+              id: 'membership_fee_approvals',
+              labelEn: 'Membership Fee Approvals',
+              labelDv: 'މެންބަރޝިޕް ފީ އެޕްރޫވަލްތައް',
+              icon: Clock,
+              badge: pendingApprovalCount > 0 ? pendingApprovalCount : undefined
+            },
+            { id: 'allocations', labelEn: 'Allocations', labelDv: 'ބަޖެޓް ލިމިޓްތައް', icon: Target },
+            { id: 'accounts', labelEn: 'Accounts', labelDv: 'އެކައުންޓްތައް', icon: Building2 },
+            { id: 'settings', labelEn: 'Settings', labelDv: 'ސެޓިންގްސް', icon: SettingsIcon },
+            { id: 'reports', labelEn: 'Reports', labelDv: 'މާލީ ރިޕޯޓްތައް', icon: FileSpreadsheet }
           ].map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
+                id={`budget-tab-${tab.id}`}
                 type="button"
                 onClick={() => handleTabChange(tab.id as BudgetTab)}
                 className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
@@ -724,6 +755,13 @@ export const BudgetPage: React.FC = () => {
               >
                 <Icon className="w-4 h-4" />
                 <span>{lang === 'english' ? tab.labelEn : tab.labelDv}</span>
+                {tab.badge !== undefined && (
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black ${
+                    isActive ? 'bg-white text-emerald-950' : 'bg-amber-500 text-slate-950 animate-pulse'
+                  }`}>
+                    {tab.badge}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1575,15 +1613,16 @@ export const BudgetPage: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFundViewMode('slips_approval')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                      fundViewMode === 'slips_approval'
-                        ? 'bg-emerald-500 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
+                    onClick={() => handleTabChange('membership_fee_approvals')}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-slate-400 hover:text-white cursor-pointer"
                   >
                     <FileCheck className="w-3.5 h-3.5" />
                     <span>Payment Slips</span>
+                    {pendingApprovalCount > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500 text-slate-950">
+                        {pendingApprovalCount}
+                      </span>
+                    )}
                   </button>
                 </div>
 
@@ -1825,6 +1864,14 @@ export const BudgetPage: React.FC = () => {
             )}
 
           </div>
+        )}
+
+        {/* DEDICATED TAB: MEMBERSHIP FEE APPROVALS */}
+        {activeTab === 'membership_fee_approvals' && (
+          <ContributionSlipsApprovalTab
+            onRefreshContributions={loadData}
+            lang={lang}
+          />
         )}
 
         {/* TAB 5: ACCOUNTS MANAGER */}

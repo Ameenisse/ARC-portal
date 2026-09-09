@@ -9,9 +9,12 @@ import {
   FileText,
   Loader2,
   CheckCircle2,
-  ShieldCheck,
+  Building2,
+  Info,
+  Coins,
+  ArrowDown,
   Calendar,
-  Building2
+  Sparkles
 } from 'lucide-react';
 import { api } from '../../../services/api';
 import { MemberContributionSetting, MemberContributionRecord, ContributionPaymentRequest } from '../../../types';
@@ -23,14 +26,9 @@ interface PayContributionModalProps {
   member: any;
   settings: MemberContributionSetting | null;
   depositAccount: any;
-  contributions: MemberContributionRecord[];
-  existingRequests: ContributionPaymentRequest[];
+  contributions?: MemberContributionRecord[];
+  existingRequests?: ContributionPaymentRequest[];
 }
-
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
-];
 
 export const PayContributionModal: React.FC<PayContributionModalProps> = ({
   isOpen,
@@ -38,15 +36,14 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
   onSuccess,
   member,
   settings,
-  depositAccount,
-  contributions = [],
-  existingRequests = []
+  depositAccount
 }) => {
-  const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth() + 1;
   const monthlyFee = Number(settings?.monthlyFee || 50);
+  const discountMonths = Number(settings?.annualAdvanceDiscountMonths || 1);
+  const annualFee = Math.max(0, (12 - discountMonths) * monthlyFee);
 
   // Form states
+  const [amountPaid, setAmountPaid] = useState<number>(100);
   const [memberNote, setMemberNote] = useState('');
   const [confirmed, setConfirmed] = useState(false);
 
@@ -58,57 +55,51 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
   const [errorMessage, setErrorMessage] = useState('');
   const [copied, setCopied] = useState(false);
 
-  // Compute pending contribution record IDs so we don't display already pending ones
-  const pendingRecordIds = new Set(
-    (existingRequests || [])
-      .filter(r => r.status === 'pending')
-      .flatMap(r => r.contributionRecordIds || [])
-  );
-
-  // Sort unpaid/overdue contributions chronologically (oldest first)
-  const unpaidContributions = (contributions || [])
-    .filter(c => c.status !== 'paid' && !pendingRecordIds.has(c.id))
-    .sort((a, b) => {
-      if (a.year !== b.year) return a.year - b.year;
-      return a.month - b.month;
-    });
-
-  // Selected contribution record ID: defaults automatically to the oldest unpaid record
-  const [selectedRecordId, setSelectedRecordId] = useState<string>('');
+  // Waterfall Preview State
+  const [waterfallPreview, setWaterfallPreview] = useState<any>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      if (unpaidContributions.length > 0) {
-        setSelectedRecordId(unpaidContributions[0].id);
-      } else {
-        setSelectedRecordId('');
-      }
       setSlipFile(null);
       setSlipPreview('');
       setMemberNote('');
       setConfirmed(false);
       setErrorMessage('');
+      setAmountPaid(100);
     }
-  }, [isOpen, unpaidContributions.length]);
+  }, [isOpen]);
+
+  // Fetch waterfall breakdown whenever amountPaid or member changes
+  useEffect(() => {
+    if (!isOpen || !member?.id || amountPaid <= 0) {
+      setWaterfallPreview(null);
+      return;
+    }
+
+    let active = true;
+    const fetchPreview = async () => {
+      try {
+        setLoadingPreview(true);
+        const res = await api.getContributionWaterfallPreview(member.id, amountPaid);
+        if (active) {
+          setWaterfallPreview(res);
+        }
+      } catch (e) {
+        console.error('Failed to preview waterfall payment allocation:', e);
+      } finally {
+        if (active) setLoadingPreview(false);
+      }
+    };
+
+    const timer = setTimeout(fetchPreview, 250);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [isOpen, member?.id, amountPaid]);
 
   if (!isOpen) return null;
-
-  const selectedRecord =
-    unpaidContributions.find(c => c.id === selectedRecordId) ||
-    unpaidContributions[0] ||
-    null;
-
-  const applicablePeriod = selectedRecord
-    ? `${MONTH_NAMES[selectedRecord.month - 1]} ${selectedRecord.year}`
-    : `${MONTH_NAMES[currentMonth - 1]} ${currentYear}`;
-
-  const applicableStatus = selectedRecord
-    ? (selectedRecord.status === 'overdue' ? 'Overdue (ފާއިތުވެފައި)' : 'Unpaid (ދައްކަންޖެހޭ)')
-    : 'Current Period (ދައްކަންޖެހޭ)';
-
-  const calculatedAmount = selectedRecord
-    ? Number(selectedRecord.totalPayable ?? selectedRecord.baseAmount ?? monthlyFee)
-    : monthlyFee;
 
   const targetBankName = depositAccount?.bankName || 'Bank of Maldives (BML)';
   const targetAccountName = depositAccount?.accountName || 'Aanandha Recreation Club';
@@ -157,7 +148,7 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
       setSubmitting(true);
       setUploading(true);
 
-      // 1. Upload slip file
+      // 1. Upload slip file to server storage
       const uploadRes = await api.uploadFile({
         fileName: slipFile.name,
         fileType: slipFile.type,
@@ -167,17 +158,16 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
 
       setUploading(false);
 
-      // 2. Submit payment request - server controls calculation based on targetContributionId
+      // 2. Submit payment request - member sends slip info, uploaded URL, amountPaid and exact uploaded slip data
       const requestRes = await api.submitContributionPaymentRequest({
-        targetContributionId: selectedRecord?.id,
-        year: selectedRecord?.year || currentYear,
-        paymentType: 'single_month',
-        months: selectedRecord ? [selectedRecord.month] : [currentMonth],
         slipDownloadUrl: uploadRes.url,
+        slipDataUrl: slipPreview,
+        slipStoragePath: uploadRes.storagePath || uploadRes.url,
         slipFileName: slipFile.name,
         slipMimeType: slipFile.type,
         slipFileSize: slipFile.size,
-        memberNote: memberNote.trim()
+        memberNote: memberNote.trim(),
+        amountPaid: Number(amountPaid) || 0
       });
 
       onSuccess(requestRes);
@@ -194,7 +184,7 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
       <div
         id="pay-contribution-modal-card"
-        className="relative w-full max-w-xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden my-8"
+        className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden my-8"
       >
         {/* Modal Header */}
         <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-slate-850 to-emerald-950/40 border-b border-slate-800 flex items-center justify-between">
@@ -232,53 +222,139 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
             </div>
           )}
 
-          {/* Member & Contribution Summary Box */}
-          <div className="p-5 rounded-2xl bg-gradient-to-br from-slate-950 to-slate-900 border border-slate-800 space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-0.5">
-                  Member
-                </span>
-                <div className="text-sm font-bold text-white truncate">
-                  {member?.fullName || member?.name || 'ARC Member'}
-                </div>
-                <div className="text-xs font-mono text-emerald-400 mt-0.5">
-                  {member?.memberNumber || 'ARC-M-001'}
-                </div>
+          {/* Member Identity Box */}
+          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Member
+              </span>
+              <div className="text-sm font-bold text-white mt-0.5">
+                {member?.fullName || member?.name || 'ARC Member'}
               </div>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Member Number
+              </span>
+              <div className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20 mt-0.5 inline-block">
+                {member?.memberNumber || 'ARC-M-001'}
+              </div>
+            </div>
+          </div>
 
-              <div>
-                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-0.5">
-                  Contribution Period
-                </span>
-                <div className="text-sm font-bold text-white flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-amber-400" />
-                  <span>{applicablePeriod}</span>
-                </div>
-                <div className="mt-1">
-                  <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                    selectedRecord?.status === 'overdue'
-                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                      : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                  }`}>
-                    {applicableStatus}
+          {/* Contribution Information & Amount Entry */}
+          <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
+                <Coins className="w-4 h-4 text-emerald-400" />
+                <span>Payment Amount & Auto-Settlement</span>
+              </div>
+              <span className="text-[11px] text-slate-400 font-mono">
+                Monthly Fee: MVR {monthlyFee}
+              </span>
+            </div>
+
+            <div>
+              <label htmlFor="amount-paid-input" className="text-xs font-semibold text-slate-300 block mb-1">
+                Amount Paid (MVR) *
+              </label>
+              <div className="relative">
+                <input
+                  id="amount-paid-input"
+                  type="number"
+                  min="1"
+                  step="1"
+                  required
+                  value={amountPaid}
+                  onChange={(e) => setAmountPaid(Math.max(1, Number(e.target.value) || 0))}
+                  placeholder="e.g. 100"
+                  className="w-full bg-slate-900 border border-slate-700 text-emerald-400 font-mono font-bold text-base rounded-xl px-3.5 py-2.5 pl-12 focus:outline-none focus:border-emerald-500 transition"
+                />
+                <span className="absolute left-3.5 top-3 text-xs font-bold text-slate-400 font-mono">MVR</span>
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <span className="text-[11px] text-slate-400">Quick select:</span>
+                {[50, 100, 150, 200, 550, 600].map(amt => (
+                  <button
+                    key={amt}
+                    type="button"
+                    onClick={() => setAmountPaid(amt)}
+                    className={`px-2 py-0.5 rounded-lg text-xs font-mono font-semibold transition cursor-pointer ${
+                      amountPaid === amt
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                        : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                    }`}
+                  >
+                    {amt}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Live Waterfall Auto-Settlement Breakdown */}
+            {loadingPreview ? (
+              <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800 flex items-center justify-center gap-2 text-xs text-slate-400">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                <span>Calculating auto-settlement across fines and unpaid months...</span>
+              </div>
+            ) : waterfallPreview ? (
+              <div className="p-3.5 rounded-xl bg-slate-900/90 border border-emerald-500/30 space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="text-emerald-400 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Auto-Allocation Preview</span>
+                  </span>
+                  <span className="font-mono text-slate-300">
+                    MVR {waterfallPreview.totalApplied} applied
                   </span>
                 </div>
-              </div>
-            </div>
 
-            {/* Calculated Amount Due (Read-only) */}
-            <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
-              <div>
-                <span className="text-xs text-slate-400">Amount Due</span>
-                <p className="text-[11px] text-slate-500">Calculated automatically by ARC policy</p>
+                {waterfallPreview.allocations && waterfallPreview.allocations.length > 0 ? (
+                  <div className="space-y-1.5 pt-1">
+                    {waterfallPreview.allocations.map((alloc: any, idx: number) => (
+                      <div
+                        key={alloc.contributionId || idx}
+                        className="flex items-center justify-between text-xs p-2 rounded-lg bg-slate-950/70 border border-slate-800"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white">
+                            {alloc.monthName} {alloc.year}
+                          </span>
+                          {alloc.finePaid > 0 && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+                              Fine: +MVR {alloc.finePaid}
+                            </span>
+                          )}
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                            Base: MVR {alloc.baseFeePaid}
+                          </span>
+                        </div>
+                        <div className="text-right font-mono font-bold text-emerald-400">
+                          MVR {alloc.totalPaid}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-400">
+                    No pending dues found. The full amount will be credited to your balance.
+                  </p>
+                )}
+
+                {/* Carry Forward Credit Balance */}
+                {waterfallPreview.carryForwardCredit > 0 && (
+                  <div className="flex items-center justify-between text-xs p-2 rounded-lg bg-emerald-950/30 border border-emerald-500/40 text-emerald-300 font-medium">
+                    <span className="flex items-center gap-1.5">
+                      <Coins className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Remaining Carry-Forward Credit Balance:</span>
+                    </span>
+                    <span className="font-mono font-bold text-emerald-400 text-sm">
+                      MVR {waterfallPreview.carryForwardCredit}
+                    </span>
+                  </div>
+                )}
               </div>
-              <div className="text-right">
-                <span className="text-2xl font-black text-emerald-400 font-mono tracking-tight">
-                  MVR {calculatedAmount.toFixed(2)}
-                </span>
-              </div>
-            </div>
+            ) : null}
           </div>
 
           {/* Official ARC Bank Account Card */}
@@ -325,57 +401,6 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
             </div>
           </div>
 
-          {/* Optional Outstanding Contributions List */}
-          {unpaidContributions.length > 1 && (
-            <div className="space-y-2 pt-1">
-              <div className="text-xs font-bold text-slate-300 flex items-center justify-between">
-                <span>Outstanding Contributions</span>
-                <span className="text-[11px] text-slate-400 font-normal">Click to select month</span>
-              </div>
-              <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                {unpaidContributions.map((rec) => {
-                  const isSelected = selectedRecord?.id === rec.id;
-                  const amt = Number(rec.totalPayable ?? rec.baseAmount ?? monthlyFee);
-                  return (
-                    <div
-                      key={rec.id}
-                      className={`flex items-center justify-between p-2.5 rounded-xl border transition ${
-                        isSelected
-                          ? 'bg-emerald-500/15 border-emerald-500/50 text-white'
-                          : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold">
-                          {MONTH_NAMES[rec.month - 1]} {rec.year}
-                        </span>
-                        <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
-                          rec.status === 'overdue' ? 'bg-rose-500/20 text-rose-300' : 'bg-amber-500/20 text-amber-300'
-                        }`}>
-                          {rec.status === 'overdue' ? 'Overdue' : 'Due'}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-bold font-mono">MVR {amt.toFixed(2)}</span>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedRecordId(rec.id)}
-                          className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
-                            isSelected
-                              ? 'bg-emerald-500 text-white shadow'
-                              : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
-                          }`}
-                        >
-                          {isSelected ? 'Selected' : 'PAY'}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           {/* Payment Slip Upload */}
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
@@ -383,7 +408,7 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
                 <Upload className="w-4 h-4 text-emerald-400" />
                 Payment Slip *
               </span>
-              <span className="text-[10px] text-slate-400">PNG, JPG, PDF (Max 5MB)</span>
+              <span className="text-[10px] text-slate-400">PNG, JPG, PDF (Max {settings?.maxSlipFileSizeMb || 5}MB)</span>
             </label>
 
             {!slipPreview ? (
@@ -443,14 +468,14 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
           {/* Member Note (Optional) */}
           <div className="space-y-1.5">
             <label htmlFor="member-note-input" className="text-xs font-semibold text-slate-300">
-              Note for Finance Team (Optional)
+              Optional Note
             </label>
             <input
               id="member-note-input"
               type="text"
               value={memberNote}
               onChange={(e) => setMemberNote(e.target.value)}
-              placeholder="e.g. Remarks or additional details"
+              placeholder="e.g. Any transfer reference or remarks"
               className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-emerald-500 transition"
             />
           </div>

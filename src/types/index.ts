@@ -631,6 +631,10 @@ export interface ClubMember {
   excoDesignation?: string;
   status: 'active' | 'inactive';
   joinedDate: string;
+  membershipFeeStartDate?: string;
+  deactivationDate?: string;
+  deactivationReason?: string;
+  creditBalance?: number;
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -946,8 +950,22 @@ export interface MemberContributionRecord {
   updatedAt: string;
 }
 
-export type ContributionPaymentType = 'single_month' | 'multiple_months' | 'annual';
+export type ContributionPaymentType = 'monthly' | 'annual' | 'single_month' | 'multiple_months' | 'waterfall';
 export type ContributionPaymentRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+export interface WaterfallAllocationItem {
+  year: number;
+  month: number;
+  monthName?: string;
+  docId: string;
+  baseAmount: number;
+  fineAmount: number;
+  finePaid: number;
+  basePaid: number;
+  totalPaid: number;
+  status: 'paid' | 'partial' | 'pending';
+  remainingDue: number;
+}
 
 export interface ContributionPaymentRequest {
   id: string;
@@ -956,25 +974,36 @@ export interface ContributionPaymentRequest {
   memberId: string;
   memberNumber: string;
   memberName: string;
-  year: number;
-  paymentType: ContributionPaymentType;
-  months: number[];
-  baseAmount: number;
-  fineAmount: number;
-  discountAmount: number;
-  totalAmount: number;
-  accountId: string;
-  accountName: string;
-  accountNumber: string;
-  bankName: string;
-  paymentMethod: 'bank_transfer';
-  referenceNumber: string;
+  displayedDepositAccountId?: string;
+  year?: number | null;
+  contributionYear?: number | null;
+  paymentType?: ContributionPaymentType | null;
+  month?: number | null;
+  months?: number[];
+  amountPaid?: number;
+  baseAmount?: number;
+  fineAmount?: number;
+  discountAmount?: number;
+  calculatedAmount?: number | null;
+  totalAmount?: number;
+  splitAllocations?: WaterfallAllocationItem[];
+  carryForwardBalance?: number;
+  accountId?: string | null;
+  accountName?: string;
+  accountNumber?: string;
+  bankName?: string;
+  paymentMethod?: 'bank_transfer';
+  referenceNumber?: string | null;
+  normalizedReference?: string | null;
+  referenceLock?: string | null;
   slipStoragePath?: string;
   slipDownloadUrl: string;
+  slipDataUrl?: string;
   slipFileName?: string;
   slipMimeType?: string;
   slipFileSize?: number;
   memberNote?: string;
+  payerNote?: string;
   status: ContributionPaymentRequestStatus;
   submittedAt: string;
   reviewedAt?: string;
@@ -982,7 +1011,7 @@ export interface ContributionPaymentRequest {
   reviewedByName?: string;
   rejectionReason?: string;
   approvalNote?: string;
-  incomeRecordId?: string;
+  incomeRecordId?: string | null;
   contributionRecordIds?: string[];
   createdAt: string;
   updatedAt: string;

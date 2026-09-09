@@ -14,7 +14,11 @@ import {
   AlertCircle,
   Plus,
   ArrowRight,
-  Receipt
+  Receipt,
+  Clock,
+  FileCheck,
+  ShieldCheck,
+  Calendar
 } from 'lucide-react';
 import { BudgetStats } from '../../types';
 import { ExcoMemberProfileCard } from './ExcoMemberProfileCard';
@@ -31,18 +35,44 @@ export const TreasurerDashboardView: React.FC<TreasurerDashboardViewProps> = ({ 
 
   const [stats, setStats] = useState<BudgetStats | null>(null);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [approvalSummary, setApprovalSummary] = useState<{
+    pending: number;
+    submittedToday: number;
+    approvedThisMonth: number;
+    approved: number;
+    rejected: number;
+    total: number;
+  }>({
+    pending: 0,
+    submittedToday: 0,
+    approvedThisMonth: 0,
+    approved: 0,
+    rejected: 0,
+    total: 0
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [statsData, accountsData] = await Promise.all([
+        const [statsData, accountsData, summaryData] = await Promise.all([
           api.getBudgetStats(),
-          api.getBankAccounts()
+          api.getBankAccounts(),
+          api.getContributionPaymentRequestsSummary().catch(() => ({
+            pending: 0,
+            submittedToday: 0,
+            approvedThisMonth: 0,
+            approved: 0,
+            rejected: 0,
+            total: 0
+          }))
         ]);
         setStats(statsData);
         setAccounts(accountsData);
+        if (summaryData) {
+          setApprovalSummary(summaryData);
+        }
       } catch (err: any) {
         showToast('error', isDh ? 'މާލީ މައުލޫމާތު ލޯޑުނުކުރެވުނު: ' + err.message : 'Failed to load treasury data: ' + err.message);
       } finally {
@@ -94,6 +124,91 @@ export const TreasurerDashboardView: React.FC<TreasurerDashboardViewProps> = ({ 
         onRefreshUser={onRefreshUser}
         accentColor="emerald"
       />
+
+      {/* DEDICATED WIDGET: Membership Fee Approvals (Section 7) */}
+      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/20 border border-amber-500/30 hover:border-amber-500/50 rounded-3xl p-6 shadow-xl transition space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-amber-500/15 text-amber-400">
+                <FileCheck className="w-5 h-5" />
+              </span>
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <span>{isDh ? 'މެންބަރޝިޕް ފީ އެޕްރޫވަލްތައް' : 'Membership Fee Approvals'}</span>
+                  {approvalSummary.pending > 0 && (
+                    <span className="px-2 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-500 text-slate-950 animate-pulse">
+                      {approvalSummary.pending} {isDh ? 'ބާކީ' : 'PENDING'}
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-slate-400">
+                  {isDh
+                    ? 'މެންބަރުން ހުށަހަޅާފައިވާ ބޭންކް ޓްރާންސްފަރ ސްލިޕްތައް ވެރިފައިކޮށް ލެޖަރަށް ފައިސާ ވަނުން.'
+                    : 'Review bank transfer receipts submitted by club members and atomically credit financial ledgers.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <a
+            id="review-payments-btn"
+            href="/portal/budget?tab=membership_fee_approvals"
+            className="px-5 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-950 transition cursor-pointer self-start sm:self-auto"
+          >
+            <span>{isDh ? 'ޕޭމަންޓްތައް ރިވިއުކުރައްވާ' : 'Review Payments'}</span>
+            <ArrowRight className={`w-4 h-4 ${isDh ? 'rotate-180' : ''}`} />
+          </a>
+        </div>
+
+        {/* 3 Metric counters */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Pending Approvals */}
+          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-semibold text-slate-400 block mb-0.5">
+                {isDh ? 'އެޕްރޫވަލް ބޭނުންވާ (Pending)' : 'Pending Approvals'}
+              </span>
+              <span className="text-2xl font-black text-amber-400 font-mono">
+                {approvalSummary.pending}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400">
+              <Clock className="w-5 h-5" />
+            </div>
+          </div>
+
+          {/* Submitted Today */}
+          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-semibold text-slate-400 block mb-0.5">
+                {isDh ? 'މިއަދު ލިބުނު (Today)' : 'Submitted Today'}
+              </span>
+              <span className="text-2xl font-black text-cyan-400 font-mono">
+                {approvalSummary.submittedToday}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-cyan-500/10 text-cyan-400">
+              <Calendar className="w-5 h-5" />
+            </div>
+          </div>
+
+          {/* Approved This Month */}
+          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-semibold text-slate-400 block mb-0.5">
+                {isDh ? 'މި މަހު އެޕްރޫވްކުރެވުނު' : 'Approved This Month'}
+              </span>
+              <span className="text-2xl font-black text-emerald-400 font-mono">
+                {approvalSummary.approvedThisMonth}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400">
+              <CheckCircle className="w-5 h-5" />
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Treasury KPI Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -153,7 +268,7 @@ export const TreasurerDashboardView: React.FC<TreasurerDashboardViewProps> = ({ 
       {/* Quick Action Matrix */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <a
-          href="/portal/budget"
+          href="/portal/budget?tab=fund_manager"
           className="bg-slate-900 border border-slate-800 hover:border-emerald-500/50 rounded-3xl p-6 space-y-3 transition group"
         >
           <div className="p-3 rounded-2xl bg-emerald-500/10 text-emerald-400 w-fit group-hover:scale-110 transition">
@@ -173,7 +288,7 @@ export const TreasurerDashboardView: React.FC<TreasurerDashboardViewProps> = ({ 
         </a>
 
         <a
-          href="/portal/budget"
+          href="/portal/budget?tab=accounts"
           className="bg-slate-900 border border-slate-800 hover:border-blue-500/50 rounded-3xl p-6 space-y-3 transition group"
         >
           <div className="p-3 rounded-2xl bg-blue-500/10 text-blue-400 w-fit group-hover:scale-110 transition">
@@ -193,7 +308,7 @@ export const TreasurerDashboardView: React.FC<TreasurerDashboardViewProps> = ({ 
         </a>
 
         <a
-          href="/portal/budget"
+          href="/portal/budget?tab=expenses"
           className="bg-slate-900 border border-slate-800 hover:border-rose-500/50 rounded-3xl p-6 space-y-3 transition group"
         >
           <div className="p-3 rounded-2xl bg-rose-500/10 text-rose-400 w-fit group-hover:scale-110 transition">

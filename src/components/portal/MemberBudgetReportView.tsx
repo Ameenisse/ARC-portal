@@ -3,7 +3,7 @@ import { User, ClubMember, MemberContributionRecord, ContributionPaymentRequest,
 import { api } from '../../services/api';
 import { Modal } from '../common/Modal';
 import { PayContributionModal } from './budget/PayContributionModal';
-import { PaymentSlipViewerModal } from './budget/PaymentSlipViewerModal';
+import { SlipLightboxModal } from './budget/SlipLightboxModal';
 import {
   Wallet,
   AlertCircle,
@@ -803,15 +803,14 @@ export const MemberBudgetReportView: React.FC<MemberBudgetReportViewProps> = ({
                               </span>
                             )}
                             {req.slipDownloadUrl && (
-                              <a
-                                href={req.slipDownloadUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-emerald-400 hover:text-emerald-300"
+                              <button
+                                type="button"
+                                onClick={() => setSelectedPaymentRequest(req)}
+                                className="text-emerald-400 hover:text-emerald-300 p-0.5 rounded hover:bg-emerald-500/10 transition cursor-pointer"
                                 title="View slip file"
                               >
                                 <ExternalLink className="w-3.5 h-3.5" />
-                              </a>
+                              </button>
                             )}
                           </div>
                         </td>
@@ -1099,34 +1098,31 @@ export const MemberBudgetReportView: React.FC<MemberBudgetReportViewProps> = ({
         </Modal>
       )}
 
-      {/* Pay Contribution Modal (Non-Admin Only) */}
-      {!isAdmin && (
-        <PayContributionModal
-          isOpen={payModalOpen}
-          onClose={() => setPayModalOpen(false)}
-          onSuccess={(newReq) => {
-            setPaymentRequests(prev => [newReq, ...prev]);
-            fetchMyContributions();
-          }}
-          member={linkedMember || { fullName: user.fullName, memberNumber: user.username }}
-          settings={settingsData}
-          depositAccount={depositAcc}
-          contributions={allContributions}
-          existingRequests={paymentRequests}
-        />
-      )}
+      {/* Pay Contribution Modal */}
+      <PayContributionModal
+        isOpen={payModalOpen}
+        onClose={() => setPayModalOpen(false)}
+        onSuccess={(newReq) => {
+          setPaymentRequests(prev => [newReq, ...prev]);
+          fetchMyContributions();
+        }}
+        member={linkedMember || { fullName: user.fullName, memberNumber: user.username }}
+        settings={settingsData}
+        depositAccount={depositAcc}
+        contributions={allContributions}
+        existingRequests={paymentRequests}
+      />
 
-      {/* Payment Slip Viewer Modal */}
+      {/* Dedicated Slip Image Lightbox Preview Modal */}
       {selectedPaymentRequest && (
-        <PaymentSlipViewerModal
+        <SlipLightboxModal
           isOpen={Boolean(selectedPaymentRequest)}
           onClose={() => setSelectedPaymentRequest(null)}
           request={selectedPaymentRequest}
           canApprove={false}
-          isCurrentUserOwner={true}
-          onCancel={async (id) => {
-            await handleCancelRequest(id);
-            setSelectedPaymentRequest(null);
+          onSlipUpdated={(updated) => {
+            setPaymentRequests(prev => prev.map(r => r.id === updated.id ? updated : r));
+            setSelectedPaymentRequest(updated);
           }}
         />
       )}
