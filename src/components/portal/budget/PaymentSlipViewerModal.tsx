@@ -18,6 +18,7 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCw,
+  RotateCcw,
   Contrast,
   Download,
   Maximize2,
@@ -25,7 +26,10 @@ import {
   Upload,
   Sparkles,
   Check,
-  Coins
+  Coins,
+  Copy,
+  FileSearch,
+  SunMedium
 } from 'lucide-react';
 import {
   ContributionPaymentRequest,
@@ -102,7 +106,12 @@ export const PaymentSlipViewerModal: React.FC<PaymentSlipViewerModalProps> = ({
   // Slip interactive inspection state
   const [slipZoom, setSlipZoom] = useState<number>(1);
   const [slipRotation, setSlipRotation] = useState<number>(0);
-  const [slipContrast, setSlipContrast] = useState<boolean>(false);
+  const [slipFilterMode, setSlipFilterMode] = useState<'normal' | 'clarity' | 'invert' | 'bw'>('normal');
+  const [slipPan, setSlipPan] = useState({ x: 0, y: 0 });
+  const [isPanningSlip, setIsPanningSlip] = useState(false);
+  const slipPanStartRef = useRef({ x: 0, y: 0 });
+  const [showInlinePdf, setShowInlinePdf] = useState(true);
+  const [copiedRef, setCopiedRef] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState<boolean>(false);
 
   // Loaded context data for review
@@ -246,7 +255,10 @@ export const PaymentSlipViewerModal: React.FC<PaymentSlipViewerModalProps> = ({
       setPaymentReferenceNumber(request.referenceNumber || '');
       setSlipZoom(1);
       setSlipRotation(0);
-      setSlipContrast(false);
+      setSlipFilterMode('normal');
+      setSlipPan({ x: 0, y: 0 });
+      setShowInlinePdf(true);
+      setCopiedRef(false);
       setLightboxOpen(false);
 
       if (canApprove && request.status === 'pending') {
@@ -594,10 +606,36 @@ export const PaymentSlipViewerModal: React.FC<PaymentSlipViewerModalProps> = ({
                 )}
 
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                    <FileText className="w-4 h-4 text-emerald-400" />
-                    Uploaded Transfer Slip & Verification
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                      <FileText className="w-4 h-4 text-emerald-400" />
+                      Uploaded Transfer Slip & Verification
+                    </span>
+                    {activeReq.referenceNumber && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(activeReq.referenceNumber || '');
+                          setCopiedRef(true);
+                          setTimeout(() => setCopiedRef(false), 2000);
+                        }}
+                        className="px-2 py-0.5 rounded-md bg-slate-900 hover:bg-slate-800 text-[11px] font-mono text-slate-300 border border-slate-800 flex items-center gap-1 transition cursor-pointer"
+                        title="Copy Reference Number"
+                      >
+                        {copiedRef ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-400" />
+                            <span className="text-emerald-400 font-bold">Copied</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3 text-slate-400" />
+                            <span>{activeReq.referenceNumber}</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
 
                   {/* Inspection Toolbar */}
                   <div className="flex items-center gap-1.5 flex-wrap">
@@ -606,20 +644,34 @@ export const PaymentSlipViewerModal: React.FC<PaymentSlipViewerModalProps> = ({
                         <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-xs">
                           <button
                             type="button"
-                            onClick={() => setSlipZoom(prev => Math.max(0.5, prev - 0.25))}
+                            onClick={() =>
+                              setSlipZoom(prev => {
+                                const next = Math.max(0.5, Number((prev - 0.25).toFixed(2)));
+                                if (next <= 1) setSlipPan({ x: 0, y: 0 });
+                                return next;
+                              })
+                            }
                             disabled={slipZoom <= 0.5}
                             className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30 transition cursor-pointer"
                             title="Zoom Out (-)"
                           >
                             <ZoomOut className="w-3.5 h-3.5" />
                           </button>
-                          <span className="px-1.5 font-mono text-[11px] text-emerald-400 font-bold min-w-[36px] text-center select-none">
-                            {Math.round(slipZoom * 100)}%
-                          </span>
                           <button
                             type="button"
-                            onClick={() => setSlipZoom(prev => Math.min(3, prev + 0.25))}
-                            disabled={slipZoom >= 3}
+                            onClick={() => {
+                              setSlipZoom(1);
+                              setSlipPan({ x: 0, y: 0 });
+                            }}
+                            className="px-1.5 font-mono text-[11px] text-emerald-400 font-bold min-w-[38px] text-center select-none hover:bg-slate-800 rounded py-0.5 cursor-pointer"
+                            title="Click to reset zoom (100%)"
+                          >
+                            {Math.round(slipZoom * 100)}%
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSlipZoom(prev => Math.min(3.5, Number((prev + 0.25).toFixed(2))))}
+                            disabled={slipZoom >= 3.5}
                             className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30 transition cursor-pointer"
                             title="Zoom In (+)"
                           >
@@ -638,17 +690,62 @@ export const PaymentSlipViewerModal: React.FC<PaymentSlipViewerModalProps> = ({
 
                         <button
                           type="button"
-                          onClick={() => setSlipContrast(prev => !prev)}
-                          className={`p-1.5 rounded-lg border transition cursor-pointer ${
-                            slipContrast
+                          onClick={() => {
+                            setSlipFilterMode(prev => {
+                              if (prev === 'normal') return 'clarity';
+                              if (prev === 'clarity') return 'invert';
+                              if (prev === 'invert') return 'bw';
+                              return 'normal';
+                            });
+                          }}
+                          className={`p-1.5 rounded-lg border transition cursor-pointer flex items-center gap-1 text-xs ${
+                            slipFilterMode !== 'normal'
                               ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
                               : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800'
                           }`}
-                          title="Toggle High Contrast for faint receipt text"
+                          title={`Receipt Text Filter: ${slipFilterMode.toUpperCase()}`}
                         >
                           <Contrast className="w-3.5 h-3.5" />
+                          {slipFilterMode !== 'normal' && (
+                            <span className="text-[10px] font-bold uppercase hidden sm:inline">
+                              {slipFilterMode === 'clarity' ? 'Sharp' : slipFilterMode === 'invert' ? 'Inv' : 'B&W'}
+                            </span>
+                          )}
                         </button>
+
+                        {(slipZoom !== 1 || slipRotation !== 0 || slipFilterMode !== 'normal') && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSlipZoom(1);
+                              setSlipRotation(0);
+                              setSlipFilterMode('normal');
+                              setSlipPan({ x: 0, y: 0 });
+                            }}
+                            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 transition cursor-pointer text-xs"
+                            title="Reset Zoom, Rotation and Filter"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </>
+                    )}
+
+                    {/* PDF Inline Toggle if PDF */}
+                    {isPdf && (
+                      <button
+                        type="button"
+                        onClick={() => setShowInlinePdf(prev => !prev)}
+                        className={`p-1.5 rounded-lg border text-xs font-medium transition cursor-pointer flex items-center gap-1 ${
+                          showInlinePdf
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+                        }`}
+                        title="Toggle Inline PDF Document"
+                      >
+                        <FileSearch className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">{showInlinePdf ? 'PDF View' : 'Card View'}</span>
+                      </button>
                     )}
 
                     {/* Quick upload / re-upload button */}
@@ -699,37 +796,92 @@ export const PaymentSlipViewerModal: React.FC<PaymentSlipViewerModalProps> = ({
                   </div>
                 </div>
 
-                {/* Preview Box Container */}
-                <div className="relative p-3 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-center min-h-[220px] max-h-[420px] overflow-hidden group">
+                {/* Preview Box Container with Enhanced Inspection */}
+                <div
+                  className="relative p-3 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:20px_20px] bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-center min-h-[240px] max-h-[440px] overflow-hidden group select-none"
+                  onWheel={e => {
+                    if (isPdf) return;
+                    e.stopPropagation();
+                    const delta = e.deltaY < 0 ? 0.2 : -0.2;
+                    setSlipZoom(prev => {
+                      const next = Math.max(0.5, Math.min(3.5, Number((prev + delta).toFixed(2))));
+                      if (next <= 1) setSlipPan({ x: 0, y: 0 });
+                      return next;
+                    });
+                  }}
+                  onMouseDown={e => {
+                    if (slipZoom <= 1) return;
+                    setIsPanningSlip(true);
+                    slipPanStartRef.current = { x: e.clientX - slipPan.x, y: e.clientY - slipPan.y };
+                  }}
+                  onMouseMove={e => {
+                    if (!isPanningSlip || slipZoom <= 1) return;
+                    setSlipPan({
+                      x: e.clientX - slipPanStartRef.current.x,
+                      y: e.clientY - slipPanStartRef.current.y
+                    });
+                  }}
+                  onMouseUp={() => setIsPanningSlip(false)}
+                  onMouseLeave={() => setIsPanningSlip(false)}
+                  style={{
+                    cursor: !isPdf && slipZoom > 1 ? (isPanningSlip ? 'grabbing' : 'grab') : 'default'
+                  }}
+                >
                   {slipUrl && !slipImageError ? (
                     isPdf ? (
-                      <div className="flex flex-col items-center justify-center p-8 text-center">
-                        <FileText className="w-14 h-14 text-emerald-400 mb-2" />
-                        <p className="text-xs font-bold text-white mb-1">{activeReq.slipFileName || 'Payment Slip PDF'}</p>
-                        <div className="flex items-center gap-2 mt-2">
-                          <button
-                            type="button"
-                            onClick={() => setLightboxOpen(true)}
-                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>View Document</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleDownloadSlip}
-                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            <span>Download</span>
-                          </button>
+                      showInlinePdf ? (
+                        <div className="w-full h-full flex flex-col items-center justify-center">
+                          <iframe
+                            src={slipUrl}
+                            title={`Payment Slip PDF - ${activeReq.memberName}`}
+                            className="w-full h-[380px] rounded-xl border border-slate-800 shadow-inner bg-slate-900"
+                          />
                         </div>
-                      </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center p-8 text-center">
+                          <FileText className="w-14 h-14 text-emerald-400 mb-2" />
+                          <p className="text-xs font-bold text-white mb-1">{activeReq.slipFileName || 'Payment Slip PDF'}</p>
+                          <p className="text-[11px] text-slate-400 mb-3">PDF format bank transfer document</p>
+                          <div className="flex items-center gap-2 mt-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowInlinePdf(true)}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>View Inline</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setLightboxOpen(true)}
+                              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>Full Lightbox</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleDownloadSlip}
+                              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>Download</span>
+                            </button>
+                          </div>
+                        </div>
+                      )
                     ) : (
                       <div
-                        onClick={() => setLightboxOpen(true)}
-                        className="cursor-zoom-in relative overflow-auto max-h-[380px] w-full flex items-center justify-center"
-                        title="Click to open Full Lightbox Inspector"
+                        onDoubleClick={() => {
+                          if (slipZoom > 1.2) {
+                            setSlipZoom(1);
+                            setSlipPan({ x: 0, y: 0 });
+                          } else {
+                            setSlipZoom(2);
+                          }
+                        }}
+                        className="relative overflow-hidden max-h-[400px] w-full flex items-center justify-center"
+                        title={slipZoom > 1 ? 'Drag to pan • Double-click to reset zoom' : 'Double-click or scroll wheel to zoom into receipt text'}
                       >
                         <img
                           src={slipUrl}
@@ -741,18 +893,42 @@ export const PaymentSlipViewerModal: React.FC<PaymentSlipViewerModalProps> = ({
                               setSlipImageError(true);
                             }
                           }}
-                          className="max-h-[360px] max-w-full object-contain rounded-xl border border-slate-800 transition-transform duration-200"
+                          className="max-h-[380px] max-w-full object-contain rounded-xl border border-slate-800/80 shadow-lg transition-transform duration-150 ease-out select-none pointer-events-none"
                           style={{
-                            transform: `scale(${slipZoom}) rotate(${slipRotation}deg)`,
-                            filter: slipContrast
-                              ? 'contrast(200%) brightness(125%) invert(0.9) saturate(1.2)'
-                              : 'none'
+                            transform: `translate(${slipPan.x}px, ${slipPan.y}px) scale(${slipZoom}) rotate(${slipRotation}deg)`,
+                            filter: (() => {
+                              switch (slipFilterMode) {
+                                case 'clarity':
+                                  return 'contrast(160%) brightness(106%) saturate(1.15)';
+                                case 'invert':
+                                  return 'contrast(165%) brightness(115%) invert(1)';
+                                case 'bw':
+                                  return 'grayscale(100%) contrast(150%) brightness(105%)';
+                                default:
+                                  return 'none';
+                              }
+                            })()
                           }}
+                          draggable={false}
                         />
-                        <div className="absolute bottom-2 right-2 px-2 py-1 rounded-lg bg-slate-950/80 backdrop-blur-sm border border-slate-700 text-[10px] text-slate-300 opacity-0 group-hover:opacity-100 transition flex items-center gap-1">
-                          <Maximize2 className="w-3 h-3 text-emerald-400" />
-                          <span>Click to Enlarge</span>
+
+                        {/* Status Chip Overlay */}
+                        <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-slate-900/85 backdrop-blur-sm border border-slate-800 text-[10px] text-slate-300 pointer-events-none flex items-center gap-1.5 font-mono">
+                          <span className="text-emerald-400 font-bold">{Math.round(slipZoom * 100)}%</span>
+                          {slipRotation > 0 && <span>{slipRotation}°</span>}
+                          {slipFilterMode !== 'normal' && <span className="text-amber-400 uppercase font-bold">{slipFilterMode}</span>}
                         </div>
+
+                        {/* Floating Full Inspector trigger button */}
+                        <button
+                          type="button"
+                          onClick={() => setLightboxOpen(true)}
+                          className="absolute bottom-2 right-2 px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 backdrop-blur-sm border border-slate-700 text-[11px] text-slate-200 hover:text-white transition flex items-center gap-1.5 shadow-lg cursor-pointer"
+                          title="Open Full Screen Lightbox"
+                        >
+                          <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Inspect Full Screen</span>
+                        </button>
                       </div>
                     )
                   ) : (

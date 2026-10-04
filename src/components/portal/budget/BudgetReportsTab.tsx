@@ -14,7 +14,8 @@ import {
   ShieldCheck,
   Percent,
   FileCheck,
-  Scale
+  Scale,
+  FileDown
 } from 'lucide-react';
 import {
   BankAccount,
@@ -26,6 +27,7 @@ import {
   ClubMember
 } from '../../../types';
 import { formatCurrency, formatDateTime } from '../../../utils/formatters';
+import { GenerateFinancialReportModal } from './GenerateFinancialReportModal';
 
 interface BudgetReportsTabProps {
   selectedYear: number;
@@ -77,6 +79,7 @@ export const BudgetReportsTab: React.FC<BudgetReportsTabProps> = ({
   canExport = true
 }) => {
   const [reportType, setReportType] = useState<'income_statement' | 'dues_audit' | 'variance' | 'reconciliation'>('income_statement');
+  const [reportModalOpen, setReportModalOpen] = useState(false);
 
   // Filter records for the selected year
   const yearIncome = incomeRecords.filter(r => new Date(r.date).getFullYear() === selectedYear);
@@ -220,6 +223,17 @@ export const BudgetReportsTab: React.FC<BudgetReportsTabProps> = ({
 
           {canExport && (
             <>
+              <button
+                type="button"
+                id="btn-reports-tab-pdf"
+                onClick={() => setReportModalOpen(true)}
+                className="flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                title="Generate and download financial summary report as PDF"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                <span>PDF ރިޕޯޓް (PDF Report)</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handlePrint}
@@ -623,6 +637,20 @@ export const BudgetReportsTab: React.FC<BudgetReportsTabProps> = ({
           </div>
         </div>
       </div>
+
+      {/* PDF Generation Modal */}
+      {reportModalOpen && (
+        <GenerateFinancialReportModal
+          isOpen={reportModalOpen}
+          onClose={() => setReportModalOpen(false)}
+          selectedYear={selectedYear}
+          accounts={accounts}
+          incomeRecords={incomeRecords}
+          expenseRecords={expenseRecords}
+          allocations={allocations}
+          contributions={contributions}
+        />
+      )}
     </div>
   );
 };

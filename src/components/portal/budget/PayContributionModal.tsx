@@ -14,7 +14,12 @@ import {
   Coins,
   ArrowDown,
   Calendar,
-  Sparkles
+  Sparkles,
+  Eye,
+  Maximize2,
+  ZoomIn,
+  ZoomOut,
+  RotateCw
 } from 'lucide-react';
 import { api } from '../../../services/api';
 import { MemberContributionSetting, MemberContributionRecord, ContributionPaymentRequest } from '../../../types';
@@ -50,6 +55,11 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
   // File upload state
   const [slipFile, setSlipFile] = useState<File | null>(null);
   const [slipPreview, setSlipPreview] = useState<string>('');
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [showSlipInspector, setShowSlipInspector] = useState(false);
+  const [inspectorZoom, setInspectorZoom] = useState<number>(1);
+  const [inspectorRotation, setInspectorRotation] = useState<number>(0);
+  const [inspectorContrast, setInspectorContrast] = useState<boolean>(false);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -63,6 +73,11 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
     if (isOpen) {
       setSlipFile(null);
       setSlipPreview('');
+      setIsDraggingFile(false);
+      setShowSlipInspector(false);
+      setInspectorZoom(1);
+      setInspectorRotation(0);
+      setInspectorContrast(false);
       setMemberNote('');
       setConfirmed(false);
       setErrorMessage('');
@@ -111,10 +126,7 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
     setTimeout(() => setCopied(false), 2500);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processSelectedFile = (file: File) => {
     setErrorMessage('');
     const maxSize = (settings?.maxSlipFileSizeMb || 5) * 1024 * 1024;
     if (file.size > maxSize) {
@@ -128,6 +140,34 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
       setSlipPreview(reader.result as string);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processSelectedFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processSelectedFile(file);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -412,15 +452,31 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
             </label>
 
             {!slipPreview ? (
-              <label
-                htmlFor="slip-file-input"
-                className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-800 hover:border-emerald-500/50 rounded-2xl bg-slate-950/60 cursor-pointer transition text-center group"
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-2xl transition text-center group cursor-pointer ${
+                  isDraggingFile
+                    ? 'border-emerald-400 bg-emerald-500/10 scale-[1.01]'
+                    : 'border-slate-800 hover:border-emerald-500/50 bg-slate-950/60'
+                }`}
+                onClick={() => document.getElementById('slip-file-input')?.click()}
               >
-                <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 group-hover:text-emerald-400 group-hover:border-emerald-500/30 transition mb-3">
+                <div
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center transition mb-3 ${
+                    isDraggingFile
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'bg-slate-900 border border-slate-800 text-slate-400 group-hover:text-emerald-400 group-hover:border-emerald-500/30'
+                  }`}
+                >
                   <Upload className="w-6 h-6" />
                 </div>
-                <p className="text-xs font-bold text-white">Click or drag & drop slip here</p>
+                <p className="text-xs font-bold text-white">
+                  {isDraggingFile ? 'Drop your payment slip here' : 'Click or drag & drop slip here'}
+                </p>
                 <p className="text-[11px] text-slate-400 mt-1 font-dhivehi">ބޭންކް ޓްރާންސްފަރ ސްލިޕް އަޕްލޯޑް ކުރައްވާ</p>
+                <p className="text-[10px] text-slate-500 mt-1">Accepts PNG, JPG, or PDF</p>
                 <input
                   id="slip-file-input"
                   type="file"
@@ -428,39 +484,187 @@ export const PayContributionModal: React.FC<PayContributionModalProps> = ({
                   onChange={handleFileChange}
                   className="hidden"
                 />
-              </label>
+              </div>
             ) : (
               <div className="p-3.5 rounded-2xl bg-slate-950 border border-emerald-500/40 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 overflow-hidden">
+                <div
+                  onClick={() => setShowSlipInspector(true)}
+                  className="flex items-center gap-3 overflow-hidden cursor-pointer group flex-1"
+                  title="Click to inspect slip preview"
+                >
                   {slipPreview.startsWith('data:image/') ? (
-                    <img
-                      src={slipPreview}
-                      alt="Slip Preview"
-                      className="w-14 h-14 object-cover rounded-xl border border-slate-800"
-                    />
+                    <div className="relative shrink-0">
+                      <img
+                        src={slipPreview}
+                        alt="Slip Preview"
+                        className="w-14 h-14 object-cover rounded-xl border border-slate-800 group-hover:border-emerald-500/50 transition"
+                      />
+                      <div className="absolute inset-0 bg-black/40 rounded-xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                        <Maximize2 className="w-4 h-4 text-white" />
+                      </div>
+                    </div>
                   ) : (
-                    <div className="w-14 h-14 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-emerald-400">
+                    <div className="w-14 h-14 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-emerald-400 shrink-0 group-hover:border-emerald-500/50 transition">
                       <FileText className="w-6 h-6" />
                     </div>
                   )}
-                  <div className="truncate">
-                    <p className="text-xs font-bold text-white truncate">{slipFile?.name}</p>
-                    <p className="text-[10px] text-slate-400">
-                      {slipFile ? (slipFile.size / 1024).toFixed(1) + ' KB' : ''} • Ready for upload
+                  <div className="truncate flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs font-bold text-white truncate">{slipFile?.name}</p>
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px] font-bold shrink-0">
+                        Ready
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      {slipFile ? (slipFile.size / 1024).toFixed(1) + ' KB' : ''} • Click to verify & zoom
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSlipFile(null);
-                    setSlipPreview('');
-                  }}
-                  className="p-2 text-slate-400 hover:text-rose-400 rounded-xl hover:bg-slate-900 transition cursor-pointer"
-                  title="Remove slip"
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowSlipInspector(true)}
+                    className="p-2 text-slate-300 hover:text-emerald-400 rounded-xl hover:bg-slate-900 border border-transparent hover:border-slate-800 transition cursor-pointer"
+                    title="Inspect & Verify Slip Details"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSlipFile(null);
+                      setSlipPreview('');
+                    }}
+                    className="p-2 text-slate-400 hover:text-rose-400 rounded-xl hover:bg-slate-900 border border-transparent hover:border-slate-800 transition cursor-pointer"
+                    title="Remove slip and choose another file"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Quick Slip Inspection Overlay Dialog */}
+            {showSlipInspector && slipPreview && (
+              <div
+                className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
+                onClick={() => setShowSlipInspector(false)}
+              >
+                <div
+                  className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl"
+                  onClick={e => e.stopPropagation()}
                 >
-                  <X className="w-4 h-4" />
-                </button>
+                  {/* Inspector Header */}
+                  <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-3 bg-slate-950/80">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <div className="truncate">
+                        <p className="text-xs font-bold text-white truncate">{slipFile?.name || 'Slip Document'}</p>
+                        <p className="text-[10px] text-slate-400">Verify transfer details before submitting</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      {slipPreview.startsWith('data:image/') && (
+                        <>
+                          <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-xs">
+                            <button
+                              type="button"
+                              onClick={() => setInspectorZoom(prev => Math.max(0.75, prev - 0.25))}
+                              disabled={inspectorZoom <= 0.75}
+                              className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30 transition cursor-pointer"
+                            >
+                              <ZoomOut className="w-3.5 h-3.5" />
+                            </button>
+                            <span className="px-1.5 font-mono text-[11px] text-emerald-400 font-bold min-w-[36px] text-center select-none">
+                              {Math.round(inspectorZoom * 100)}%
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setInspectorZoom(prev => Math.min(3, prev + 0.25))}
+                              disabled={inspectorZoom >= 3}
+                              className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30 transition cursor-pointer"
+                            >
+                              <ZoomIn className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setInspectorRotation(prev => (prev + 90) % 360)}
+                            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition cursor-pointer"
+                            title="Rotate 90°"
+                          >
+                            <RotateCw className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setInspectorContrast(prev => !prev)}
+                            className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                              inspectorContrast
+                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800'
+                            }`}
+                            title="Toggle High Contrast for faint receipt text"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setShowSlipInspector(false)}
+                        className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer ml-1"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Inspector View Canvas */}
+                  <div className="p-4 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:20px_20px] bg-slate-950 flex-1 flex items-center justify-center min-h-[300px] max-h-[550px] overflow-auto">
+                    {slipPreview.startsWith('data:image/') ? (
+                      <img
+                        src={slipPreview}
+                        alt="Inspect Slip"
+                        className="max-h-[500px] max-w-full object-contain rounded-xl border border-slate-800 shadow-2xl transition-transform duration-150"
+                        style={{
+                          transform: `scale(${inspectorZoom}) rotate(${inspectorRotation}deg)`,
+                          filter: inspectorContrast
+                            ? 'contrast(170%) brightness(105%) saturate(1.2)'
+                            : 'none'
+                        }}
+                      />
+                    ) : (
+                      <iframe
+                        src={slipPreview}
+                        title="Inspect PDF Slip"
+                        className="w-full h-[500px] rounded-xl border border-slate-800 bg-slate-900 shadow-2xl"
+                      />
+                    )}
+                  </div>
+
+                  {/* Inspector Footer Verification Card */}
+                  <div className="p-3.5 border-t border-slate-800 bg-slate-900 flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-2 text-slate-300">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>
+                        Target Account: <strong className="text-white font-mono">{targetAccountNumber}</strong> ({targetAccountName})
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowSlipInspector(false)}
+                      className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition cursor-pointer"
+                    >
+                      Looks Good
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>

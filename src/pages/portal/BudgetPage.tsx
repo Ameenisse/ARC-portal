@@ -64,7 +64,8 @@ import { BudgetReportsTab } from '../../components/portal/budget/BudgetReportsTa
 import { InvoicesTab } from '../../components/portal/budget/InvoicesTab';
 import { BillViewerModal } from '../../components/portal/budget/BillViewerModal';
 import { ContributionSlipsApprovalTab } from '../../components/portal/budget/ContributionSlipsApprovalTab';
-import { FileText, Paperclip, Upload, ShieldCheck, Eye } from 'lucide-react';
+import { GenerateFinancialReportModal } from '../../components/portal/budget/GenerateFinancialReportModal';
+import { FileText, Paperclip, Upload, ShieldCheck, Eye, FileDown } from 'lucide-react';
 
 type BudgetTab = 'dashboard' | 'income' | 'expenses' | 'invoices' | 'fund_manager' | 'membership_fee_approvals' | 'allocations' | 'accounts' | 'settings' | 'reports';
 
@@ -94,6 +95,7 @@ export const BudgetPage: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [pendingApprovalCount, setPendingApprovalCount] = useState<number>(0);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
 
   useEffect(() => {
     if (tabParam && validTabs.includes(tabParam)) {
@@ -707,6 +709,19 @@ export const BudgetPage: React.FC = () => {
               <option value={2024}>2024</option>
             </select>
 
+            {canExport && (
+              <button
+                type="button"
+                id="btn-budget-page-pdf-report"
+                onClick={() => setReportModalOpen(true)}
+                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition cursor-pointer"
+                title={lang === 'english' ? 'Generate and download financial summary report as PDF' : 'މާލީ PDF ރިޕޯޓް ޑައުންލޯޑްކުރުން'}
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                <span>{lang === 'english' ? 'Financial PDF Report' : 'މާލީ PDF ރިޕޯޓް'}</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleRefresh}
@@ -926,15 +941,28 @@ export const BudgetPage: React.FC = () => {
                       <p className="text-slate-400 text-[11px]">Fiscal Comparison across 12 months</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4 text-xs">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-3 h-3 rounded-sm bg-emerald-500" />
-                      <span className="text-slate-300">Income</span>
+                  <div className="flex items-center gap-3">
+                    <div className="hidden sm:flex items-center gap-4 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-3 h-3 rounded-sm bg-emerald-500" />
+                        <span className="text-slate-300">Income</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-3 h-3 rounded-sm bg-rose-500" />
+                        <span className="text-slate-300">Expenses</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-3 h-3 rounded-sm bg-rose-500" />
-                      <span className="text-slate-300">Expenses</span>
-                    </div>
+                    {canExport && (
+                      <button
+                        type="button"
+                        onClick={() => setReportModalOpen(true)}
+                        className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition border border-slate-700 cursor-pointer"
+                        title="Download monthly financial statement as PDF"
+                      >
+                        <FileDown className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>PDF Report</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -3064,6 +3092,22 @@ export const BudgetPage: React.FC = () => {
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* Financial Summary Report (PDF) Modal */}
+      {reportModalOpen && (
+        <GenerateFinancialReportModal
+          isOpen={reportModalOpen}
+          onClose={() => setReportModalOpen(false)}
+          selectedYear={selectedYear}
+          accounts={accounts}
+          incomeRecords={incomeRecords}
+          expenseRecords={expenseRecords}
+          allocations={allocations}
+          contributions={contributions}
+          currentUser={user}
+          onSuccessToast={(msg) => showToast('success', msg)}
+        />
       )}
 
     </PortalLayout>
