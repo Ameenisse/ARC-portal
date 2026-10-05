@@ -4,12 +4,20 @@ import { PublicSiteData } from '../types';
 
 const CACHE_KEY = 'arc_cached_public_site_data_v1';
 
+function isValidPublicSiteData(obj: any): obj is PublicSiteData {
+  return Boolean(obj && typeof obj === 'object' && obj.branding && obj.sectionVisibility && Array.isArray(obj.slideshow));
+}
+
 // Global in-memory cache
 let memoryCache: PublicSiteData | null = (() => {
   if (typeof window !== 'undefined') {
     try {
       const stored = sessionStorage.getItem(CACHE_KEY);
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (isValidPublicSiteData(parsed)) return parsed;
+        sessionStorage.removeItem(CACHE_KEY);
+      }
     } catch {
       // ignore
     }
@@ -20,6 +28,7 @@ let memoryCache: PublicSiteData | null = (() => {
 const listeners = new Set<(data: PublicSiteData) => void>();
 
 export function updatePublicSiteDataCache(newData: PublicSiteData) {
+  if (!isValidPublicSiteData(newData)) return;
   memoryCache = newData;
   if (typeof window !== 'undefined') {
     try {

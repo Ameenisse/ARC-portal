@@ -9,18 +9,10 @@ import { createServer as createViteServer } from 'vite';
 import { db, verifyPin, hashPin, generateSalt } from './src/server/db';
 import { Coordinates, CalculationMethod, PrayerTimes, Madhab } from 'adhan';
 import { ALL_MODULES } from './src/server/seedData';
-import { bucket, firestore, verifySupabaseConnection } from './src/server/firebase';
+import { bucket, firestore } from './src/server/firebase';
 import { realtimeBroadcaster } from './src/server/realtime';
 import { rentalDb } from './src/server/rentalDb';
 import { registerRentalRoutes } from './src/server/rentalRoutes';
-import {
-  loadSupabaseConfig,
-  saveSupabaseConfig,
-  getSupabaseSqlScript,
-  DEFAULT_SUPABASE_URL,
-  SUPABASE_TABLE,
-  SUPABASE_BUCKET
-} from './src/server/supabase';
 import {
   User,
   PublicSiteData,
@@ -36,7 +28,7 @@ import {
 const app = express();
 const PORT = 3000;
 
-app.use(compression());
+app.use(compression() as any);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -339,78 +331,27 @@ app.get('/api/health', (req: Request, res: Response) => {
 
 app.get('/api/health/database', async (req: Request, res: Response) => {
   const health = await db.checkDatabaseHealth();
-  const cfg = loadSupabaseConfig();
-  const sb = (health as any).supabase || { url: cfg.url, hasKey: Boolean(cfg.key), connected: health.connected, schemaReady: health.schemaReady };
   if (health.schemaReady && health.connected) {
     return res.status(200).json({
-      backend: 'supabase-js',
-      projectId: sb.url || DEFAULT_SUPABASE_URL,
-      databaseId: SUPABASE_TABLE,
-      database: sb.schemaReady ? 'supabase-postgresql' : 'supabase-pending-key',
-      storage: SUPABASE_BUCKET,
+      backend: 'firebase-admin',
+      projectId: 'gen-lang-client-0224683648',
+      databaseId: 'ai-studio-arc-1ed79364-547a-408d-9326-df4162ee21d6',
+      database: 'cloud-firestore',
+      storage: 'firebase-storage',
       connected: true,
-      ready: true,
-      hasSupabaseKey: sb.hasKey,
-      supabaseSchemaReady: sb.schemaReady
+      ready: true
     });
   } else {
     return res.status(503).json({
-      backend: 'supabase-js',
-      projectId: sb.url || DEFAULT_SUPABASE_URL,
-      databaseId: SUPABASE_TABLE,
-      database: 'supabase-postgresql',
-      storage: SUPABASE_BUCKET,
+      backend: 'firebase-admin',
+      projectId: 'gen-lang-client-0224683648',
+      databaseId: 'ai-studio-arc-1ed79364-547a-408d-9326-df4162ee21d6',
+      database: 'cloud-firestore',
+      storage: 'firebase-storage',
       connected: health.connected,
       ready: false,
-      hasSupabaseKey: sb.hasKey,
-      supabaseSchemaReady: sb.schemaReady,
-      error: health.error || 'Supabase PostgreSQL connection or table schema is not ready.'
+      error: health.error || 'Cloud Firestore database connection is not ready.'
     });
-  }
-});
-
-app.get('/api/system/supabase-config', async (req: Request, res: Response) => {
-  const cfg = loadSupabaseConfig();
-  const sbStatus = await verifySupabaseConnection();
-  return res.json({
-    ok: true,
-    url: cfg.url || DEFAULT_SUPABASE_URL,
-    publishableKey: cfg.publishableKey,
-    jwksUrl: cfg.jwksUrl,
-    postgresConnectionString: cfg.databaseUrl || 'postgresql://postgres:[YOUR-PASSWORD]@db.afkdbmntchllpucshuxe.supabase.co:5432/postgres',
-    hasKey: Boolean(cfg.key && cfg.key.length > 10),
-    hasSecretKey: Boolean(cfg.secretKey),
-    maskedKey: cfg.key ? `${cfg.key.slice(0, 15)}...${cfg.key.slice(-6)}` : '',
-    connected: sbStatus.connected,
-    schemaReady: sbStatus.schemaReady,
-    error: sbStatus.error,
-    sqlScript: getSupabaseSqlScript()
-  });
-});
-
-app.post('/api/system/supabase-config', authenticateSession, async (req: Request, res: Response) => {
-  try {
-    const { url, key } = req.body || {};
-    const targetUrl = (url || DEFAULT_SUPABASE_URL).trim();
-    const targetKey = (key || '').trim();
-    if (!targetKey) {
-      return res.status(400).json({ error: 'Please provide your Supabase service_role or anon API key.' });
-    }
-    saveSupabaseConfig(targetUrl, targetKey);
-    const sbStatus = await verifySupabaseConnection();
-    return res.json({
-      ok: true,
-      url: targetUrl,
-      hasKey: true,
-      connected: sbStatus.connected,
-      schemaReady: sbStatus.schemaReady,
-      error: sbStatus.error,
-      message: sbStatus.schemaReady
-        ? 'Connected to Supabase PostgreSQL successfully!'
-        : sbStatus.error || 'Saved key. Run the SQL script in Supabase SQL Editor to create the table.'
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -421,7 +362,7 @@ app.get('/api/health/db-test', async (req: Request, res: Response) => {
       id: testId,
       action: 'DB_HEALTH_DIAGNOSTIC_TEST',
       module: 'settings',
-      reason: 'Testing Supabase PostgreSQL persistence write operation'
+      reason: 'Testing Cloud Firestore persistence write operation'
     });
 
     const logs = await db.getAuditLogs();
@@ -431,16 +372,11 @@ app.get('/api/health/db-test', async (req: Request, res: Response) => {
       return res.status(500).json({ ok: false, error: 'Test log inserted but not found on read.' });
     }
 
-    const sbStatus = await verifySupabaseConnection();
     return res.json({
       ok: true,
-      backend: 'supabase-js',
-      database: sbStatus.schemaReady ? 'supabase-postgresql' : 'fallback-active (awaiting Supabase key/SQL)',
-      supabaseUrl: sbStatus.url,
-      supabaseReady: sbStatus.schemaReady,
-      message: sbStatus.schemaReady
-        ? `Supabase PostgreSQL (${sbStatus.url}) read and write operations verified successfully!`
-        : `Write/Read verified (Fallback active — ${sbStatus.error || 'configure Supabase key & run SQL'})`,
+      backend: 'express-firebase-admin',
+      database: 'cloud-firestore',
+      message: 'Cloud Firestore database read and write operations verified successfully!',
       testRecord: found
     });
   } catch (err: any) {
@@ -719,18 +655,39 @@ app.post('/api/auth/logout', authenticateSession, async (req: Request, res: Resp
 
 const handlePublicSiteData = async (req: Request, res: Response) => {
   try {
-    const settings = await db.getSettings();
-    const slideshow = await db.getSlideshow();
-    const contacts = await db.getContacts();
-    const socialLinks = await db.getSocialLinks();
-    const excoMembers = await db.getExcoMembers();
-    const events = await db.getEvents();
-    const healthAwareness = await db.getHealthAwareness();
+    const [
+      settings,
+      slideshow,
+      contacts,
+      socialLinks,
+      excoMembers,
+      events,
+      healthAwareness
+    ] = await Promise.all([
+      db.getSettings().catch(() => []),
+      db.getSlideshow().catch(() => []),
+      db.getContacts().catch(() => []),
+      db.getSocialLinks().catch(() => []),
+      db.getExcoMembers().catch(() => []),
+      db.getEvents().catch(() => []),
+      db.getHealthAwareness().catch(() => [])
+    ]);
 
     const getSetting = (group: string, key: string, defaultVal: any) => {
       const found = settings.find(s => (s.group === group || (!s.group && group === 'branding')) && s.key === key);
       return (found && found.value !== undefined && found.value !== null) ? found.value : defaultVal;
     };
+
+    const rawVisibility = getSetting('public_site', 'sectionVisibility', null);
+    const defaultVisibility = { slideshow: true, welcome: true, vision_mission: true, ramazan_quiz: true, exco_team: true, reach_us: true, social_links: true };
+    const sectionVisibility = (rawVisibility && typeof rawVisibility === 'object')
+      ? { ...defaultVisibility, ...rawVisibility }
+      : defaultVisibility;
+
+    const rawOrder = getSetting('public_site', 'sectionOrder', null);
+    const sectionOrder = Array.isArray(rawOrder)
+      ? rawOrder
+      : ['slideshow', 'welcome', 'vision_mission', 'ramazan_quiz', 'exco_team', 'reach_us', 'social_links'];
 
     const publicData: PublicSiteData = {
       branding: {
@@ -750,9 +707,9 @@ const handlePublicSiteData = async (req: Request, res: Response) => {
         announcement: getSetting('branding', 'announcement', ''),
         announcementActive: Boolean(getSetting('branding', 'announcementActive', false))
       },
-      sectionOrder: getSetting('public_site', 'sectionOrder', ['slideshow', 'welcome', 'vision_mission', 'ramazan_quiz', 'exco_team', 'reach_us', 'social_links']),
-      sectionVisibility: getSetting('public_site', 'sectionVisibility', { slideshow: true, welcome: true, vision_mission: true, ramazan_quiz: true, exco_team: true, reach_us: true, social_links: true }),
-      slideshow: slideshow.filter(s => s.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
+      sectionOrder,
+      sectionVisibility,
+      slideshow: (Array.isArray(slideshow) ? slideshow : []).filter(s => s.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
       slideshowSettings: {
         autoplay: true,
         slideDuration: 5000,
@@ -770,11 +727,11 @@ const handlePublicSiteData = async (req: Request, res: Response) => {
         missionContent: getSetting('branding', 'missionContent', 'Empowering individuals through recreational, educational, and spiritual opportunities.'),
         bgImage: getSetting('branding', 'vmBgImage', '')
       },
-      contacts: contacts.filter(c => c.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
-      socialLinks: socialLinks.filter(s => s.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
-      excoMembers: excoMembers.filter(e => e.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
-      events: events.filter(e => e.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
-      healthAwareness: healthAwareness.filter(h => h.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
+      contacts: (Array.isArray(contacts) ? contacts : []).filter(c => c.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
+      socialLinks: (Array.isArray(socialLinks) ? socialLinks : []).filter(s => s.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
+      excoMembers: (Array.isArray(excoMembers) ? excoMembers : []).filter(e => e.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
+      events: (Array.isArray(events) ? events : []).filter(e => e.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
+      healthAwareness: (Array.isArray(healthAwareness) ? healthAwareness : []).filter(h => h.status === 'active').sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
     };
 
     return res.json(publicData);
@@ -4390,15 +4347,15 @@ async function startServer() {
     console.log(`ARC Portal server running on port ${PORT}`);
   });
 
-  // Verify database schema and seed data asynchronously in the background
+  // Run database verification and seeding in background so server startup is never blocked
   (async () => {
     try {
-      console.log('[Startup] Verifying database schema...');
+      console.log('[Startup] Verifying Firestore database schema...');
       await db.verifyStartupSchema();
-      console.log('[Startup] Database verification successful.');
+      console.log('[Startup] Firestore verification successful.');
       await rentalDb.ensureRentalSeedData();
     } catch (err) {
-      console.error('[Startup] Notice during database schema verification:', err);
+      console.error('[Startup] Notice during Firestore schema verification:', err);
     }
   })();
 }

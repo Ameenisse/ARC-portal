@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { firestore, getDatabaseMetadata, verifySupabaseConnection, DATABASE_ID, PROJECT_ID } from './firebase';
+import { firestore, getDatabaseMetadata, DATABASE_ID, PROJECT_ID } from './firebase';
 import {
   User,
   Role,
@@ -41,7 +41,7 @@ import {
   InvoiceStatus,
   HealthAwarenessItem
 } from '../types';
-import { ALL_MODULES, defaultRoles, defaultSiteSettingsList, defaultClubRules } from './seedData';
+import { defaultRoles } from './seedData';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -88,139 +88,37 @@ export class FirestoreDatabaseStore {
   // STARTUP & HEALTH
   // -------------------------------------------------------------
   async verifyStartupSchema(): Promise<void> {
-    console.log('[Database] Checking ARC installation (Supabase / Fallback)...');
-    const sbCheck = await verifySupabaseConnection();
-    if (sbCheck.hasKey) {
-      if (sbCheck.schemaReady) {
-        console.log(`[Supabase] Connected and schema ready at ${sbCheck.url}`);
-      } else {
-        console.warn(`[Supabase] Notice: ${sbCheck.error}`);
-      }
-    } else {
-      console.log(`[Supabase] Target URL: ${sbCheck.url} (Awaiting SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY)`);
-    }
-
-    const installRef = firestore.collection('system').doc('installation');
-    const installation = await installRef.get();
+    console.log('[Firestore] Checking ARC installation...');
+    const installation = await firestore
+      .collection('system')
+      .doc('installation')
+      .get();
 
     if (!installation.exists || installation.data()?.initialized !== true) {
-      console.log('[Database] Performing automatic one-time initial system bootstrap...');
-
-      // 1. Ensure default Admin account (admin / 2613)
-      const usersRef = firestore.collection('users');
-      const adminSnap = await usersRef.where('username', '==', 'admin').get();
-      if (adminSnap.empty) {
-        const salt = generateSalt();
-        const pinHash = hashPin('2613', salt);
-        const adminId = 'usr_admin_001';
-        const adminPermissions = ALL_MODULES.map(m => ({
-          id: `perm_${adminId}_${m}`,
-          roleId: 'role_admin',
-          userId: adminId,
-          moduleKey: m,
-          canView: true,
-          canCreate: true,
-          canEdit: true,
-          canDelete: true,
-          canPublish: true,
-          canApprove: true,
-          canExport: true,
-          canManageSettings: true
-        }));
-
-        await usersRef.doc(adminId).set({
-          id: adminId,
-          fullName: 'System Administrator',
-          username: 'admin',
-          designation: 'Chief Administrator',
-          contactNumber: '+960 7771234',
-          roleId: 'role_admin',
-          roleName: 'Admin',
-          status: 'active',
-          requirePinChange: false,
-          failedLoginCount: 0,
-          lockedUntil: null,
-          lastLoginAt: new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          notes: 'Primary system administrator account',
-          permissions: adminPermissions,
-          pinHash,
-          pinSalt: salt
-        });
-      }
-
-      // 2. Ensure System Roles
-      const rolesRef = firestore.collection('roles');
-      for (const r of defaultRoles) {
-        const docSnap = await rolesRef.doc(r.id).get();
-        if (!docSnap.exists) {
-          await rolesRef.doc(r.id).set(r);
-        }
-      }
-
-      // 3. Ensure Site Settings
-      const settingsRef = firestore.collection('siteSettings');
-      for (const s of defaultSiteSettingsList) {
-        const docSnap = await settingsRef.doc(s.id).get();
-        if (!docSnap.exists) {
-          await settingsRef.doc(s.id).set(s);
-        }
-      }
-
-      // 4. Ensure Club Rules
-      const rulesRef = firestore.collection('clubRules');
-      const rulesDoc = await rulesRef.doc('main').get();
-      if (!rulesDoc.exists) {
-        await rulesRef.doc('main').set(defaultClubRules);
-      }
-
-      // 5. Ensure Counters
-      const countersRef = firestore.collection('counters');
-      const memCounter = await countersRef.doc('members').get();
-      if (!memCounter.exists) {
-        await countersRef.doc('members').set({ count: 1 });
-      }
-      const quizCounter = await countersRef.doc('quizParticipants').get();
-      if (!quizCounter.exists) {
-        await countersRef.doc('quizParticipants').set({ count: 1 });
-      }
-
-      // 6. Mark initialized
-      await installRef.set({
-        initialized: true,
-        databaseId: sbCheck.schemaReady ? 'supabase-postgresql' : DATABASE_ID,
-        initializedAt: new Date().toISOString()
-      });
-
-      console.log('[Database] Initial system bootstrap completed.');
+      console.log('[Firestore] System installation record not found or not marked initialized. Proceeding with live collections.');
+      return;
     }
 
-    console.log(`[Database] Ready.`);
+    console.log(`[Firestore] Ready: ${DATABASE_ID}`);
   }
 
   async checkDatabaseHealth() {
     try {
-      const sbCheck = await verifySupabaseConnection();
       await firestore.collection('system').limit(1).get();
       const meta = getDatabaseMetadata();
       return {
-        database: sbCheck.schemaReady ? 'supabase-postgresql' : 'supabase-pending-sql',
+        database: 'cloud-firestore',
         connected: true,
         schemaReady: true,
-        supabaseConnected: sbCheck.connected,
-        supabaseSchemaReady: sbCheck.schemaReady,
-        missingTables: !sbCheck.schemaReady ? ['arc_collection_documents'] : [],
-        metadata: meta,
-        supabase: sbCheck,
-        error: sbCheck.error
+        missingTables: [],
+        metadata: meta
       };
     } catch (err: any) {
       return {
-        database: 'supabase-postgresql',
+        database: 'cloud-firestore',
         connected: false,
         schemaReady: false,
-        missingTables: ['arc_collection_documents'],
+        missingTables: [],
         error: err.message
       };
     }

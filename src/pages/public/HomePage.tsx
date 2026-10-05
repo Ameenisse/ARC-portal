@@ -51,10 +51,35 @@ export const HomePage: React.FC = () => {
     );
   }
 
-  if (!data) return null;
+  if (!data || !data.branding) return null;
 
-  const { branding, sectionVisibility, slideshow, visionMission, contacts, socialLinks, excoMembers, events = [] } = data;
-  const hasEvents = events.length > 0;
+  const {
+    branding,
+    sectionVisibility = {
+      slideshow: true,
+      welcome: true,
+      vision_mission: true,
+      ramazan_quiz: true,
+      exco_team: true,
+      reach_us: true,
+      social_links: true
+    },
+    slideshow = [],
+    visionMission = {
+      heading: 'Vision & Mission',
+      introduction: '',
+      visionTitle: 'Our Vision',
+      visionContent: '',
+      missionTitle: 'Our Mission',
+      missionContent: '',
+      bgImage: ''
+    },
+    contacts = [],
+    socialLinks = [],
+    excoMembers = [],
+    events = []
+  } = data;
+  const hasEvents = Array.isArray(events) && events.length > 0;
 
   return (
     <PageTransition>
