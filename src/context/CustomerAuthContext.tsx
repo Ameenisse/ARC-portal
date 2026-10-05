@@ -1,17 +1,16 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import {
-  getAuth,
-  GoogleAuthProvider,
-  signInWithPopup,
-  signOut,
-  onAuthStateChanged,
-  User as FirebaseUser
-} from 'firebase/auth';
+import { supabase } from '../lib/firebase';
 import { RentalCustomer } from '../types';
 
+export interface CustomerAuthUser {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+}
+
 interface CustomerAuthContextType {
-  firebaseUser: FirebaseUser | null;
+  firebaseUser: CustomerAuthUser | null;
   customer: RentalCustomer | null;
   idToken: string | null;
   loading: boolean;
@@ -25,29 +24,13 @@ interface CustomerAuthContextType {
 
 const CustomerAuthContext = createContext<CustomerAuthContextType | undefined>(undefined);
 
-// Load client Firebase config
-const firebaseConfig = {
-  projectId: "gen-lang-client-0224683648",
-  appId: "1:432276947345:web:1343ef32677a7575cb5a30",
-  apiKey: "AIzaSyBfz48JElbtgjXefl1HLGH3KbloTyIH0UQ",
-  authDomain: "gen-lang-client-0224683648.firebaseapp.com",
-  firestoreDatabaseId: "ai-studio-arc-1ed79364-547a-408d-9326-df4162ee21d6",
-  storageBucket: "gen-lang-client-0224683648.firebasestorage.app"
-};
-
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: 'select_account' });
-
 export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<CustomerAuthUser | null>(null);
   const [customer, setCustomer] = useState<RentalCustomer | null>(null);
   const [idToken, setIdToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Fetch or sync customer profile from backend
-  const fetchCustomerProfile = useCallback(async (token: string, fbUser?: FirebaseUser | null) => {
+  const fetchCustomerProfile = useCallback(async (token: string, authUser?: CustomerAuthUser | null) => {
     try {
       const res = await fetch('/api/customer/profile', {
         headers: {
@@ -57,8 +40,7 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (res.ok) {
         const data = await res.json();
         setCustomer(data);
-      } else if (res.status === 404 && fbUser) {
-        // First time customer, create initial profile
+      } else if (res.status === 404 && authUser) {
         const initRes = await fetch('/api/customer/profile', {
           method: 'POST',
           headers: {
@@ -66,10 +48,10 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
             Authorization: `Bearer ${token}`
           },
           body: JSON.stringify({
-            fullName: fbUser.displayName || '',
-            googleEmail: fbUser.email || '',
-            googleName: fbUser.displayName || '',
-            googlePhotoUrl: fbUser.photoURL || ''
+            fullName: authUser.displayName || '',
+            googleEmail: authUser.email || '',
+            googleName: authUser.displayName || '',
+            googlePhotoUrl: authUser.photoURL || ''
           })
         });
         if (initRes.ok) {
@@ -82,9 +64,7 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   }, []);
 
-  // Listen to Firebase client auth changes
   useEffect(() => {
-    // Check if dev token exists in sessionStorage
     const devToken = sessionStorage.getItem('arc_customer_dev_token');
     if (devToken) {
       setIdToken(devToken);
@@ -92,18 +72,35 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setLoading(true);
-      if (user) {
-        setFirebaseUser(user);
-        try {
-          const token = await user.getIdToken();
-          setIdToken(token);
-          await fetchCustomerProfile(token, user);
-        } catch (e) {
-          console.error('Failed to get user ID token:', e);
-        }
-      } else {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        const u = session.user;
+        const mappedUser: CustomerAuthUser = {
+          uid: u.id,
+          email: u.email || null,
+          displayName: u.user_metadata?.full_name || u.user_metadata?.name || u.email || null,
+          photoURL: u.user_metadata?.avatar_url || u.user_metadata?.picture || null
+        };
+        setFirebaseUser(mappedUser);
+        setIdToken(session.access_token);
+        await fetchCustomerProfile(session.access_token, mappedUser);
+      }
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        const u = session.user;
+        const mappedUser: CustomerAuthUser = {
+          uid: u.id,
+          email: u.email || null,
+          displayName: u.user_metadata?.full_name || u.user_metadata?.name || u.email || null,
+          photoURL: u.user_metadata?.avatar_url || u.user_metadata?.picture || null
+        };
+        setFirebaseUser(mappedUser);
+        setIdToken(session.access_token);
+        await fetchCustomerProfile(session.access_token, mappedUser);
+      } else if (!sessionStorage.getItem('arc_customer_dev_token')) {
         setFirebaseUser(null);
         setCustomer(null);
         setIdToken(null);
@@ -111,20 +108,21 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => subscription.unsubscribe();
   }, [fetchCustomerProfile]);
 
   const signInWithGoogle = async () => {
     setLoading(true);
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-      setFirebaseUser(user);
-      const token = await user.getIdToken();
-      setIdToken(token);
-      await fetchCustomerProfile(token, user);
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin + '/rental'
+        }
+      });
+      if (error) throw error;
     } catch (err: any) {
-      console.error('Google Sign In failed:', err);
+      console.error('Supabase Google Sign In failed:', err);
       throw err;
     } finally {
       setLoading(false);
@@ -152,7 +150,7 @@ export const CustomerAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const signOutCustomer = async () => {
     sessionStorage.removeItem('arc_customer_dev_token');
     try {
-      await signOut(auth);
+      await supabase.auth.signOut();
     } catch (e) {
       console.warn('Sign out warning:', e);
     }

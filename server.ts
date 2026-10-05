@@ -4372,15 +4372,6 @@ app.all('/api/*', (req: Request, res: Response) => {
 
 // Serve frontend assets or Vite middleware in dev
 async function startServer() {
-  try {
-    console.log('[Startup] Verifying Firestore database schema...');
-    await db.verifyStartupSchema();
-    console.log('[Startup] Firestore verification successful.');
-    await rentalDb.ensureRentalSeedData();
-  } catch (err) {
-    console.error('[Startup] Critical error during Firestore schema verification:', err);
-  }
-
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -4398,6 +4389,18 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`ARC Portal server running on port ${PORT}`);
   });
+
+  // Verify database schema and seed data asynchronously in the background
+  (async () => {
+    try {
+      console.log('[Startup] Verifying database schema...');
+      await db.verifyStartupSchema();
+      console.log('[Startup] Database verification successful.');
+      await rentalDb.ensureRentalSeedData();
+    } catch (err) {
+      console.error('[Startup] Notice during database schema verification:', err);
+    }
+  })();
 }
 
 startServer();

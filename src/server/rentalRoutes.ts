@@ -66,8 +66,8 @@ export function registerRentalRoutes(
             resumable: false
           });
 
-          const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filePath}`;
-          return res.json({ url: publicUrl, fileName: cleanFileName, storage: 'firebase-storage' });
+          const publicUrl = file.getPublicUrl();
+          return res.json({ url: publicUrl, fileName: cleanFileName, storage: 'supabase-storage' });
         } catch (storageErr) {
           console.warn('[Storage] Upload to bucket skipped, returning data URI:', storageErr);
         }
