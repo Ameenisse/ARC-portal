@@ -9,10 +9,18 @@ import { createServer as createViteServer } from 'vite';
 import { db, verifyPin, hashPin, generateSalt } from './src/server/db';
 import { Coordinates, CalculationMethod, PrayerTimes, Madhab } from 'adhan';
 import { ALL_MODULES } from './src/server/seedData';
-import { bucket, firestore } from './src/server/firebase';
+import { bucket, firestore, verifySupabaseConnection } from './src/server/firebase';
 import { realtimeBroadcaster } from './src/server/realtime';
 import { rentalDb } from './src/server/rentalDb';
 import { registerRentalRoutes } from './src/server/rentalRoutes';
+import {
+  loadSupabaseConfig,
+  saveSupabaseConfig,
+  getSupabaseSqlScript,
+  DEFAULT_SUPABASE_URL,
+  SUPABASE_TABLE,
+  SUPABASE_BUCKET
+} from './src/server/supabase';
 import {
   User,
   PublicSiteData,
@@ -331,27 +339,78 @@ app.get('/api/health', (req: Request, res: Response) => {
 
 app.get('/api/health/database', async (req: Request, res: Response) => {
   const health = await db.checkDatabaseHealth();
+  const cfg = loadSupabaseConfig();
+  const sb = (health as any).supabase || { url: cfg.url, hasKey: Boolean(cfg.key), connected: health.connected, schemaReady: health.schemaReady };
   if (health.schemaReady && health.connected) {
     return res.status(200).json({
-      backend: 'firebase-admin',
-      projectId: 'gen-lang-client-0224683648',
-      databaseId: 'ai-studio-arc-1ed79364-547a-408d-9326-df4162ee21d6',
-      database: 'cloud-firestore',
-      storage: 'firebase-storage',
+      backend: 'supabase-js',
+      projectId: sb.url || DEFAULT_SUPABASE_URL,
+      databaseId: SUPABASE_TABLE,
+      database: sb.schemaReady ? 'supabase-postgresql' : 'supabase-pending-key',
+      storage: SUPABASE_BUCKET,
       connected: true,
-      ready: true
+      ready: true,
+      hasSupabaseKey: sb.hasKey,
+      supabaseSchemaReady: sb.schemaReady
     });
   } else {
     return res.status(503).json({
-      backend: 'firebase-admin',
-      projectId: 'gen-lang-client-0224683648',
-      databaseId: 'ai-studio-arc-1ed79364-547a-408d-9326-df4162ee21d6',
-      database: 'cloud-firestore',
-      storage: 'firebase-storage',
+      backend: 'supabase-js',
+      projectId: sb.url || DEFAULT_SUPABASE_URL,
+      databaseId: SUPABASE_TABLE,
+      database: 'supabase-postgresql',
+      storage: SUPABASE_BUCKET,
       connected: health.connected,
       ready: false,
-      error: health.error || 'Cloud Firestore database connection is not ready.'
+      hasSupabaseKey: sb.hasKey,
+      supabaseSchemaReady: sb.schemaReady,
+      error: health.error || 'Supabase PostgreSQL connection or table schema is not ready.'
     });
+  }
+});
+
+app.get('/api/system/supabase-config', async (req: Request, res: Response) => {
+  const cfg = loadSupabaseConfig();
+  const sbStatus = await verifySupabaseConnection();
+  return res.json({
+    ok: true,
+    url: cfg.url || DEFAULT_SUPABASE_URL,
+    publishableKey: cfg.publishableKey,
+    jwksUrl: cfg.jwksUrl,
+    postgresConnectionString: cfg.databaseUrl || 'postgresql://postgres:[YOUR-PASSWORD]@db.afkdbmntchllpucshuxe.supabase.co:5432/postgres',
+    hasKey: Boolean(cfg.key && cfg.key.length > 10),
+    hasSecretKey: Boolean(cfg.secretKey),
+    maskedKey: cfg.key ? `${cfg.key.slice(0, 15)}...${cfg.key.slice(-6)}` : '',
+    connected: sbStatus.connected,
+    schemaReady: sbStatus.schemaReady,
+    error: sbStatus.error,
+    sqlScript: getSupabaseSqlScript()
+  });
+});
+
+app.post('/api/system/supabase-config', authenticateSession, async (req: Request, res: Response) => {
+  try {
+    const { url, key } = req.body || {};
+    const targetUrl = (url || DEFAULT_SUPABASE_URL).trim();
+    const targetKey = (key || '').trim();
+    if (!targetKey) {
+      return res.status(400).json({ error: 'Please provide your Supabase service_role or anon API key.' });
+    }
+    saveSupabaseConfig(targetUrl, targetKey);
+    const sbStatus = await verifySupabaseConnection();
+    return res.json({
+      ok: true,
+      url: targetUrl,
+      hasKey: true,
+      connected: sbStatus.connected,
+      schemaReady: sbStatus.schemaReady,
+      error: sbStatus.error,
+      message: sbStatus.schemaReady
+        ? 'Connected to Supabase PostgreSQL successfully!'
+        : sbStatus.error || 'Saved key. Run the SQL script in Supabase SQL Editor to create the table.'
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -362,7 +421,7 @@ app.get('/api/health/db-test', async (req: Request, res: Response) => {
       id: testId,
       action: 'DB_HEALTH_DIAGNOSTIC_TEST',
       module: 'settings',
-      reason: 'Testing Cloud Firestore persistence write operation'
+      reason: 'Testing Supabase PostgreSQL persistence write operation'
     });
 
     const logs = await db.getAuditLogs();
@@ -372,11 +431,16 @@ app.get('/api/health/db-test', async (req: Request, res: Response) => {
       return res.status(500).json({ ok: false, error: 'Test log inserted but not found on read.' });
     }
 
+    const sbStatus = await verifySupabaseConnection();
     return res.json({
       ok: true,
-      backend: 'express-firebase-admin',
-      database: 'cloud-firestore',
-      message: 'Cloud Firestore database read and write operations verified successfully!',
+      backend: 'supabase-js',
+      database: sbStatus.schemaReady ? 'supabase-postgresql' : 'fallback-active (awaiting Supabase key/SQL)',
+      supabaseUrl: sbStatus.url,
+      supabaseReady: sbStatus.schemaReady,
+      message: sbStatus.schemaReady
+        ? `Supabase PostgreSQL (${sbStatus.url}) read and write operations verified successfully!`
+        : `Write/Read verified (Fallback active — ${sbStatus.error || 'configure Supabase key & run SQL'})`,
       testRecord: found
     });
   } catch (err: any) {

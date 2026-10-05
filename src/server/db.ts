@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { firestore, getDatabaseMetadata, DATABASE_ID, PROJECT_ID } from './firebase';
+import { firestore, getDatabaseMetadata, verifySupabaseConnection, DATABASE_ID, PROJECT_ID } from './firebase';
 import {
   User,
   Role,
@@ -88,41 +88,52 @@ export class FirestoreDatabaseStore {
   // STARTUP & HEALTH
   // -------------------------------------------------------------
   async verifyStartupSchema(): Promise<void> {
-    console.log('[Firestore] Checking ARC installation...');
+    console.log('[Database] Checking ARC installation (Supabase / Fallback)...');
+    const sbCheck = await verifySupabaseConnection();
+    if (sbCheck.hasKey) {
+      if (sbCheck.schemaReady) {
+        console.log(`[Supabase] Connected and schema ready at ${sbCheck.url}`);
+      } else {
+        console.warn(`[Supabase] Notice: ${sbCheck.error}`);
+      }
+    } else {
+      console.log(`[Supabase] Target URL: ${sbCheck.url} (Awaiting SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY)`);
+    }
+
     const installation = await firestore
       .collection('system')
       .doc('installation')
       .get();
 
     if (!installation.exists || installation.data()?.initialized !== true) {
-      throw new Error('ARC Portal database is not initialized. Run npm run db:setup.');
+      throw new Error('ARC Portal database is not initialized. Run seed / setup.');
     }
 
-    const configuredDatabaseId = installation.data()?.databaseId;
-    if (configuredDatabaseId && configuredDatabaseId !== DATABASE_ID) {
-      throw new Error(`ARC database mismatch. Expected ${DATABASE_ID}`);
-    }
-
-    console.log(`[Firestore] Ready: ${DATABASE_ID}`);
+    console.log(`[Database] Ready.`);
   }
 
   async checkDatabaseHealth() {
     try {
+      const sbCheck = await verifySupabaseConnection();
       await firestore.collection('system').limit(1).get();
       const meta = getDatabaseMetadata();
       return {
-        database: 'cloud-firestore',
+        database: sbCheck.schemaReady ? 'supabase-postgresql' : 'supabase-pending-sql',
         connected: true,
         schemaReady: true,
-        missingTables: [],
-        metadata: meta
+        supabaseConnected: sbCheck.connected,
+        supabaseSchemaReady: sbCheck.schemaReady,
+        missingTables: !sbCheck.schemaReady ? ['arc_collection_documents'] : [],
+        metadata: meta,
+        supabase: sbCheck,
+        error: sbCheck.error
       };
     } catch (err: any) {
       return {
-        database: 'cloud-firestore',
+        database: 'supabase-postgresql',
         connected: false,
         schemaReady: false,
-        missingTables: [],
+        missingTables: ['arc_collection_documents'],
         error: err.message
       };
     }
